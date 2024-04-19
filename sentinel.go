@@ -1,4 +1,4 @@
-package rueidis
+package valkey
 
 import (
 	"container/list"
@@ -14,7 +14,7 @@ import (
 
 	"math/rand"
 
-	"github.com/redis/rueidis/internal/cmds"
+	"github.com/rueian/valkey-go/internal/cmds"
 )
 
 func newSentinelClient(opt *ClientOption, connFn connFn) (client *sentinelClient, err error) {
@@ -61,19 +61,19 @@ func (c *sentinelClient) B() Builder {
 	return c.cmd
 }
 
-func (c *sentinelClient) Do(ctx context.Context, cmd Completed) (resp RedisResult) {
+func (c *sentinelClient) Do(ctx context.Context, cmd Completed) (resp ValkeyResult) {
 retry:
 	resp = c.mConn.Load().(conn).Do(ctx, cmd)
-	if c.retry && cmd.IsReadOnly() && c.isRetryable(resp.NonRedisError(), ctx) {
+	if c.retry && cmd.IsReadOnly() && c.isRetryable(resp.NonValkeyError(), ctx) {
 		goto retry
 	}
-	if resp.NonRedisError() == nil { // not recycle cmds if error, since cmds may be used later in pipe. consider recycle them by pipe
+	if resp.NonValkeyError() == nil { // not recycle cmds if error, since cmds may be used later in pipe. consider recycle them by pipe
 		cmds.PutCompleted(cmd)
 	}
 	return resp
 }
 
-func (c *sentinelClient) DoMulti(ctx context.Context, multi ...Completed) []RedisResult {
+func (c *sentinelClient) DoMulti(ctx context.Context, multi ...Completed) []ValkeyResult {
 	if len(multi) == 0 {
 		return nil
 	}
@@ -81,33 +81,33 @@ retry:
 	resps := c.mConn.Load().(conn).DoMulti(ctx, multi...)
 	if c.retry && allReadOnly(multi) {
 		for _, resp := range resps.s {
-			if c.isRetryable(resp.NonRedisError(), ctx) {
+			if c.isRetryable(resp.NonValkeyError(), ctx) {
 				resultsp.Put(resps)
 				goto retry
 			}
 		}
 	}
 	for i, cmd := range multi {
-		if resps.s[i].NonRedisError() == nil {
+		if resps.s[i].NonValkeyError() == nil {
 			cmds.PutCompleted(cmd)
 		}
 	}
 	return resps.s
 }
 
-func (c *sentinelClient) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) (resp RedisResult) {
+func (c *sentinelClient) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) (resp ValkeyResult) {
 retry:
 	resp = c.mConn.Load().(conn).DoCache(ctx, cmd, ttl)
-	if c.retry && c.isRetryable(resp.NonRedisError(), ctx) {
+	if c.retry && c.isRetryable(resp.NonValkeyError(), ctx) {
 		goto retry
 	}
-	if err := resp.NonRedisError(); err == nil || err == ErrDoCacheAborted {
+	if err := resp.NonValkeyError(); err == nil || err == ErrDoCacheAborted {
 		cmds.PutCacheable(cmd)
 	}
 	return resp
 }
 
-func (c *sentinelClient) DoMultiCache(ctx context.Context, multi ...CacheableTTL) []RedisResult {
+func (c *sentinelClient) DoMultiCache(ctx context.Context, multi ...CacheableTTL) []ValkeyResult {
 	if len(multi) == 0 {
 		return nil
 	}
@@ -115,14 +115,14 @@ retry:
 	resps := c.mConn.Load().(conn).DoMultiCache(ctx, multi...)
 	if c.retry {
 		for _, resp := range resps.s {
-			if c.isRetryable(resp.NonRedisError(), ctx) {
+			if c.isRetryable(resp.NonValkeyError(), ctx) {
 				resultsp.Put(resps)
 				goto retry
 			}
 		}
 	}
 	for i, cmd := range multi {
-		if err := resps.s[i].NonRedisError(); err == nil || err == ErrDoCacheAborted {
+		if err := resps.s[i].NonValkeyError(); err == nil || err == ErrDoCacheAborted {
 			cmds.PutCacheable(cmd.Cmd)
 		}
 	}
@@ -133,7 +133,7 @@ func (c *sentinelClient) Receive(ctx context.Context, subscribe Completed, fn fu
 retry:
 	err = c.mConn.Load().(conn).Receive(ctx, subscribe, fn)
 	if c.retry {
-		if _, ok := err.(*RedisError); !ok && c.isRetryable(err, ctx) {
+		if _, ok := err.(*ValkeyError); !ok && c.isRetryable(err, ctx) {
 			goto retry
 		}
 	}
@@ -143,15 +143,15 @@ retry:
 	return err
 }
 
-func (c *sentinelClient) DoStream(ctx context.Context, cmd Completed) RedisResultStream {
+func (c *sentinelClient) DoStream(ctx context.Context, cmd Completed) ValkeyResultStream {
 	resp := c.mConn.Load().(conn).DoStream(ctx, cmd)
 	cmds.PutCompleted(cmd)
 	return resp
 }
 
-func (c *sentinelClient) DoMultiStream(ctx context.Context, multi ...Completed) MultiRedisResultStream {
+func (c *sentinelClient) DoMultiStream(ctx context.Context, multi ...Completed) MultiValkeyResultStream {
 	if len(multi) == 0 {
-		return RedisResultStream{e: io.EOF}
+		return ValkeyResultStream{e: io.EOF}
 	}
 	s := c.mConn.Load().(conn).DoMultiStream(ctx, multi...)
 	for _, cmd := range multi {
@@ -413,7 +413,7 @@ func (c *sentinelClient) listWatch(cc conn) (target string, sentinels []string, 
 	return net.JoinHostPort(m[0], m[1]), sentinels, nil
 }
 
-func pickReplica(resp []RedisResult) (string, error) {
+func pickReplica(resp []ValkeyResult) (string, error) {
 	replicas, err := resp[1].ToArray()
 	if err != nil {
 		return "", err
@@ -452,6 +452,6 @@ func newSentinelOpt(opt *ClientOption) *ClientOption {
 }
 
 var (
-	errNotMaster = errors.New("the redis role is not master")
-	errNotSlave  = errors.New("the redis role is not slave")
+	errNotMaster = errors.New("the valkey role is not master")
+	errNotSlave  = errors.New("the valkey role is not slave")
 )

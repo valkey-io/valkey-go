@@ -7,14 +7,14 @@ import (
 	"time"
 
 	"github.com/oklog/ulid/v2"
-	"github.com/redis/rueidis"
+	"github.com/rueian/valkey-go"
 )
 
 type JSONTestStruct struct {
-	Key    string `redis:",key"`
+	Key    string `valkey:",key"`
 	Nested struct{ F1 string }
 	Val    []byte
-	Ver    int64 `redis:",ver"`
+	Ver    int64 `valkey:",ver"`
 }
 
 func TestNewJsonRepositoryMismatch(t *testing.T) {
@@ -25,7 +25,7 @@ func TestNewJsonRepositoryMismatch(t *testing.T) {
 	defer client.Close()
 
 	repo := NewJSONRepository("jsonmismatch", Mismatch{}, client)
-	if err := repo.CreateIndex(ctx, func(schema FtCreateSchema) rueidis.Completed {
+	if err := repo.CreateIndex(ctx, func(schema FtCreateSchema) valkey.Completed {
 		return schema.FieldName("$.F1").Tag().Build()
 	}); err != nil {
 		t.Fatal(err)
@@ -39,13 +39,13 @@ func TestNewJsonRepositoryMismatch(t *testing.T) {
 		if err := client.Do(ctx, client.B().Del().Key("jsonmismatch:"+e.Key).Build()).Error(); err != nil {
 			t.Fatal(err)
 		}
-		if err := client.Do(ctx, client.B().JsonSet().Key("jsonmismatch:"+e.Key).Path("$").Value(rueidis.JSON("1")).Build()).Error(); err != nil {
+		if err := client.Do(ctx, client.B().JsonSet().Key("jsonmismatch:"+e.Key).Path("$").Value(valkey.JSON("1")).Build()).Error(); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := repo.Fetch(ctx, e.Key); err == nil {
 			t.Fatal("Fetch not failed as expected")
 		}
-		if _, _, err := repo.Search(ctx, func(search FtSearchIndex) rueidis.Completed {
+		if _, _, err := repo.Search(ctx, func(search FtSearchIndex) valkey.Completed {
 			return search.Query("*").Build()
 		}); err == nil {
 			t.Fatal("Search not failed as expected")
@@ -121,14 +121,14 @@ func TestNewJSONRepository(t *testing.T) {
 		})
 
 		t.Run("Search", func(t *testing.T) {
-			err := repo.CreateIndex(ctx, func(schema FtCreateSchema) rueidis.Completed {
+			err := repo.CreateIndex(ctx, func(schema FtCreateSchema) valkey.Completed {
 				return schema.FieldName("$.Val").Text().Build()
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			time.Sleep(time.Second)
-			n, records, err := repo.Search(ctx, func(search FtSearchIndex) rueidis.Completed {
+			n, records, err := repo.Search(ctx, func(search FtSearchIndex) valkey.Completed {
 				return search.Query("*").Build()
 			})
 			if err != nil {
@@ -143,7 +143,7 @@ func TestNewJSONRepository(t *testing.T) {
 			if !reflect.DeepEqual(e, records[0]) {
 				t.Fatalf("items[0] should be the same as e")
 			}
-			n, records, err = repo.Search(ctx, func(search FtSearchIndex) rueidis.Completed {
+			n, records, err = repo.Search(ctx, func(search FtSearchIndex) valkey.Completed {
 				return search.Query("*").Dialect(3).Build()
 			})
 			if err != nil {
@@ -164,14 +164,14 @@ func TestNewJSONRepository(t *testing.T) {
 		})
 
 		t.Run("Search Sort", func(t *testing.T) {
-			err := repo.CreateIndex(ctx, func(schema FtCreateSchema) rueidis.Completed {
+			err := repo.CreateIndex(ctx, func(schema FtCreateSchema) valkey.Completed {
 				return schema.FieldName("$.Val").Text().Sortable().Build()
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			time.Sleep(time.Second)
-			n, records, err := repo.Search(ctx, func(search FtSearchIndex) rueidis.Completed {
+			n, records, err := repo.Search(ctx, func(search FtSearchIndex) valkey.Completed {
 				return search.Query("*").Sortby("$.Val").Build()
 			})
 			if err != nil {
@@ -246,9 +246,9 @@ func TestNewJSONRepository(t *testing.T) {
 }
 
 type JSONTestTTLStruct struct {
-	Key  string    `redis:",key"`
-	Ver  int64     `redis:",ver"`
-	Exat time.Time `redis:",exat"`
+	Key  string    `valkey:",key"`
+	Ver  int64     `valkey:",ver"`
+	Exat time.Time `valkey:",exat"`
 }
 
 //gocyclo:ignore

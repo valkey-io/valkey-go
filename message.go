@@ -1,4 +1,4 @@
-package rueidis
+package valkey
 
 import (
 	"encoding/json"
@@ -9,107 +9,107 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/redis/rueidis/internal/util"
+	"github.com/rueian/valkey-go/internal/util"
 )
 
-const messageStructSize = int(unsafe.Sizeof(RedisMessage{}))
+const messageStructSize = int(unsafe.Sizeof(ValkeyMessage{}))
 
-// Nil represents a Redis Nil message
-var Nil = &RedisError{typ: typeNull}
+// Nil represents a Valkey Nil message
+var Nil = &ValkeyError{typ: typeNull}
 
-// IsRedisNil is a handy method to check if error is a redis nil response.
-// All redis nil response returns as an error.
-func IsRedisNil(err error) bool {
+// IsValkeyNil is a handy method to check if error is a valkey nil response.
+// All valkey nil response returns as an error.
+func IsValkeyNil(err error) bool {
 	return err == Nil
 }
 
-// IsRedisBusyGroup checks if it is a redis BUSYGROUP message.
-func IsRedisBusyGroup(err error) bool {
-	if ret, yes := IsRedisErr(err); yes {
+// IsValkeyBusyGroup checks if it is a valkey BUSYGROUP message.
+func IsValkeyBusyGroup(err error) bool {
+	if ret, yes := IsValkeyErr(err); yes {
 		return ret.IsBusyGroup()
 	}
 	return false
 }
 
-// IsRedisErr is a handy method to check if error is a redis ERR response.
-func IsRedisErr(err error) (ret *RedisError, ok bool) {
-	ret, ok = err.(*RedisError)
+// IsValkeyErr is a handy method to check if error is a valkey ERR response.
+func IsValkeyErr(err error) (ret *ValkeyError, ok bool) {
+	ret, ok = err.(*ValkeyError)
 	return ret, ok && ret != Nil
 }
 
-// RedisError is an error response or a nil message from redis instance
-type RedisError RedisMessage
+// ValkeyError is an error response or a nil message from valkey instance
+type ValkeyError ValkeyMessage
 
-func (r *RedisError) Error() string {
+func (r *ValkeyError) Error() string {
 	if r.IsNil() {
-		return "redis nil message"
+		return "valkey nil message"
 	}
 	return r.string
 }
 
-// IsNil checks if it is a redis nil message.
-func (r *RedisError) IsNil() bool {
+// IsNil checks if it is a valkey nil message.
+func (r *ValkeyError) IsNil() bool {
 	return r.typ == typeNull
 }
 
-// IsMoved checks if it is a redis MOVED message and returns moved address.
-func (r *RedisError) IsMoved() (addr string, ok bool) {
+// IsMoved checks if it is a valkey MOVED message and returns moved address.
+func (r *ValkeyError) IsMoved() (addr string, ok bool) {
 	if ok = strings.HasPrefix(r.string, "MOVED"); ok {
 		addr = strings.Split(r.string, " ")[2]
 	}
 	return
 }
 
-// IsAsk checks if it is a redis ASK message and returns ask address.
-func (r *RedisError) IsAsk() (addr string, ok bool) {
+// IsAsk checks if it is a valkey ASK message and returns ask address.
+func (r *ValkeyError) IsAsk() (addr string, ok bool) {
 	if ok = strings.HasPrefix(r.string, "ASK"); ok {
 		addr = strings.Split(r.string, " ")[2]
 	}
 	return
 }
 
-// IsTryAgain checks if it is a redis TRYAGAIN message and returns ask address.
-func (r *RedisError) IsTryAgain() bool {
+// IsTryAgain checks if it is a valkey TRYAGAIN message and returns ask address.
+func (r *ValkeyError) IsTryAgain() bool {
 	return strings.HasPrefix(r.string, "TRYAGAIN")
 }
 
-// IsClusterDown checks if it is a redis CLUSTERDOWN message and returns ask address.
-func (r *RedisError) IsClusterDown() bool {
+// IsClusterDown checks if it is a valkey CLUSTERDOWN message and returns ask address.
+func (r *ValkeyError) IsClusterDown() bool {
 	return strings.HasPrefix(r.string, "CLUSTERDOWN")
 }
 
-// IsNoScript checks if it is a redis NOSCRIPT message.
-func (r *RedisError) IsNoScript() bool {
+// IsNoScript checks if it is a valkey NOSCRIPT message.
+func (r *ValkeyError) IsNoScript() bool {
 	return strings.HasPrefix(r.string, "NOSCRIPT")
 }
 
-// IsBusyGroup checks if it is a redis BUSYGROUP message.
-func (r *RedisError) IsBusyGroup() bool {
+// IsBusyGroup checks if it is a valkey BUSYGROUP message.
+func (r *ValkeyError) IsBusyGroup() bool {
 	return strings.HasPrefix(r.string, "BUSYGROUP")
 }
 
-func newResult(val RedisMessage, err error) RedisResult {
-	return RedisResult{val: val, err: err}
+func newResult(val ValkeyMessage, err error) ValkeyResult {
+	return ValkeyResult{val: val, err: err}
 }
 
-func newErrResult(err error) RedisResult {
-	return RedisResult{err: err}
+func newErrResult(err error) ValkeyResult {
+	return ValkeyResult{err: err}
 }
 
-// RedisResult is the return struct from Client.Do or Client.DoCache
-// it contains either a redis response or an underlying error (ex. network timeout).
-type RedisResult struct {
+// ValkeyResult is the return struct from Client.Do or Client.DoCache
+// it contains either a valkey response or an underlying error (ex. network timeout).
+type ValkeyResult struct {
 	err error
-	val RedisMessage
+	val ValkeyMessage
 }
 
-// NonRedisError can be used to check if there is an underlying error (ex. network timeout).
-func (r RedisResult) NonRedisError() error {
+// NonValkeyError can be used to check if there is an underlying error (ex. network timeout).
+func (r ValkeyResult) NonValkeyError() error {
 	return r.err
 }
 
-// Error returns either underlying error or redis error or nil
-func (r RedisResult) Error() (err error) {
+// Error returns either underlying error or valkey error or nil
+func (r ValkeyResult) Error() (err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -118,8 +118,8 @@ func (r RedisResult) Error() (err error) {
 	return
 }
 
-// ToMessage retrieves the RedisMessage
-func (r RedisResult) ToMessage() (v RedisMessage, err error) {
+// ToMessage retrieves the ValkeyMessage
+func (r ValkeyResult) ToMessage() (v ValkeyMessage, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -128,8 +128,8 @@ func (r RedisResult) ToMessage() (v RedisMessage, err error) {
 	return r.val, err
 }
 
-// ToInt64 delegates to RedisMessage.ToInt64
-func (r RedisResult) ToInt64() (v int64, err error) {
+// ToInt64 delegates to ValkeyMessage.ToInt64
+func (r ValkeyResult) ToInt64() (v int64, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -138,8 +138,8 @@ func (r RedisResult) ToInt64() (v int64, err error) {
 	return
 }
 
-// ToBool delegates to RedisMessage.ToBool
-func (r RedisResult) ToBool() (v bool, err error) {
+// ToBool delegates to ValkeyMessage.ToBool
+func (r ValkeyResult) ToBool() (v bool, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -148,8 +148,8 @@ func (r RedisResult) ToBool() (v bool, err error) {
 	return
 }
 
-// ToFloat64 delegates to RedisMessage.ToFloat64
-func (r RedisResult) ToFloat64() (v float64, err error) {
+// ToFloat64 delegates to ValkeyMessage.ToFloat64
+func (r ValkeyResult) ToFloat64() (v float64, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -158,8 +158,8 @@ func (r RedisResult) ToFloat64() (v float64, err error) {
 	return
 }
 
-// ToString delegates to RedisMessage.ToString
-func (r RedisResult) ToString() (v string, err error) {
+// ToString delegates to ValkeyMessage.ToString
+func (r ValkeyResult) ToString() (v string, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -168,8 +168,8 @@ func (r RedisResult) ToString() (v string, err error) {
 	return
 }
 
-// AsReader delegates to RedisMessage.AsReader
-func (r RedisResult) AsReader() (v io.Reader, err error) {
+// AsReader delegates to ValkeyMessage.AsReader
+func (r ValkeyResult) AsReader() (v io.Reader, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -178,8 +178,8 @@ func (r RedisResult) AsReader() (v io.Reader, err error) {
 	return
 }
 
-// AsBytes delegates to RedisMessage.AsBytes
-func (r RedisResult) AsBytes() (v []byte, err error) {
+// AsBytes delegates to ValkeyMessage.AsBytes
+func (r ValkeyResult) AsBytes() (v []byte, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -188,8 +188,8 @@ func (r RedisResult) AsBytes() (v []byte, err error) {
 	return
 }
 
-// DecodeJSON delegates to RedisMessage.DecodeJSON
-func (r RedisResult) DecodeJSON(v any) (err error) {
+// DecodeJSON delegates to ValkeyMessage.DecodeJSON
+func (r ValkeyResult) DecodeJSON(v any) (err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -198,8 +198,8 @@ func (r RedisResult) DecodeJSON(v any) (err error) {
 	return
 }
 
-// AsInt64 delegates to RedisMessage.AsInt64
-func (r RedisResult) AsInt64() (v int64, err error) {
+// AsInt64 delegates to ValkeyMessage.AsInt64
+func (r ValkeyResult) AsInt64() (v int64, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -208,8 +208,8 @@ func (r RedisResult) AsInt64() (v int64, err error) {
 	return
 }
 
-// AsUint64 delegates to RedisMessage.AsUint64
-func (r RedisResult) AsUint64() (v uint64, err error) {
+// AsUint64 delegates to ValkeyMessage.AsUint64
+func (r ValkeyResult) AsUint64() (v uint64, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -218,8 +218,8 @@ func (r RedisResult) AsUint64() (v uint64, err error) {
 	return
 }
 
-// AsBool delegates to RedisMessage.AsBool
-func (r RedisResult) AsBool() (v bool, err error) {
+// AsBool delegates to ValkeyMessage.AsBool
+func (r ValkeyResult) AsBool() (v bool, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -228,8 +228,8 @@ func (r RedisResult) AsBool() (v bool, err error) {
 	return
 }
 
-// AsFloat64 delegates to RedisMessage.AsFloat64
-func (r RedisResult) AsFloat64() (v float64, err error) {
+// AsFloat64 delegates to ValkeyMessage.AsFloat64
+func (r ValkeyResult) AsFloat64() (v float64, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -238,8 +238,8 @@ func (r RedisResult) AsFloat64() (v float64, err error) {
 	return
 }
 
-// ToArray delegates to RedisMessage.ToArray
-func (r RedisResult) ToArray() (v []RedisMessage, err error) {
+// ToArray delegates to ValkeyMessage.ToArray
+func (r ValkeyResult) ToArray() (v []ValkeyMessage, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -248,8 +248,8 @@ func (r RedisResult) ToArray() (v []RedisMessage, err error) {
 	return
 }
 
-// AsStrSlice delegates to RedisMessage.AsStrSlice
-func (r RedisResult) AsStrSlice() (v []string, err error) {
+// AsStrSlice delegates to ValkeyMessage.AsStrSlice
+func (r ValkeyResult) AsStrSlice() (v []string, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -258,8 +258,8 @@ func (r RedisResult) AsStrSlice() (v []string, err error) {
 	return
 }
 
-// AsIntSlice delegates to RedisMessage.AsIntSlice
-func (r RedisResult) AsIntSlice() (v []int64, err error) {
+// AsIntSlice delegates to ValkeyMessage.AsIntSlice
+func (r ValkeyResult) AsIntSlice() (v []int64, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -268,8 +268,8 @@ func (r RedisResult) AsIntSlice() (v []int64, err error) {
 	return
 }
 
-// AsFloatSlice delegates to RedisMessage.AsFloatSlice
-func (r RedisResult) AsFloatSlice() (v []float64, err error) {
+// AsFloatSlice delegates to ValkeyMessage.AsFloatSlice
+func (r ValkeyResult) AsFloatSlice() (v []float64, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -278,8 +278,8 @@ func (r RedisResult) AsFloatSlice() (v []float64, err error) {
 	return
 }
 
-// AsBoolSlice delegates to RedisMessage.AsBoolSlice
-func (r RedisResult) AsBoolSlice() (v []bool, err error) {
+// AsBoolSlice delegates to ValkeyMessage.AsBoolSlice
+func (r ValkeyResult) AsBoolSlice() (v []bool, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -288,8 +288,8 @@ func (r RedisResult) AsBoolSlice() (v []bool, err error) {
 	return
 }
 
-// AsXRangeEntry delegates to RedisMessage.AsXRangeEntry
-func (r RedisResult) AsXRangeEntry() (v XRangeEntry, err error) {
+// AsXRangeEntry delegates to ValkeyMessage.AsXRangeEntry
+func (r ValkeyResult) AsXRangeEntry() (v XRangeEntry, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -298,8 +298,8 @@ func (r RedisResult) AsXRangeEntry() (v XRangeEntry, err error) {
 	return
 }
 
-// AsXRange delegates to RedisMessage.AsXRange
-func (r RedisResult) AsXRange() (v []XRangeEntry, err error) {
+// AsXRange delegates to ValkeyMessage.AsXRange
+func (r ValkeyResult) AsXRange() (v []XRangeEntry, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -308,8 +308,8 @@ func (r RedisResult) AsXRange() (v []XRangeEntry, err error) {
 	return
 }
 
-// AsZScore delegates to RedisMessage.AsZScore
-func (r RedisResult) AsZScore() (v ZScore, err error) {
+// AsZScore delegates to ValkeyMessage.AsZScore
+func (r ValkeyResult) AsZScore() (v ZScore, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -318,8 +318,8 @@ func (r RedisResult) AsZScore() (v ZScore, err error) {
 	return
 }
 
-// AsZScores delegates to RedisMessage.AsZScores
-func (r RedisResult) AsZScores() (v []ZScore, err error) {
+// AsZScores delegates to ValkeyMessage.AsZScores
+func (r ValkeyResult) AsZScores() (v []ZScore, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -328,8 +328,8 @@ func (r RedisResult) AsZScores() (v []ZScore, err error) {
 	return
 }
 
-// AsXRead delegates to RedisMessage.AsXRead
-func (r RedisResult) AsXRead() (v map[string][]XRangeEntry, err error) {
+// AsXRead delegates to ValkeyMessage.AsXRead
+func (r ValkeyResult) AsXRead() (v map[string][]XRangeEntry, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -338,7 +338,7 @@ func (r RedisResult) AsXRead() (v map[string][]XRangeEntry, err error) {
 	return
 }
 
-func (r RedisResult) AsLMPop() (v KeyValues, err error) {
+func (r ValkeyResult) AsLMPop() (v KeyValues, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -347,7 +347,7 @@ func (r RedisResult) AsLMPop() (v KeyValues, err error) {
 	return
 }
 
-func (r RedisResult) AsZMPop() (v KeyZScores, err error) {
+func (r ValkeyResult) AsZMPop() (v KeyZScores, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -356,7 +356,7 @@ func (r RedisResult) AsZMPop() (v KeyZScores, err error) {
 	return
 }
 
-func (r RedisResult) AsFtSearch() (total int64, docs []FtSearchDoc, err error) {
+func (r ValkeyResult) AsFtSearch() (total int64, docs []FtSearchDoc, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -365,7 +365,7 @@ func (r RedisResult) AsFtSearch() (total int64, docs []FtSearchDoc, err error) {
 	return
 }
 
-func (r RedisResult) AsFtAggregate() (total int64, docs []map[string]string, err error) {
+func (r ValkeyResult) AsFtAggregate() (total int64, docs []map[string]string, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -374,7 +374,7 @@ func (r RedisResult) AsFtAggregate() (total int64, docs []map[string]string, err
 	return
 }
 
-func (r RedisResult) AsFtAggregateCursor() (cursor, total int64, docs []map[string]string, err error) {
+func (r ValkeyResult) AsFtAggregateCursor() (cursor, total int64, docs []map[string]string, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -383,7 +383,7 @@ func (r RedisResult) AsFtAggregateCursor() (cursor, total int64, docs []map[stri
 	return
 }
 
-func (r RedisResult) AsGeosearch() (locations []GeoLocation, err error) {
+func (r ValkeyResult) AsGeosearch() (locations []GeoLocation, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -392,8 +392,8 @@ func (r RedisResult) AsGeosearch() (locations []GeoLocation, err error) {
 	return
 }
 
-// AsMap delegates to RedisMessage.AsMap
-func (r RedisResult) AsMap() (v map[string]RedisMessage, err error) {
+// AsMap delegates to ValkeyMessage.AsMap
+func (r ValkeyResult) AsMap() (v map[string]ValkeyMessage, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -402,8 +402,8 @@ func (r RedisResult) AsMap() (v map[string]RedisMessage, err error) {
 	return
 }
 
-// AsStrMap delegates to RedisMessage.AsStrMap
-func (r RedisResult) AsStrMap() (v map[string]string, err error) {
+// AsStrMap delegates to ValkeyMessage.AsStrMap
+func (r ValkeyResult) AsStrMap() (v map[string]string, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -412,8 +412,8 @@ func (r RedisResult) AsStrMap() (v map[string]string, err error) {
 	return
 }
 
-// AsIntMap delegates to RedisMessage.AsIntMap
-func (r RedisResult) AsIntMap() (v map[string]int64, err error) {
+// AsIntMap delegates to ValkeyMessage.AsIntMap
+func (r ValkeyResult) AsIntMap() (v map[string]int64, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -422,8 +422,8 @@ func (r RedisResult) AsIntMap() (v map[string]int64, err error) {
 	return
 }
 
-// AsScanEntry delegates to RedisMessage.AsScanEntry.
-func (r RedisResult) AsScanEntry() (v ScanEntry, err error) {
+// AsScanEntry delegates to ValkeyMessage.AsScanEntry.
+func (r ValkeyResult) AsScanEntry() (v ScanEntry, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -432,8 +432,8 @@ func (r RedisResult) AsScanEntry() (v ScanEntry, err error) {
 	return
 }
 
-// ToMap delegates to RedisMessage.ToMap
-func (r RedisResult) ToMap() (v map[string]RedisMessage, err error) {
+// ToMap delegates to ValkeyMessage.ToMap
+func (r ValkeyResult) ToMap() (v map[string]ValkeyMessage, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -442,8 +442,8 @@ func (r RedisResult) ToMap() (v map[string]RedisMessage, err error) {
 	return
 }
 
-// ToAny delegates to RedisMessage.ToAny
-func (r RedisResult) ToAny() (v any, err error) {
+// ToAny delegates to ValkeyMessage.ToAny
+func (r ValkeyResult) ToAny() (v any, err error) {
 	if r.err != nil {
 		err = r.err
 	} else {
@@ -452,122 +452,122 @@ func (r RedisResult) ToAny() (v any, err error) {
 	return
 }
 
-// IsCacheHit delegates to RedisMessage.IsCacheHit
-func (r RedisResult) IsCacheHit() bool {
+// IsCacheHit delegates to ValkeyMessage.IsCacheHit
+func (r ValkeyResult) IsCacheHit() bool {
 	return r.val.IsCacheHit()
 }
 
-// CacheTTL delegates to RedisMessage.CacheTTL
-func (r RedisResult) CacheTTL() int64 {
+// CacheTTL delegates to ValkeyMessage.CacheTTL
+func (r ValkeyResult) CacheTTL() int64 {
 	return r.val.CacheTTL()
 }
 
-// CachePTTL delegates to RedisMessage.CachePTTL
-func (r RedisResult) CachePTTL() int64 {
+// CachePTTL delegates to ValkeyMessage.CachePTTL
+func (r ValkeyResult) CachePTTL() int64 {
 	return r.val.CachePTTL()
 }
 
-// CachePXAT delegates to RedisMessage.CachePXAT
-func (r RedisResult) CachePXAT() int64 {
+// CachePXAT delegates to ValkeyMessage.CachePXAT
+func (r ValkeyResult) CachePXAT() int64 {
 	return r.val.CachePXAT()
 }
 
-// String returns human-readable representation of RedisResult
-func (r *RedisResult) String() string {
-	v, _ := (*prettyRedisResult)(r).MarshalJSON()
+// String returns human-readable representation of ValkeyResult
+func (r *ValkeyResult) String() string {
+	v, _ := (*prettyValkeyResult)(r).MarshalJSON()
 	return string(v)
 }
 
-type prettyRedisResult RedisResult
+type prettyValkeyResult ValkeyResult
 
 // MarshalJSON implements json.Marshaler interface
-func (r *prettyRedisResult) MarshalJSON() ([]byte, error) {
-	type PrettyRedisResult struct {
-		Message *prettyRedisMessage `json:"Message,omitempty"`
-		Error   string              `json:"Error,omitempty"`
+func (r *prettyValkeyResult) MarshalJSON() ([]byte, error) {
+	type PrettyValkeyResult struct {
+		Message *prettyValkeyMessage `json:"Message,omitempty"`
+		Error   string               `json:"Error,omitempty"`
 	}
-	obj := PrettyRedisResult{}
+	obj := PrettyValkeyResult{}
 	if r.err != nil {
 		obj.Error = r.err.Error()
 	} else {
-		obj.Message = (*prettyRedisMessage)(&r.val)
+		obj.Message = (*prettyValkeyMessage)(&r.val)
 	}
 	return json.Marshal(obj)
 }
 
-// RedisMessage is a redis response message, it may be a nil response
-type RedisMessage struct {
-	attrs   *RedisMessage
+// ValkeyMessage is a valkey response message, it may be a nil response
+type ValkeyMessage struct {
+	attrs   *ValkeyMessage
 	string  string
-	values  []RedisMessage
+	values  []ValkeyMessage
 	integer int64
 	typ     byte
 	ttl     [7]byte
 }
 
-// IsNil check if message is a redis nil response
-func (m *RedisMessage) IsNil() bool {
+// IsNil check if message is a valkey nil response
+func (m *ValkeyMessage) IsNil() bool {
 	return m.typ == typeNull
 }
 
-// IsInt64 check if message is a redis RESP3 int response
-func (m *RedisMessage) IsInt64() bool {
+// IsInt64 check if message is a valkey RESP3 int response
+func (m *ValkeyMessage) IsInt64() bool {
 	return m.typ == typeInteger
 }
 
-// IsFloat64 check if message is a redis RESP3 double response
-func (m *RedisMessage) IsFloat64() bool {
+// IsFloat64 check if message is a valkey RESP3 double response
+func (m *ValkeyMessage) IsFloat64() bool {
 	return m.typ == typeFloat
 }
 
-// IsString check if message is a redis string response
-func (m *RedisMessage) IsString() bool {
+// IsString check if message is a valkey string response
+func (m *ValkeyMessage) IsString() bool {
 	return m.typ == typeBlobString || m.typ == typeSimpleString
 }
 
-// IsBool check if message is a redis RESP3 bool response
-func (m *RedisMessage) IsBool() bool {
+// IsBool check if message is a valkey RESP3 bool response
+func (m *ValkeyMessage) IsBool() bool {
 	return m.typ == typeBool
 }
 
-// IsArray check if message is a redis array response
-func (m *RedisMessage) IsArray() bool {
+// IsArray check if message is a valkey array response
+func (m *ValkeyMessage) IsArray() bool {
 	return m.typ == typeArray || m.typ == typeSet
 }
 
-// IsMap check if message is a redis RESP3 map response
-func (m *RedisMessage) IsMap() bool {
+// IsMap check if message is a valkey RESP3 map response
+func (m *ValkeyMessage) IsMap() bool {
 	return m.typ == typeMap
 }
 
-// Error check if message is a redis error response, including nil response
-func (m *RedisMessage) Error() error {
+// Error check if message is a valkey error response, including nil response
+func (m *ValkeyMessage) Error() error {
 	if m.typ == typeNull {
 		return Nil
 	}
 	if m.typ == typeSimpleErr || m.typ == typeBlobErr {
-		// kvrocks: https://github.com/redis/rueidis/issues/152#issuecomment-1333923750
+		// kvrocks: https://github.com/valkey/rueidis/issues/152#issuecomment-1333923750
 		mm := *m
 		mm.string = strings.TrimPrefix(m.string, "ERR ")
-		return (*RedisError)(&mm)
+		return (*ValkeyError)(&mm)
 	}
 	return nil
 }
 
-// ToString check if message is a redis string response, and return it
-func (m *RedisMessage) ToString() (val string, err error) {
+// ToString check if message is a valkey string response, and return it
+func (m *ValkeyMessage) ToString() (val string, err error) {
 	if m.IsString() {
 		return m.string, nil
 	}
 	if m.IsInt64() || m.values != nil {
 		typ := m.typ
-		panic(fmt.Sprintf("redis message type %s is not a string", typeNames[typ]))
+		panic(fmt.Sprintf("valkey message type %s is not a string", typeNames[typ]))
 	}
 	return m.string, m.Error()
 }
 
-// AsReader check if message is a redis string response and wrap it with the strings.NewReader
-func (m *RedisMessage) AsReader() (reader io.Reader, err error) {
+// AsReader check if message is a valkey string response and wrap it with the strings.NewReader
+func (m *ValkeyMessage) AsReader() (reader io.Reader, err error) {
 	str, err := m.ToString()
 	if err != nil {
 		return nil, err
@@ -575,8 +575,8 @@ func (m *RedisMessage) AsReader() (reader io.Reader, err error) {
 	return strings.NewReader(str), nil
 }
 
-// AsBytes check if message is a redis string response and return it as an immutable []byte
-func (m *RedisMessage) AsBytes() (bs []byte, err error) {
+// AsBytes check if message is a valkey string response and return it as an immutable []byte
+func (m *ValkeyMessage) AsBytes() (bs []byte, err error) {
 	str, err := m.ToString()
 	if err != nil {
 		return nil, err
@@ -584,8 +584,8 @@ func (m *RedisMessage) AsBytes() (bs []byte, err error) {
 	return unsafe.Slice(unsafe.StringData(str), len(str)), nil
 }
 
-// DecodeJSON check if message is a redis string response and treat it as json, then unmarshal it into provided value
-func (m *RedisMessage) DecodeJSON(v any) (err error) {
+// DecodeJSON check if message is a valkey string response and treat it as json, then unmarshal it into provided value
+func (m *ValkeyMessage) DecodeJSON(v any) (err error) {
 	str, err := m.ToString()
 	if err != nil {
 		return err
@@ -594,8 +594,8 @@ func (m *RedisMessage) DecodeJSON(v any) (err error) {
 	return decoder.Decode(v)
 }
 
-// AsInt64 check if message is a redis string response, and parse it as int64
-func (m *RedisMessage) AsInt64() (val int64, err error) {
+// AsInt64 check if message is a valkey string response, and parse it as int64
+func (m *ValkeyMessage) AsInt64() (val int64, err error) {
 	if m.IsInt64() {
 		return m.integer, nil
 	}
@@ -606,8 +606,8 @@ func (m *RedisMessage) AsInt64() (val int64, err error) {
 	return strconv.ParseInt(v, 10, 64)
 }
 
-// AsUint64 check if message is a redis string response, and parse it as uint64
-func (m *RedisMessage) AsUint64() (val uint64, err error) {
+// AsUint64 check if message is a valkey string response, and parse it as uint64
+func (m *ValkeyMessage) AsUint64() (val uint64, err error) {
 	if m.IsInt64() {
 		return uint64(m.integer), nil
 	}
@@ -618,8 +618,8 @@ func (m *RedisMessage) AsUint64() (val uint64, err error) {
 	return strconv.ParseUint(v, 10, 64)
 }
 
-// AsBool checks if message is non-nil redis response, and parses it as bool
-func (m *RedisMessage) AsBool() (val bool, err error) {
+// AsBool checks if message is non-nil valkey response, and parses it as bool
+func (m *ValkeyMessage) AsBool() (val bool, err error) {
 	if err = m.Error(); err != nil {
 		return
 	}
@@ -635,12 +635,12 @@ func (m *RedisMessage) AsBool() (val bool, err error) {
 		return
 	default:
 		typ := m.typ
-		panic(fmt.Sprintf("redis message type %s is not a int, string or bool", typeNames[typ]))
+		panic(fmt.Sprintf("valkey message type %s is not a int, string or bool", typeNames[typ]))
 	}
 }
 
-// AsFloat64 check if message is a redis string response, and parse it as float64
-func (m *RedisMessage) AsFloat64() (val float64, err error) {
+// AsFloat64 check if message is a valkey string response, and parse it as float64
+func (m *ValkeyMessage) AsFloat64() (val float64, err error) {
 	if m.IsFloat64() {
 		return util.ToFloat64(m.string)
 	}
@@ -651,8 +651,8 @@ func (m *RedisMessage) AsFloat64() (val float64, err error) {
 	return util.ToFloat64(v)
 }
 
-// ToInt64 check if message is a redis RESP3 int response, and return it
-func (m *RedisMessage) ToInt64() (val int64, err error) {
+// ToInt64 check if message is a valkey RESP3 int response, and return it
+func (m *ValkeyMessage) ToInt64() (val int64, err error) {
 	if m.IsInt64() {
 		return m.integer, nil
 	}
@@ -660,11 +660,11 @@ func (m *RedisMessage) ToInt64() (val int64, err error) {
 		return 0, err
 	}
 	typ := m.typ
-	panic(fmt.Sprintf("redis message type %s is not a RESP3 int64", typeNames[typ]))
+	panic(fmt.Sprintf("valkey message type %s is not a RESP3 int64", typeNames[typ]))
 }
 
-// ToBool check if message is a redis RESP3 bool response, and return it
-func (m *RedisMessage) ToBool() (val bool, err error) {
+// ToBool check if message is a valkey RESP3 bool response, and return it
+func (m *ValkeyMessage) ToBool() (val bool, err error) {
 	if m.IsBool() {
 		return m.integer == 1, nil
 	}
@@ -672,11 +672,11 @@ func (m *RedisMessage) ToBool() (val bool, err error) {
 		return false, err
 	}
 	typ := m.typ
-	panic(fmt.Sprintf("redis message type %s is not a RESP3 bool", typeNames[typ]))
+	panic(fmt.Sprintf("valkey message type %s is not a RESP3 bool", typeNames[typ]))
 }
 
-// ToFloat64 check if message is a redis RESP3 double response, and return it
-func (m *RedisMessage) ToFloat64() (val float64, err error) {
+// ToFloat64 check if message is a valkey RESP3 double response, and return it
+func (m *ValkeyMessage) ToFloat64() (val float64, err error) {
 	if m.IsFloat64() {
 		return util.ToFloat64(m.string)
 	}
@@ -684,11 +684,11 @@ func (m *RedisMessage) ToFloat64() (val float64, err error) {
 		return 0, err
 	}
 	typ := m.typ
-	panic(fmt.Sprintf("redis message type %s is not a RESP3 float64", typeNames[typ]))
+	panic(fmt.Sprintf("valkey message type %s is not a RESP3 float64", typeNames[typ]))
 }
 
-// ToArray check if message is a redis array/set response, and return it
-func (m *RedisMessage) ToArray() ([]RedisMessage, error) {
+// ToArray check if message is a valkey array/set response, and return it
+func (m *ValkeyMessage) ToArray() ([]ValkeyMessage, error) {
 	if m.IsArray() {
 		return m.values, nil
 	}
@@ -696,12 +696,12 @@ func (m *RedisMessage) ToArray() ([]RedisMessage, error) {
 		return nil, err
 	}
 	typ := m.typ
-	panic(fmt.Sprintf("redis message type %s is not a array", typeNames[typ]))
+	panic(fmt.Sprintf("valkey message type %s is not a array", typeNames[typ]))
 }
 
-// AsStrSlice check if message is a redis array/set response, and convert to []string.
-// redis nil element and other non string element will be present as zero.
-func (m *RedisMessage) AsStrSlice() ([]string, error) {
+// AsStrSlice check if message is a valkey array/set response, and convert to []string.
+// valkey nil element and other non string element will be present as zero.
+func (m *ValkeyMessage) AsStrSlice() ([]string, error) {
 	values, err := m.ToArray()
 	if err != nil {
 		return nil, err
@@ -713,9 +713,9 @@ func (m *RedisMessage) AsStrSlice() ([]string, error) {
 	return s, nil
 }
 
-// AsIntSlice check if message is a redis array/set response, and convert to []int64.
-// redis nil element and other non integer element will be present as zero.
-func (m *RedisMessage) AsIntSlice() ([]int64, error) {
+// AsIntSlice check if message is a valkey array/set response, and convert to []int64.
+// valkey nil element and other non integer element will be present as zero.
+func (m *ValkeyMessage) AsIntSlice() ([]int64, error) {
 	values, err := m.ToArray()
 	if err != nil {
 		return nil, err
@@ -733,9 +733,9 @@ func (m *RedisMessage) AsIntSlice() ([]int64, error) {
 	return s, nil
 }
 
-// AsFloatSlice check if message is a redis array/set response, and convert to []float64.
-// redis nil element and other non float element will be present as zero.
-func (m *RedisMessage) AsFloatSlice() ([]float64, error) {
+// AsFloatSlice check if message is a valkey array/set response, and convert to []float64.
+// valkey nil element and other non float element will be present as zero.
+func (m *ValkeyMessage) AsFloatSlice() ([]float64, error) {
 	values, err := m.ToArray()
 	if err != nil {
 		return nil, err
@@ -753,9 +753,9 @@ func (m *RedisMessage) AsFloatSlice() ([]float64, error) {
 	return s, nil
 }
 
-// AsBoolSlice checks if message is a redis array/set response, and converts it to []bool.
-// Redis nil elements and other non-boolean elements will be represented as false.
-func (m *RedisMessage) AsBoolSlice() ([]bool, error) {
+// AsBoolSlice checks if message is a valkey array/set response, and converts it to []bool.
+// Valkey nil elements and other non-boolean elements will be represented as false.
+func (m *ValkeyMessage) AsBoolSlice() ([]bool, error) {
 	values, err := m.ToArray()
 	if err != nil {
 		return nil, err
@@ -773,8 +773,8 @@ type XRangeEntry struct {
 	ID          string
 }
 
-// AsXRangeEntry check if message is a redis array/set response of length 2, and convert to XRangeEntry
-func (m *RedisMessage) AsXRangeEntry() (XRangeEntry, error) {
+// AsXRangeEntry check if message is a valkey array/set response of length 2, and convert to XRangeEntry
+func (m *ValkeyMessage) AsXRangeEntry() (XRangeEntry, error) {
 	values, err := m.ToArray()
 	if err != nil {
 		return XRangeEntry{}, err
@@ -788,7 +788,7 @@ func (m *RedisMessage) AsXRangeEntry() (XRangeEntry, error) {
 	}
 	fieldValues, err := values[1].AsStrMap()
 	if err != nil {
-		if IsRedisNil(err) {
+		if IsValkeyNil(err) {
 			return XRangeEntry{ID: id, FieldValues: nil}, nil
 		}
 		return XRangeEntry{}, err
@@ -799,8 +799,8 @@ func (m *RedisMessage) AsXRangeEntry() (XRangeEntry, error) {
 	}, nil
 }
 
-// AsXRange check if message is a redis array/set response, and convert to []XRangeEntry
-func (m *RedisMessage) AsXRange() ([]XRangeEntry, error) {
+// AsXRange check if message is a valkey array/set response, and convert to []XRangeEntry
+func (m *ValkeyMessage) AsXRange() ([]XRangeEntry, error) {
 	values, err := m.ToArray()
 	if err != nil {
 		return nil, err
@@ -817,7 +817,7 @@ func (m *RedisMessage) AsXRange() ([]XRangeEntry, error) {
 }
 
 // AsXRead converts XREAD/XREADGRUOP response to map[string][]XRangeEntry
-func (m *RedisMessage) AsXRead() (ret map[string][]XRangeEntry, err error) {
+func (m *ValkeyMessage) AsXRead() (ret map[string][]XRangeEntry, err error) {
 	if err = m.Error(); err != nil {
 		return nil, err
 	}
@@ -843,7 +843,7 @@ func (m *RedisMessage) AsXRead() (ret map[string][]XRangeEntry, err error) {
 		return ret, nil
 	}
 	typ := m.typ
-	panic(fmt.Sprintf("redis message type %s is not a map/array/set or its length is not even", typeNames[typ]))
+	panic(fmt.Sprintf("valkey message type %s is not a map/array/set or its length is not even", typeNames[typ]))
 }
 
 // ZScore is the element type of ZRANGE WITHSCORES, ZDIFF WITHSCORES and ZPOPMAX command response
@@ -852,18 +852,18 @@ type ZScore struct {
 	Score  float64
 }
 
-func toZScore(values []RedisMessage) (s ZScore, err error) {
+func toZScore(values []ValkeyMessage) (s ZScore, err error) {
 	if len(values) == 2 {
 		if s.Member, err = values[0].ToString(); err == nil {
 			s.Score, err = values[1].AsFloat64()
 		}
 		return s, err
 	}
-	panic("redis message is not a map/array/set or its length is not 2")
+	panic("valkey message is not a map/array/set or its length is not 2")
 }
 
 // AsZScore converts ZPOPMAX and ZPOPMIN command with count 1 response to a single ZScore
-func (m *RedisMessage) AsZScore() (s ZScore, err error) {
+func (m *ValkeyMessage) AsZScore() (s ZScore, err error) {
 	arr, err := m.ToArray()
 	if err != nil {
 		return s, err
@@ -872,7 +872,7 @@ func (m *RedisMessage) AsZScore() (s ZScore, err error) {
 }
 
 // AsZScores converts ZRANGE WITHSCROES, ZDIFF WITHSCROES and ZPOPMAX/ZPOPMIN command with count > 1 responses to []ZScore
-func (m *RedisMessage) AsZScores() ([]ZScore, error) {
+func (m *ValkeyMessage) AsZScores() ([]ZScore, error) {
 	arr, err := m.ToArray()
 	if err != nil {
 		return nil, err
@@ -902,8 +902,8 @@ type ScanEntry struct {
 	Cursor   uint64
 }
 
-// AsScanEntry check if message is a redis array/set response of length 2, and convert to ScanEntry.
-func (m *RedisMessage) AsScanEntry() (e ScanEntry, err error) {
+// AsScanEntry check if message is a valkey array/set response of length 2, and convert to ScanEntry.
+func (m *ValkeyMessage) AsScanEntry() (e ScanEntry, err error) {
 	msgs, err := m.ToArray()
 	if err != nil {
 		return ScanEntry{}, err
@@ -915,11 +915,11 @@ func (m *RedisMessage) AsScanEntry() (e ScanEntry, err error) {
 		return e, err
 	}
 	typ := m.typ
-	panic(fmt.Sprintf("redis message type %s is not a scan response or its length is not at least 2", typeNames[typ]))
+	panic(fmt.Sprintf("valkey message type %s is not a scan response or its length is not at least 2", typeNames[typ]))
 }
 
-// AsMap check if message is a redis array/set response, and convert to map[string]RedisMessage
-func (m *RedisMessage) AsMap() (map[string]RedisMessage, error) {
+// AsMap check if message is a valkey array/set response, and convert to map[string]ValkeyMessage
+func (m *ValkeyMessage) AsMap() (map[string]ValkeyMessage, error) {
 	if err := m.Error(); err != nil {
 		return nil, err
 	}
@@ -927,12 +927,12 @@ func (m *RedisMessage) AsMap() (map[string]RedisMessage, error) {
 		return toMap(m.values), nil
 	}
 	typ := m.typ
-	panic(fmt.Sprintf("redis message type %s is not a map/array/set or its length is not even", typeNames[typ]))
+	panic(fmt.Sprintf("valkey message type %s is not a map/array/set or its length is not even", typeNames[typ]))
 }
 
-// AsStrMap check if message is a redis map/array/set response, and convert to map[string]string.
-// redis nil element and other non string element will be present as zero.
-func (m *RedisMessage) AsStrMap() (map[string]string, error) {
+// AsStrMap check if message is a valkey map/array/set response, and convert to map[string]string.
+// valkey nil element and other non string element will be present as zero.
+func (m *ValkeyMessage) AsStrMap() (map[string]string, error) {
 	if err := m.Error(); err != nil {
 		return nil, err
 	}
@@ -946,12 +946,12 @@ func (m *RedisMessage) AsStrMap() (map[string]string, error) {
 		return r, nil
 	}
 	typ := m.typ
-	panic(fmt.Sprintf("redis message type %s is not a map/array/set or its length is not even", typeNames[typ]))
+	panic(fmt.Sprintf("valkey message type %s is not a map/array/set or its length is not even", typeNames[typ]))
 }
 
-// AsIntMap check if message is a redis map/array/set response, and convert to map[string]int64.
-// redis nil element and other non integer element will be present as zero.
-func (m *RedisMessage) AsIntMap() (map[string]int64, error) {
+// AsIntMap check if message is a valkey map/array/set response, and convert to map[string]int64.
+// valkey nil element and other non integer element will be present as zero.
+func (m *ValkeyMessage) AsIntMap() (map[string]int64, error) {
 	if err := m.Error(); err != nil {
 		return nil, err
 	}
@@ -974,7 +974,7 @@ func (m *RedisMessage) AsIntMap() (map[string]int64, error) {
 		return r, nil
 	}
 	typ := m.typ
-	panic(fmt.Sprintf("redis message type %s is not a map/array/set or its length is not even", typeNames[typ]))
+	panic(fmt.Sprintf("valkey message type %s is not a map/array/set or its length is not even", typeNames[typ]))
 }
 
 type KeyValues struct {
@@ -982,7 +982,7 @@ type KeyValues struct {
 	Values []string
 }
 
-func (m *RedisMessage) AsLMPop() (kvs KeyValues, err error) {
+func (m *ValkeyMessage) AsLMPop() (kvs KeyValues, err error) {
 	if err = m.Error(); err != nil {
 		return KeyValues{}, err
 	}
@@ -992,7 +992,7 @@ func (m *RedisMessage) AsLMPop() (kvs KeyValues, err error) {
 		return
 	}
 	typ := m.typ
-	panic(fmt.Sprintf("redis message type %s is not a LMPOP response", typeNames[typ]))
+	panic(fmt.Sprintf("valkey message type %s is not a LMPOP response", typeNames[typ]))
 }
 
 type KeyZScores struct {
@@ -1000,7 +1000,7 @@ type KeyZScores struct {
 	Values []ZScore
 }
 
-func (m *RedisMessage) AsZMPop() (kvs KeyZScores, err error) {
+func (m *ValkeyMessage) AsZMPop() (kvs KeyZScores, err error) {
 	if err = m.Error(); err != nil {
 		return KeyZScores{}, err
 	}
@@ -1010,7 +1010,7 @@ func (m *RedisMessage) AsZMPop() (kvs KeyZScores, err error) {
 		return
 	}
 	typ := m.typ
-	panic(fmt.Sprintf("redis message type %s is not a ZMPOP response", typeNames[typ]))
+	panic(fmt.Sprintf("valkey message type %s is not a ZMPOP response", typeNames[typ]))
 }
 
 type FtSearchDoc struct {
@@ -1019,7 +1019,7 @@ type FtSearchDoc struct {
 	Score float64
 }
 
-func (m *RedisMessage) AsFtSearch() (total int64, docs []FtSearchDoc, err error) {
+func (m *ValkeyMessage) AsFtSearch() (total int64, docs []FtSearchDoc, err error) {
 	if err = m.Error(); err != nil {
 		return 0, nil, err
 	}
@@ -1046,7 +1046,7 @@ func (m *RedisMessage) AsFtSearch() (total int64, docs []FtSearchDoc, err error)
 			case "error":
 				for _, e := range m.values[i+1].values {
 					e := e
-					return 0, nil, (*RedisError)(&e)
+					return 0, nil, (*ValkeyError)(&e)
 				}
 			}
 		}
@@ -1088,10 +1088,10 @@ func (m *RedisMessage) AsFtSearch() (total int64, docs []FtSearchDoc, err error)
 		return
 	}
 	typ := m.typ
-	panic(fmt.Sprintf("redis message type %s is not a FT.SEARCH response", typeNames[typ]))
+	panic(fmt.Sprintf("valkey message type %s is not a FT.SEARCH response", typeNames[typ]))
 }
 
-func (m *RedisMessage) AsFtAggregate() (total int64, docs []map[string]string, err error) {
+func (m *ValkeyMessage) AsFtAggregate() (total int64, docs []map[string]string, err error) {
 	if err = m.Error(); err != nil {
 		return 0, nil, err
 	}
@@ -1114,7 +1114,7 @@ func (m *RedisMessage) AsFtAggregate() (total int64, docs []map[string]string, e
 			case "error":
 				for _, e := range m.values[i+1].values {
 					e := e
-					return 0, nil, (*RedisError)(&e)
+					return 0, nil, (*ValkeyError)(&e)
 				}
 			}
 		}
@@ -1129,10 +1129,10 @@ func (m *RedisMessage) AsFtAggregate() (total int64, docs []map[string]string, e
 		return
 	}
 	typ := m.typ
-	panic(fmt.Sprintf("redis message type %s is not a FT.AGGREGATE response", typeNames[typ]))
+	panic(fmt.Sprintf("valkey message type %s is not a FT.AGGREGATE response", typeNames[typ]))
 }
 
-func (m *RedisMessage) AsFtAggregateCursor() (cursor, total int64, docs []map[string]string, err error) {
+func (m *ValkeyMessage) AsFtAggregateCursor() (cursor, total int64, docs []map[string]string, err error) {
 	if m.IsArray() && len(m.values) == 2 && (m.values[0].IsArray() || m.values[0].IsMap()) {
 		total, docs, err = m.values[0].AsFtAggregate()
 		cursor = m.values[1].integer
@@ -1148,7 +1148,7 @@ type GeoLocation struct {
 	GeoHash                   int64
 }
 
-func (m *RedisMessage) AsGeosearch() ([]GeoLocation, error) {
+func (m *ValkeyMessage) AsGeosearch() ([]GeoLocation, error) {
 	arr, err := m.ToArray()
 	if err != nil {
 		return nil, err
@@ -1193,8 +1193,8 @@ func (m *RedisMessage) AsGeosearch() ([]GeoLocation, error) {
 	return geoLocations, nil
 }
 
-// ToMap check if message is a redis RESP3 map response, and return it
-func (m *RedisMessage) ToMap() (map[string]RedisMessage, error) {
+// ToMap check if message is a valkey RESP3 map response, and return it
+func (m *ValkeyMessage) ToMap() (map[string]ValkeyMessage, error) {
 	if m.IsMap() {
 		return toMap(m.values), nil
 	}
@@ -1202,11 +1202,11 @@ func (m *RedisMessage) ToMap() (map[string]RedisMessage, error) {
 		return nil, err
 	}
 	typ := m.typ
-	panic(fmt.Sprintf("redis message type %s is not a RESP3 map", typeNames[typ]))
+	panic(fmt.Sprintf("valkey message type %s is not a RESP3 map", typeNames[typ]))
 }
 
 // ToAny turns message into go any value
-func (m *RedisMessage) ToAny() (any, error) {
+func (m *ValkeyMessage) ToAny() (any, error) {
 	if err := m.Error(); err != nil {
 		return nil, err
 	}
@@ -1222,7 +1222,7 @@ func (m *RedisMessage) ToAny() (any, error) {
 	case typeMap:
 		vs := make(map[string]any, len(m.values)/2)
 		for i := 0; i < len(m.values); i += 2 {
-			if v, err := m.values[i+1].ToAny(); err != nil && !IsRedisNil(err) {
+			if v, err := m.values[i+1].ToAny(); err != nil && !IsValkeyNil(err) {
 				vs[m.values[i].string] = err
 			} else {
 				vs[m.values[i].string] = v
@@ -1232,7 +1232,7 @@ func (m *RedisMessage) ToAny() (any, error) {
 	case typeSet, typeArray:
 		vs := make([]any, len(m.values))
 		for i := 0; i < len(m.values); i++ {
-			if v, err := m.values[i].ToAny(); err != nil && !IsRedisNil(err) {
+			if v, err := m.values[i].ToAny(); err != nil && !IsValkeyNil(err) {
 				vs[i] = err
 			} else {
 				vs[i] = v
@@ -1241,16 +1241,16 @@ func (m *RedisMessage) ToAny() (any, error) {
 		return vs, nil
 	}
 	typ := m.typ
-	panic(fmt.Sprintf("redis message type %s is not a supported in ToAny", typeNames[typ]))
+	panic(fmt.Sprintf("valkey message type %s is not a supported in ToAny", typeNames[typ]))
 }
 
 // IsCacheHit check if message is from client side cache
-func (m *RedisMessage) IsCacheHit() bool {
+func (m *ValkeyMessage) IsCacheHit() bool {
 	return m.attrs == cacheMark
 }
 
 // CacheTTL returns the remaining TTL in seconds of client side cache
-func (m *RedisMessage) CacheTTL() (ttl int64) {
+func (m *ValkeyMessage) CacheTTL() (ttl int64) {
 	milli := m.CachePTTL()
 	if milli > 0 {
 		if ttl = milli / 1000; milli > ttl*1000 {
@@ -1262,7 +1262,7 @@ func (m *RedisMessage) CacheTTL() (ttl int64) {
 }
 
 // CachePTTL returns the remaining PTTL in seconds of client side cache
-func (m *RedisMessage) CachePTTL() int64 {
+func (m *ValkeyMessage) CachePTTL() int64 {
 	milli := m.getExpireAt()
 	if milli == 0 {
 		return -1
@@ -1274,7 +1274,7 @@ func (m *RedisMessage) CachePTTL() int64 {
 }
 
 // CachePXAT returns the remaining PXAT in seconds of client side cache
-func (m *RedisMessage) CachePXAT() int64 {
+func (m *ValkeyMessage) CachePXAT() int64 {
 	milli := m.getExpireAt()
 	if milli == 0 {
 		return -1
@@ -1282,16 +1282,16 @@ func (m *RedisMessage) CachePXAT() int64 {
 	return milli
 }
 
-func (m *RedisMessage) relativePTTL(now time.Time) int64 {
+func (m *ValkeyMessage) relativePTTL(now time.Time) int64 {
 	return m.getExpireAt() - now.UnixMilli()
 }
 
-func (m *RedisMessage) getExpireAt() int64 {
+func (m *ValkeyMessage) getExpireAt() int64 {
 	return int64(m.ttl[0]) | int64(m.ttl[1])<<8 | int64(m.ttl[2])<<16 | int64(m.ttl[3])<<24 |
 		int64(m.ttl[4])<<32 | int64(m.ttl[5])<<40 | int64(m.ttl[6])<<48
 }
 
-func (m *RedisMessage) setExpireAt(pttl int64) {
+func (m *ValkeyMessage) setExpireAt(pttl int64) {
 	m.ttl[0] = byte(pttl)
 	m.ttl[1] = byte(pttl >> 8)
 	m.ttl[2] = byte(pttl >> 16)
@@ -1301,20 +1301,20 @@ func (m *RedisMessage) setExpireAt(pttl int64) {
 	m.ttl[6] = byte(pttl >> 48)
 }
 
-func toMap(values []RedisMessage) map[string]RedisMessage {
-	r := make(map[string]RedisMessage, len(values)/2)
+func toMap(values []ValkeyMessage) map[string]ValkeyMessage {
+	r := make(map[string]ValkeyMessage, len(values)/2)
 	for i := 0; i < len(values); i += 2 {
 		if values[i].typ == typeBlobString || values[i].typ == typeSimpleString {
 			r[values[i].string] = values[i+1]
 			continue
 		}
 		typ := values[i].typ
-		panic(fmt.Sprintf("redis message type %s as map key is not supported", typeNames[typ]))
+		panic(fmt.Sprintf("valkey message type %s as map key is not supported", typeNames[typ]))
 	}
 	return r
 }
 
-func (m *RedisMessage) approximateSize() (s int) {
+func (m *ValkeyMessage) approximateSize() (s int) {
 	s += messageStructSize
 	s += len(m.string)
 	for _, v := range m.values {
@@ -1323,28 +1323,28 @@ func (m *RedisMessage) approximateSize() (s int) {
 	return
 }
 
-// String returns human-readable representation of RedisMessage
-func (m *RedisMessage) String() string {
-	v, _ := (*prettyRedisMessage)(m).MarshalJSON()
+// String returns human-readable representation of ValkeyMessage
+func (m *ValkeyMessage) String() string {
+	v, _ := (*prettyValkeyMessage)(m).MarshalJSON()
 	return string(v)
 }
 
-type prettyRedisMessage RedisMessage
+type prettyValkeyMessage ValkeyMessage
 
 // MarshalJSON implements json.Marshaler interface
-func (m *prettyRedisMessage) MarshalJSON() ([]byte, error) {
-	type PrettyRedisMessage struct {
+func (m *prettyValkeyMessage) MarshalJSON() ([]byte, error) {
+	type PrettyValkeyMessage struct {
 		Value any    `json:"Value,omitempty"`
 		Type  string `json:"Type,omitempty"`
 		Error string `json:"Error,omitempty"`
 		Ttl   string `json:"TTL,omitempty"`
 	}
-	org := (*RedisMessage)(m)
+	org := (*ValkeyMessage)(m)
 	strType, ok := typeNames[m.typ]
 	if !ok {
 		strType = "unknown"
 	}
-	obj := PrettyRedisMessage{Type: strType}
+	obj := PrettyValkeyMessage{Type: strType}
 	if m.ttl != [7]byte{} {
 		obj.Ttl = time.UnixMilli(org.CachePXAT()).UTC().String()
 	}
@@ -1359,9 +1359,9 @@ func (m *prettyRedisMessage) MarshalJSON() ([]byte, error) {
 	case typeInteger:
 		obj.Value = m.integer
 	case typeMap, typeSet, typeArray:
-		values := make([]prettyRedisMessage, len(m.values))
+		values := make([]prettyValkeyMessage, len(m.values))
 		for i, value := range m.values {
-			values[i] = prettyRedisMessage(value)
+			values[i] = prettyValkeyMessage(value)
 		}
 		obj.Value = values
 	}

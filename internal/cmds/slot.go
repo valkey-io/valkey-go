@@ -25,7 +25,7 @@ func slot(key string) uint16 {
 
 /*
  * Copyright 2001-2010 Georges Menie (www.menie.org)
- * Copyright 2010 Salvatore Sanfilippo (adapted to Redis coding style)
+ * Copyright 2010 Salvatore Sanfilippo (adapted to Valkey coding style)
  * All rights reserved.
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:

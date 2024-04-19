@@ -1,12 +1,12 @@
-package rueidis
+package valkey
 
 import (
 	"context"
 	"errors"
 	"time"
 
-	intl "github.com/redis/rueidis/internal/cmds"
-	"github.com/redis/rueidis/internal/util"
+	intl "github.com/rueian/valkey-go/internal/cmds"
+	"github.com/rueian/valkey-go/internal/util"
 )
 
 type mgetcachecmds struct {
@@ -42,9 +42,9 @@ var mgetcmdsp = util.NewPool(func(capacity int) *mgetcmds {
 })
 
 // MGetCache is a helper that consults the client-side caches with multiple keys by grouping keys within same slot into multiple GETs
-func MGetCache(client Client, ctx context.Context, ttl time.Duration, keys []string) (ret map[string]RedisMessage, err error) {
+func MGetCache(client Client, ctx context.Context, ttl time.Duration, keys []string) (ret map[string]ValkeyMessage, err error) {
 	if len(keys) == 0 {
-		return make(map[string]RedisMessage), nil
+		return make(map[string]ValkeyMessage), nil
 	}
 	cmds := mgetcachecmdsp.Get(len(keys), len(keys))
 	defer mgetcachecmdsp.Put(cmds)
@@ -54,10 +54,10 @@ func MGetCache(client Client, ctx context.Context, ttl time.Duration, keys []str
 	return doMultiCache(client, ctx, cmds.s, keys)
 }
 
-// MGet is a helper that consults the redis directly with multiple keys by grouping keys within same slot into MGET or multiple GETs
-func MGet(client Client, ctx context.Context, keys []string) (ret map[string]RedisMessage, err error) {
+// MGet is a helper that consults the valkey directly with multiple keys by grouping keys within same slot into MGET or multiple GETs
+func MGet(client Client, ctx context.Context, keys []string) (ret map[string]ValkeyMessage, err error) {
 	if len(keys) == 0 {
-		return make(map[string]RedisMessage), nil
+		return make(map[string]ValkeyMessage), nil
 	}
 
 	switch client.(type) {
@@ -73,7 +73,7 @@ func MGet(client Client, ctx context.Context, keys []string) (ret map[string]Red
 	return doMultiGet(client, ctx, cmds.s, keys)
 }
 
-// MSet is a helper that consults the redis directly with multiple keys by grouping keys within same slot into MSETs or multiple SETs
+// MSet is a helper that consults the valkey directly with multiple keys by grouping keys within same slot into MSETs or multiple SETs
 func MSet(client Client, ctx context.Context, kvs map[string]string) map[string]error {
 	if len(kvs) == 0 {
 		return make(map[string]error)
@@ -92,7 +92,7 @@ func MSet(client Client, ctx context.Context, kvs map[string]string) map[string]
 	return doMultiSet(client, ctx, cmds.s)
 }
 
-// MDel is a helper that consults the redis directly with multiple keys by grouping keys within same slot into DELs
+// MDel is a helper that consults the valkey directly with multiple keys by grouping keys within same slot into DELs
 func MDel(client Client, ctx context.Context, keys []string) map[string]error {
 	if len(keys) == 0 {
 		return make(map[string]error)
@@ -111,7 +111,7 @@ func MDel(client Client, ctx context.Context, keys []string) map[string]error {
 	return doMultiSet(client, ctx, cmds.s)
 }
 
-// MSetNX is a helper that consults the redis directly with multiple keys by grouping keys within same slot into MSETNXs or multiple SETNXs
+// MSetNX is a helper that consults the valkey directly with multiple keys by grouping keys within same slot into MSETNXs or multiple SETNXs
 func MSetNX(client Client, ctx context.Context, kvs map[string]string) map[string]error {
 	if len(kvs) == 0 {
 		return make(map[string]error)
@@ -131,9 +131,9 @@ func MSetNX(client Client, ctx context.Context, kvs map[string]string) map[strin
 }
 
 // JsonMGetCache is a helper that consults the client-side caches with multiple keys by grouping keys within same slot into multiple JSON.GETs
-func JsonMGetCache(client Client, ctx context.Context, ttl time.Duration, keys []string, path string) (ret map[string]RedisMessage, err error) {
+func JsonMGetCache(client Client, ctx context.Context, ttl time.Duration, keys []string, path string) (ret map[string]ValkeyMessage, err error) {
 	if len(keys) == 0 {
-		return make(map[string]RedisMessage), nil
+		return make(map[string]ValkeyMessage), nil
 	}
 	cmds := mgetcachecmdsp.Get(len(keys), len(keys))
 	defer mgetcachecmdsp.Put(cmds)
@@ -143,10 +143,10 @@ func JsonMGetCache(client Client, ctx context.Context, ttl time.Duration, keys [
 	return doMultiCache(client, ctx, cmds.s, keys)
 }
 
-// JsonMGet is a helper that consults redis directly with multiple keys by grouping keys within same slot into JSON.MGETs or multiple JSON.GETs
-func JsonMGet(client Client, ctx context.Context, keys []string, path string) (ret map[string]RedisMessage, err error) {
+// JsonMGet is a helper that consults valkey directly with multiple keys by grouping keys within same slot into JSON.MGETs or multiple JSON.GETs
+func JsonMGet(client Client, ctx context.Context, keys []string, path string) (ret map[string]ValkeyMessage, err error) {
 	if len(keys) == 0 {
-		return make(map[string]RedisMessage), nil
+		return make(map[string]ValkeyMessage), nil
 	}
 
 	switch client.(type) {
@@ -162,7 +162,7 @@ func JsonMGet(client Client, ctx context.Context, keys []string, path string) (r
 	return doMultiGet(client, ctx, cmds.s, keys)
 }
 
-// JsonMSet is a helper that consults redis directly with multiple keys by grouping keys within same slot into JSON.MSETs or multiple JOSN.SETs
+// JsonMSet is a helper that consults valkey directly with multiple keys by grouping keys within same slot into JSON.MSETs or multiple JOSN.SETs
 func JsonMSet(client Client, ctx context.Context, kvs map[string]string, path string) map[string]error {
 	if len(kvs) == 0 {
 		return make(map[string]error)
@@ -181,8 +181,8 @@ func JsonMSet(client Client, ctx context.Context, kvs map[string]string, path st
 	return doMultiSet(client, ctx, cmds.s)
 }
 
-// DecodeSliceOfJSON is a helper that struct-scans each RedisMessage into dest, which must be a slice of pointer.
-func DecodeSliceOfJSON[T any](result RedisResult, dest *[]T) error {
+// DecodeSliceOfJSON is a helper that struct-scans each ValkeyMessage into dest, which must be a slice of pointer.
+func DecodeSliceOfJSON[T any](result ValkeyResult, dest *[]T) error {
 	values, err := result.ToArray()
 	if err != nil {
 		return err
@@ -192,7 +192,7 @@ func DecodeSliceOfJSON[T any](result RedisResult, dest *[]T) error {
 	for i, v := range values {
 		var t T
 		if err = v.DecodeJSON(&t); err != nil {
-			if IsRedisNil(err) {
+			if IsValkeyNil(err) {
 				continue
 			}
 			return err
@@ -203,12 +203,12 @@ func DecodeSliceOfJSON[T any](result RedisResult, dest *[]T) error {
 	return nil
 }
 
-func clientMGet(client Client, ctx context.Context, cmd Completed, keys []string) (ret map[string]RedisMessage, err error) {
+func clientMGet(client Client, ctx context.Context, cmd Completed, keys []string) (ret map[string]ValkeyMessage, err error) {
 	arr, err := client.Do(ctx, cmd).ToArray()
 	if err != nil {
 		return nil, err
 	}
-	return arrayToKV(make(map[string]RedisMessage, len(keys)), arr, keys), nil
+	return arrayToKV(make(map[string]ValkeyMessage, len(keys)), arr, keys), nil
 }
 
 func clientMSet(client Client, ctx context.Context, mset string, kvs map[string]string, ret map[string]error) map[string]error {
@@ -247,12 +247,12 @@ func clientMDel(client Client, ctx context.Context, keys []string) map[string]er
 	return ret
 }
 
-func doMultiCache(cc Client, ctx context.Context, cmds []CacheableTTL, keys []string) (ret map[string]RedisMessage, err error) {
-	ret = make(map[string]RedisMessage, len(keys))
+func doMultiCache(cc Client, ctx context.Context, cmds []CacheableTTL, keys []string) (ret map[string]ValkeyMessage, err error) {
+	ret = make(map[string]ValkeyMessage, len(keys))
 	resps := cc.DoMultiCache(ctx, cmds...)
-	defer resultsp.Put(&redisresults{s: resps})
+	defer resultsp.Put(&valkeyresults{s: resps})
 	for i, resp := range resps {
-		if err := resp.NonRedisError(); err != nil {
+		if err := resp.NonValkeyError(); err != nil {
 			return nil, err
 		}
 		ret[keys[i]] = resp.val
@@ -260,12 +260,12 @@ func doMultiCache(cc Client, ctx context.Context, cmds []CacheableTTL, keys []st
 	return ret, nil
 }
 
-func doMultiGet(cc Client, ctx context.Context, cmds []Completed, keys []string) (ret map[string]RedisMessage, err error) {
-	ret = make(map[string]RedisMessage, len(keys))
+func doMultiGet(cc Client, ctx context.Context, cmds []Completed, keys []string) (ret map[string]ValkeyMessage, err error) {
+	ret = make(map[string]ValkeyMessage, len(keys))
 	resps := cc.DoMulti(ctx, cmds...)
-	defer resultsp.Put(&redisresults{s: resps})
+	defer resultsp.Put(&valkeyresults{s: resps})
 	for i, resp := range resps {
-		if err := resp.NonRedisError(); err != nil {
+		if err := resp.NonValkeyError(); err != nil {
 			return nil, err
 		}
 		ret[keys[i]] = resp.val
@@ -277,15 +277,15 @@ func doMultiSet(cc Client, ctx context.Context, cmds []Completed) (ret map[strin
 	ret = make(map[string]error, len(cmds))
 	resps := cc.DoMulti(ctx, cmds...)
 	for i, resp := range resps {
-		if ret[cmds[i].Commands()[1]] = resp.Error(); resp.NonRedisError() == nil {
+		if ret[cmds[i].Commands()[1]] = resp.Error(); resp.NonValkeyError() == nil {
 			intl.PutCompletedForce(cmds[i])
 		}
 	}
-	resultsp.Put(&redisresults{s: resps})
+	resultsp.Put(&valkeyresults{s: resps})
 	return ret
 }
 
-func arrayToKV(m map[string]RedisMessage, arr []RedisMessage, keys []string) map[string]RedisMessage {
+func arrayToKV(m map[string]ValkeyMessage, arr []ValkeyMessage, keys []string) map[string]ValkeyMessage {
 	for i, resp := range arr {
 		m[keys[i]] = resp
 	}

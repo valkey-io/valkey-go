@@ -1,4 +1,4 @@
-package rueidis
+package valkey
 
 import (
 	"sync"
@@ -8,11 +8,11 @@ import (
 )
 
 type queue interface {
-	PutOne(m Completed) chan RedisResult
-	PutMulti(m []Completed, resps []RedisResult) chan RedisResult
-	NextWriteCmd() (Completed, []Completed, chan RedisResult)
-	WaitForWrite() (Completed, []Completed, chan RedisResult)
-	NextResultCh() (Completed, []Completed, chan RedisResult, []RedisResult, *sync.Cond)
+	PutOne(m Completed) chan ValkeyResult
+	PutMulti(m []Completed, resps []ValkeyResult) chan ValkeyResult
+	NextWriteCmd() (Completed, []Completed, chan ValkeyResult)
+	WaitForWrite() (Completed, []Completed, chan ValkeyResult)
+	NextResultCh() (Completed, []Completed, chan ValkeyResult, []ValkeyResult, *sync.Cond)
 }
 
 var _ queue = (*ring)(nil)
@@ -27,7 +27,7 @@ func newRing(factor int) *ring {
 		m := &sync.Mutex{}
 		r.store[i].c1 = sync.NewCond(m)
 		r.store[i].c2 = sync.NewCond(m)
-		r.store[i].ch = make(chan RedisResult, 0) // this channel can't be buffered
+		r.store[i].ch = make(chan ValkeyResult, 0) // this channel can't be buffered
 	}
 	return r
 }
@@ -45,15 +45,15 @@ type ring struct {
 type node struct {
 	c1    *sync.Cond
 	c2    *sync.Cond
-	ch    chan RedisResult
+	ch    chan ValkeyResult
 	one   Completed
 	multi []Completed
-	resps []RedisResult
+	resps []ValkeyResult
 	mark  uint32
 	slept bool
 }
 
-func (r *ring) PutOne(m Completed) chan RedisResult {
+func (r *ring) PutOne(m Completed) chan ValkeyResult {
 	n := &r.store[atomic.AddUint32(&r.write, 1)&r.mask]
 	n.c1.L.Lock()
 	for n.mark != 0 {
@@ -69,7 +69,7 @@ func (r *ring) PutOne(m Completed) chan RedisResult {
 	return n.ch
 }
 
-func (r *ring) PutMulti(m []Completed, resps []RedisResult) chan RedisResult {
+func (r *ring) PutMulti(m []Completed, resps []ValkeyResult) chan ValkeyResult {
 	n := &r.store[atomic.AddUint32(&r.write, 1)&r.mask]
 	n.c1.L.Lock()
 	for n.mark != 0 {
@@ -87,7 +87,7 @@ func (r *ring) PutMulti(m []Completed, resps []RedisResult) chan RedisResult {
 }
 
 // NextWriteCmd should be only called by one dedicated thread
-func (r *ring) NextWriteCmd() (one Completed, multi []Completed, ch chan RedisResult) {
+func (r *ring) NextWriteCmd() (one Completed, multi []Completed, ch chan ValkeyResult) {
 	r.read1++
 	p := r.read1 & r.mask
 	n := &r.store[p]
@@ -103,7 +103,7 @@ func (r *ring) NextWriteCmd() (one Completed, multi []Completed, ch chan RedisRe
 }
 
 // WaitForWrite should be only called by one dedicated thread
-func (r *ring) WaitForWrite() (one Completed, multi []Completed, ch chan RedisResult) {
+func (r *ring) WaitForWrite() (one Completed, multi []Completed, ch chan ValkeyResult) {
 	r.read1++
 	p := r.read1 & r.mask
 	n := &r.store[p]
@@ -120,7 +120,7 @@ func (r *ring) WaitForWrite() (one Completed, multi []Completed, ch chan RedisRe
 }
 
 // NextResultCh should be only called by one dedicated thread
-func (r *ring) NextResultCh() (one Completed, multi []Completed, ch chan RedisResult, resps []RedisResult, cond *sync.Cond) {
+func (r *ring) NextResultCh() (one Completed, multi []Completed, ch chan ValkeyResult, resps []ValkeyResult, cond *sync.Cond) {
 	r.read2++
 	p := r.read2 & r.mask
 	n := &r.store[p]

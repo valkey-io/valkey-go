@@ -1,4 +1,4 @@
-package rueidis
+package valkey
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/redis/rueidis/internal/cmds"
+	"github.com/rueian/valkey-go/internal/cmds"
 )
 
 func TestNewLuaScriptOnePass(t *testing.T) {
@@ -26,11 +26,11 @@ func TestNewLuaScriptOnePass(t *testing.T) {
 		BFn: func() Builder {
 			return cmds.NewBuilder(cmds.NoSlot)
 		},
-		DoFn: func(ctx context.Context, cmd Completed) (resp RedisResult) {
+		DoFn: func(ctx context.Context, cmd Completed) (resp ValkeyResult) {
 			if reflect.DeepEqual(cmd.Commands(), []string{"EVALSHA", sha, "2", "1", "2", "3", "4"}) {
-				return newResult(RedisMessage{typ: '+', string: "OK"}, nil)
+				return newResult(ValkeyMessage{typ: '+', string: "OK"}, nil)
 			}
-			return newResult(RedisMessage{typ: '+', string: "unexpected"}, nil)
+			return newResult(ValkeyMessage{typ: '+', string: "unexpected"}, nil)
 		},
 	}
 
@@ -56,21 +56,21 @@ func TestNewLuaScript(t *testing.T) {
 		BFn: func() Builder {
 			return cmds.NewBuilder(cmds.NoSlot)
 		},
-		DoFn: func(ctx context.Context, cmd Completed) (resp RedisResult) {
+		DoFn: func(ctx context.Context, cmd Completed) (resp ValkeyResult) {
 			if reflect.DeepEqual(cmd.Commands(), []string{"EVALSHA", sha, "2", "1", "2", "3", "4"}) {
 				eval = true
-				return newResult(RedisMessage{typ: '-', string: "NOSCRIPT"}, nil)
+				return newResult(ValkeyMessage{typ: '-', string: "NOSCRIPT"}, nil)
 			}
 			if eval && reflect.DeepEqual(cmd.Commands(), []string{"EVAL", body, "2", "1", "2", "3", "4"}) {
-				return newResult(RedisMessage{typ: '_'}, nil)
+				return newResult(ValkeyMessage{typ: '_'}, nil)
 			}
-			return newResult(RedisMessage{typ: '+', string: "unexpected"}, nil)
+			return newResult(ValkeyMessage{typ: '+', string: "unexpected"}, nil)
 		},
 	}
 
 	script := NewLuaScript(body)
 
-	if err, ok := IsRedisErr(script.Exec(context.Background(), c, k, a).Error()); ok && !err.IsNil() {
+	if err, ok := IsValkeyErr(script.Exec(context.Background(), c, k, a).Error()); ok && !err.IsNil() {
 		t.Fatalf("ret mistmatch")
 	}
 }
@@ -90,21 +90,21 @@ func TestNewLuaScriptReadOnly(t *testing.T) {
 		BFn: func() Builder {
 			return cmds.NewBuilder(cmds.NoSlot)
 		},
-		DoFn: func(ctx context.Context, cmd Completed) (resp RedisResult) {
+		DoFn: func(ctx context.Context, cmd Completed) (resp ValkeyResult) {
 			if reflect.DeepEqual(cmd.Commands(), []string{"EVALSHA_RO", sha, "2", "1", "2", "3", "4"}) {
 				eval = true
-				return newResult(RedisMessage{typ: '-', string: "NOSCRIPT"}, nil)
+				return newResult(ValkeyMessage{typ: '-', string: "NOSCRIPT"}, nil)
 			}
 			if eval && reflect.DeepEqual(cmd.Commands(), []string{"EVAL_RO", body, "2", "1", "2", "3", "4"}) {
-				return newResult(RedisMessage{typ: '_'}, nil)
+				return newResult(ValkeyMessage{typ: '_'}, nil)
 			}
-			return newResult(RedisMessage{typ: '+', string: "unexpected"}, nil)
+			return newResult(ValkeyMessage{typ: '+', string: "unexpected"}, nil)
 		},
 	}
 
 	script := NewLuaScriptReadOnly(body)
 
-	if err, ok := IsRedisErr(script.Exec(context.Background(), c, k, a).Error()); ok && !err.IsNil() {
+	if err, ok := IsValkeyErr(script.Exec(context.Background(), c, k, a).Error()); ok && !err.IsNil() {
 		t.Fatalf("ret mistmatch")
 	}
 }
@@ -120,8 +120,8 @@ func TestNewLuaScriptExecMultiError(t *testing.T) {
 		BFn: func() Builder {
 			return cmds.NewBuilder(cmds.NoSlot)
 		},
-		DoFn: func(ctx context.Context, cmd Completed) (resp RedisResult) {
-			return newResult(RedisMessage{typ: '-', string: "ANY ERR"}, nil)
+		DoFn: func(ctx context.Context, cmd Completed) (resp ValkeyResult) {
+			return newResult(ValkeyMessage{typ: '-', string: "ANY ERR"}, nil)
 		},
 	}
 
@@ -144,13 +144,13 @@ func TestNewLuaScriptExecMulti(t *testing.T) {
 		BFn: func() Builder {
 			return cmds.NewBuilder(cmds.NoSlot)
 		},
-		DoFn: func(ctx context.Context, cmd Completed) (resp RedisResult) {
-			return newResult(RedisMessage{typ: '+', string: "OK"}, nil)
+		DoFn: func(ctx context.Context, cmd Completed) (resp ValkeyResult) {
+			return newResult(ValkeyMessage{typ: '+', string: "OK"}, nil)
 		},
-		DoMultiFn: func(ctx context.Context, multi ...Completed) (resp []RedisResult) {
+		DoMultiFn: func(ctx context.Context, multi ...Completed) (resp []ValkeyResult) {
 			for _, cmd := range multi {
 				if reflect.DeepEqual(cmd.Commands(), []string{"EVALSHA", sha, "2", "1", "2", "3", "4"}) {
-					resp = append(resp, newResult(RedisMessage{typ: '+', string: "OK"}, nil))
+					resp = append(resp, newResult(ValkeyMessage{typ: '+', string: "OK"}, nil))
 				}
 			}
 			return resp
@@ -176,13 +176,13 @@ func TestNewLuaScriptExecMultiRo(t *testing.T) {
 		BFn: func() Builder {
 			return cmds.NewBuilder(cmds.NoSlot)
 		},
-		DoFn: func(ctx context.Context, cmd Completed) (resp RedisResult) {
-			return newResult(RedisMessage{typ: '+', string: "OK"}, nil)
+		DoFn: func(ctx context.Context, cmd Completed) (resp ValkeyResult) {
+			return newResult(ValkeyMessage{typ: '+', string: "OK"}, nil)
 		},
-		DoMultiFn: func(ctx context.Context, multi ...Completed) (resp []RedisResult) {
+		DoMultiFn: func(ctx context.Context, multi ...Completed) (resp []ValkeyResult) {
 			for _, cmd := range multi {
 				if reflect.DeepEqual(cmd.Commands(), []string{"EVALSHA_RO", sha, "2", "1", "2", "3", "4"}) {
-					resp = append(resp, newResult(RedisMessage{typ: '+', string: "OK"}, nil))
+					resp = append(resp, newResult(ValkeyMessage{typ: '+', string: "OK"}, nil))
 				}
 			}
 			return resp
@@ -197,10 +197,10 @@ func TestNewLuaScriptExecMultiRo(t *testing.T) {
 
 type client struct {
 	BFn            func() Builder
-	DoFn           func(ctx context.Context, cmd Completed) (resp RedisResult)
-	DoMultiFn      func(ctx context.Context, cmd ...Completed) (resp []RedisResult)
-	DoCacheFn      func(ctx context.Context, cmd Cacheable, ttl time.Duration) (resp RedisResult)
-	DoMultiCacheFn func(ctx context.Context, cmd ...CacheableTTL) (resp []RedisResult)
+	DoFn           func(ctx context.Context, cmd Completed) (resp ValkeyResult)
+	DoMultiFn      func(ctx context.Context, cmd ...Completed) (resp []ValkeyResult)
+	DoCacheFn      func(ctx context.Context, cmd Cacheable, ttl time.Duration) (resp ValkeyResult)
+	DoMultiCacheFn func(ctx context.Context, cmd ...CacheableTTL) (resp []ValkeyResult)
 	DedicatedFn    func(fn func(DedicatedClient) error) (err error)
 	DedicateFn     func() (DedicatedClient, func())
 	CloseFn        func()
@@ -217,40 +217,40 @@ func (c *client) B() Builder {
 	return Builder{}
 }
 
-func (c *client) Do(ctx context.Context, cmd Completed) (resp RedisResult) {
+func (c *client) Do(ctx context.Context, cmd Completed) (resp ValkeyResult) {
 	if c.DoFn != nil {
 		return c.DoFn(ctx, cmd)
 	}
-	return RedisResult{}
+	return ValkeyResult{}
 }
 
-func (c *client) DoMulti(ctx context.Context, cmd ...Completed) (resp []RedisResult) {
+func (c *client) DoMulti(ctx context.Context, cmd ...Completed) (resp []ValkeyResult) {
 	if c.DoMultiFn != nil {
 		return c.DoMultiFn(ctx, cmd...)
 	}
 	return nil
 }
 
-func (c *client) DoStream(ctx context.Context, cmd Completed) (resp RedisResultStream) {
-	return RedisResultStream{}
+func (c *client) DoStream(ctx context.Context, cmd Completed) (resp ValkeyResultStream) {
+	return ValkeyResultStream{}
 }
 
-func (c *client) DoMultiStream(ctx context.Context, cmd ...Completed) (resp MultiRedisResultStream) {
-	return MultiRedisResultStream{}
+func (c *client) DoMultiStream(ctx context.Context, cmd ...Completed) (resp MultiValkeyResultStream) {
+	return MultiValkeyResultStream{}
 }
 
-func (c *client) DoMultiCache(ctx context.Context, cmd ...CacheableTTL) (resp []RedisResult) {
+func (c *client) DoMultiCache(ctx context.Context, cmd ...CacheableTTL) (resp []ValkeyResult) {
 	if c.DoMultiCacheFn != nil {
 		return c.DoMultiCacheFn(ctx, cmd...)
 	}
 	return nil
 }
 
-func (c *client) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) (resp RedisResult) {
+func (c *client) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) (resp ValkeyResult) {
 	if c.DoCacheFn != nil {
 		return c.DoCacheFn(ctx, cmd, ttl)
 	}
-	return RedisResult{}
+	return ValkeyResult{}
 }
 
 func (c *client) Dedicated(fn func(DedicatedClient) error) (err error) {

@@ -4,18 +4,18 @@ import (
 	"context"
 	"errors"
 
-	"github.com/redis/rueidis"
+	"github.com/rueian/valkey-go"
 )
 
 var EndOfCursor = errors.New("end of cursor")
 
-func newAggregateCursor(idx string, client rueidis.Client, first []map[string]string, cursor, total int64) *AggregateCursor {
+func newAggregateCursor(idx string, client valkey.Client, first []map[string]string, cursor, total int64) *AggregateCursor {
 	return &AggregateCursor{client: client, idx: idx, first: first, id: cursor, n: total}
 }
 
 // AggregateCursor unifies the response of FT.AGGREGATE with or without WITHCURSOR
 type AggregateCursor struct {
-	client rueidis.Client
+	client valkey.Client
 	idx    string
 	first  []map[string]string
 	id     int64

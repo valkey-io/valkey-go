@@ -1,4 +1,4 @@
-package rueidis
+package valkey
 
 import (
 	"bufio"
@@ -11,7 +11,7 @@ import (
 	"sync"
 )
 
-var errChunked = errors.New("unbounded redis message")
+var errChunked = errors.New("unbounded valkey message")
 var errOldNull = errors.New("RESP2 null")
 
 const (
@@ -36,7 +36,7 @@ const (
 
 var typeNames = make(map[byte]string, 16)
 
-type reader func(i *bufio.Reader) (RedisMessage, error)
+type reader func(i *bufio.Reader) (ValkeyMessage, error)
 
 var readers = [256]reader{}
 
@@ -76,47 +76,47 @@ func init() {
 	typeNames[typeEnd] = "null"
 }
 
-func readSimpleString(i *bufio.Reader) (m RedisMessage, err error) {
+func readSimpleString(i *bufio.Reader) (m ValkeyMessage, err error) {
 	m.string, err = readS(i)
 	return
 }
 
-func readBlobString(i *bufio.Reader) (m RedisMessage, err error) {
+func readBlobString(i *bufio.Reader) (m ValkeyMessage, err error) {
 	m.string, err = readB(i)
 	if err == errChunked {
 		sb := strings.Builder{}
 		for {
 			if _, err = i.Discard(1); err != nil { // discard the ';'
-				return RedisMessage{}, err
+				return ValkeyMessage{}, err
 			}
 			length, err := readI(i)
 			if err != nil {
-				return RedisMessage{}, err
+				return ValkeyMessage{}, err
 			}
 			if length == 0 {
-				return RedisMessage{string: sb.String()}, nil
+				return ValkeyMessage{string: sb.String()}, nil
 			}
 			sb.Grow(int(length))
 			if _, err = io.CopyN(&sb, i, length); err != nil {
-				return RedisMessage{}, err
+				return ValkeyMessage{}, err
 			}
 			if _, err = i.Discard(2); err != nil {
-				return RedisMessage{}, err
+				return ValkeyMessage{}, err
 			}
 		}
 	}
 	return
 }
 
-func readInteger(i *bufio.Reader) (m RedisMessage, err error) {
+func readInteger(i *bufio.Reader) (m ValkeyMessage, err error) {
 	m.integer, err = readI(i)
 	return
 }
 
-func readBoolean(i *bufio.Reader) (m RedisMessage, err error) {
+func readBoolean(i *bufio.Reader) (m ValkeyMessage, err error) {
 	b, err := i.ReadByte()
 	if err != nil {
-		return RedisMessage{}, err
+		return ValkeyMessage{}, err
 	}
 	if b == 't' {
 		m.integer = 1
@@ -125,12 +125,12 @@ func readBoolean(i *bufio.Reader) (m RedisMessage, err error) {
 	return
 }
 
-func readNull(i *bufio.Reader) (m RedisMessage, err error) {
+func readNull(i *bufio.Reader) (m ValkeyMessage, err error) {
 	_, err = i.Discard(2)
 	return
 }
 
-func readArray(i *bufio.Reader) (m RedisMessage, err error) {
+func readArray(i *bufio.Reader) (m ValkeyMessage, err error) {
 	length, err := readI(i)
 	if err == nil {
 		if length == -1 {
@@ -143,7 +143,7 @@ func readArray(i *bufio.Reader) (m RedisMessage, err error) {
 	return m, err
 }
 
-func readMap(i *bufio.Reader) (m RedisMessage, err error) {
+func readMap(i *bufio.Reader) (m ValkeyMessage, err error) {
 	length, err := readI(i)
 	if err == nil {
 		m.values, err = readA(i, length*2)
@@ -219,8 +219,8 @@ func readB(i *bufio.Reader) (string, error) {
 	return BinaryString(bs), nil
 }
 
-func readE(i *bufio.Reader) ([]RedisMessage, error) {
-	v := make([]RedisMessage, 0)
+func readE(i *bufio.Reader) ([]ValkeyMessage, error) {
+	v := make([]ValkeyMessage, 0)
 	for {
 		n, err := readNextMessage(i)
 		if err != nil {
@@ -233,8 +233,8 @@ func readE(i *bufio.Reader) ([]RedisMessage, error) {
 	}
 }
 
-func readA(i *bufio.Reader, length int64) (v []RedisMessage, err error) {
-	v = make([]RedisMessage, length)
+func readA(i *bufio.Reader, length int64) (v []ValkeyMessage, err error) {
+	v = make([]ValkeyMessage, length)
 	for n := int64(0); n < length; n++ {
 		if v[n], err = readNextMessage(i); err != nil {
 			return nil, err
@@ -271,28 +271,28 @@ func writeN(o *bufio.Writer, id byte, n int) (err error) {
 	return err
 }
 
-func readNextMessage(i *bufio.Reader) (m RedisMessage, err error) {
-	var attrs *RedisMessage
+func readNextMessage(i *bufio.Reader) (m ValkeyMessage, err error) {
+	var attrs *ValkeyMessage
 	var typ byte
 	for {
 		if typ, err = i.ReadByte(); err != nil {
-			return RedisMessage{}, err
+			return ValkeyMessage{}, err
 		}
 		fn := readers[typ]
 		if fn == nil {
-			return RedisMessage{}, errors.New(unknownMessageType + strconv.Itoa(int(typ)))
+			return ValkeyMessage{}, errors.New(unknownMessageType + strconv.Itoa(int(typ)))
 		}
 		if m, err = fn(i); err != nil {
 			if err == errOldNull {
-				return RedisMessage{typ: typeNull}, nil
+				return ValkeyMessage{typ: typeNull}, nil
 			}
-			return RedisMessage{}, err
+			return ValkeyMessage{}, err
 		}
 		m.typ = typ
 		if m.typ == typeAttribute { // handle the attributes
 			a := m     // clone the original m first, and then take address of the clone
 			attrs = &a // to avoid go compiler allocating the m on heap which causing worse performance.
-			m = RedisMessage{}
+			m = ValkeyMessage{}
 			continue
 		}
 		m.attrs = attrs
@@ -353,14 +353,14 @@ next:
 			return 0, Nil, true
 		case typeSimpleErr, typeBlobErr:
 			mm := m
-			return 0, (*RedisError)(&mm), true
+			return 0, (*ValkeyError)(&mm), true
 		case typeInteger, typeBool:
 			n, err := w.Write([]byte(strconv.FormatInt(m.integer, 10)))
 			return int64(n), err, true
 		case typePush:
 			goto next
 		default:
-			return 0, fmt.Errorf("unsupported redis %q response for streaming read", typeNames[typ]), true
+			return 0, fmt.Errorf("unsupported valkey %q response for streaming read", typeNames[typ]), true
 		}
 	}
 }

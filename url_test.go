@@ -1,4 +1,4 @@
-package rueidis
+package valkey
 
 import (
 	"strings"
@@ -9,7 +9,7 @@ func TestParseURL(t *testing.T) {
 	if opt, err := ParseURL("re dis://"); err == nil {
 		t.Fatalf("unexpected %v %v", opt, err)
 	}
-	if opt, err := ParseURL(""); !strings.HasPrefix(err.Error(), "redis: invalid URL scheme") {
+	if opt, err := ParseURL(""); !strings.HasPrefix(err.Error(), "valkey: invalid URL scheme") {
 		t.Fatalf("unexpected %v %v", opt, err)
 	}
 	if opt, err := ParseURL("rediss://"); err != nil || opt.TLSConfig == nil {
@@ -36,19 +36,19 @@ func TestParseURL(t *testing.T) {
 	if opt, err := ParseURL("redis:///1"); err != nil || opt.SelectDB != 1 {
 		t.Fatalf("unexpected %v %v", opt, err)
 	}
-	if opt, err := ParseURL("redis:///a"); !strings.HasPrefix(err.Error(), "redis: invalid database number") {
+	if opt, err := ParseURL("redis:///a"); !strings.HasPrefix(err.Error(), "valkey: invalid database number") {
 		t.Fatalf("unexpected %v %v", opt, err)
 	}
-	if opt, err := ParseURL("redis:///1?db=a"); !strings.HasPrefix(err.Error(), "redis: invalid database number") {
+	if opt, err := ParseURL("redis:///1?db=a"); !strings.HasPrefix(err.Error(), "valkey: invalid database number") {
 		t.Fatalf("unexpected %v %v", opt, err)
 	}
-	if opt, err := ParseURL("redis:////1"); !strings.HasPrefix(err.Error(), "redis: invalid URL path") {
+	if opt, err := ParseURL("redis:////1"); !strings.HasPrefix(err.Error(), "valkey: invalid URL path") {
 		t.Fatalf("unexpected %v %v", opt, err)
 	}
-	if opt, err := ParseURL("redis://?dial_timeout=a"); !strings.HasPrefix(err.Error(), "redis: invalid dial timeout") {
+	if opt, err := ParseURL("redis://?dial_timeout=a"); !strings.HasPrefix(err.Error(), "valkey: invalid dial timeout") {
 		t.Fatalf("unexpected %v %v", opt, err)
 	}
-	if opt, err := ParseURL("redis://?write_timeout=a"); !strings.HasPrefix(err.Error(), "redis: invalid write timeout") {
+	if opt, err := ParseURL("redis://?write_timeout=a"); !strings.HasPrefix(err.Error(), "valkey: invalid write timeout") {
 		t.Fatalf("unexpected %v %v", opt, err)
 	}
 	if opt, err := ParseURL("redis://?protocol=2"); !opt.AlwaysRESP2 {
@@ -76,7 +76,7 @@ func TestParseURL(t *testing.T) {
 
 func TestMustParseURL(t *testing.T) {
 	defer func() {
-		if err := recover(); !strings.HasPrefix(err.(error).Error(), "redis: invalid URL path") {
+		if err := recover(); !strings.HasPrefix(err.(error).Error(), "valkey: invalid URL path") {
 			t.Failed()
 		}
 	}()

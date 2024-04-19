@@ -8,25 +8,25 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/redis/rueidis"
+	"github.com/rueian/valkey-go"
 )
 
-func TestRedisString(t *testing.T) {
-	m := RedisString("s")
+func TestValkeyString(t *testing.T) {
+	m := ValkeyString("s")
 	if v, err := m.ToString(); err != nil || v != "s" {
 		t.Fatalf("unexpected value %v", v)
 	}
 }
 
-func TestRedisError(t *testing.T) {
-	m := RedisError("s")
+func TestValkeyError(t *testing.T) {
+	m := ValkeyError("s")
 	if err := m.Error(); err == nil || err.Error() != "s" {
 		t.Fatalf("unexpected value %v", err)
 	}
 }
 
-func TestRedisInt64(t *testing.T) {
-	m := RedisInt64(1)
+func TestValkeyInt64(t *testing.T) {
+	m := ValkeyInt64(1)
 	if v, err := m.ToInt64(); err != nil || v != int64(1) {
 		t.Fatalf("unexpected value %v", v)
 	}
@@ -35,8 +35,8 @@ func TestRedisInt64(t *testing.T) {
 	}
 }
 
-func TestRedisFloat64(t *testing.T) {
-	m := RedisFloat64(1)
+func TestValkeyFloat64(t *testing.T) {
+	m := ValkeyFloat64(1)
 	if v, err := m.ToFloat64(); err != nil || v != float64(1) {
 		t.Fatalf("unexpected value %v", v)
 	}
@@ -45,8 +45,8 @@ func TestRedisFloat64(t *testing.T) {
 	}
 }
 
-func TestRedisBool(t *testing.T) {
-	m := RedisBool(true)
+func TestValkeyBool(t *testing.T) {
+	m := ValkeyBool(true)
 	if v, err := m.ToBool(); err != nil || v != true {
 		t.Fatalf("unexpected value %v", v)
 	}
@@ -55,8 +55,8 @@ func TestRedisBool(t *testing.T) {
 	}
 }
 
-func TestRedisNil(t *testing.T) {
-	m := RedisNil()
+func TestValkeyNil(t *testing.T) {
+	m := ValkeyNil()
 	if err := m.Error(); err == nil {
 		t.Fatalf("unexpected value %v", err)
 	}
@@ -65,17 +65,17 @@ func TestRedisNil(t *testing.T) {
 	}
 }
 
-func TestRedisArray(t *testing.T) {
-	m := RedisArray(RedisString("0"), RedisString("1"), RedisString("2"))
+func TestValkeyArray(t *testing.T) {
+	m := ValkeyArray(ValkeyString("0"), ValkeyString("1"), ValkeyString("2"))
 	if arr, err := m.AsStrSlice(); err != nil || !reflect.DeepEqual(arr, []string{"0", "1", "2"}) {
 		t.Fatalf("unexpected value %v", err)
 	}
 }
 
-func TestRedisMap(t *testing.T) {
-	m := RedisMap(map[string]rueidis.RedisMessage{
-		"a": RedisString("0"),
-		"b": RedisString("1"),
+func TestValkeyMap(t *testing.T) {
+	m := ValkeyMap(map[string]valkey.ValkeyMessage{
+		"a": ValkeyString("0"),
+		"b": ValkeyString("1"),
 	})
 	if arr, err := m.AsStrMap(); err != nil || !reflect.DeepEqual(arr, map[string]string{
 		"a": "0",
@@ -83,17 +83,17 @@ func TestRedisMap(t *testing.T) {
 	}) {
 		t.Fatalf("unexpected value %v", err)
 	}
-	if arr, err := m.ToMap(); err != nil || !reflect.DeepEqual(arr, map[string]rueidis.RedisMessage{
-		"a": RedisString("0"),
-		"b": RedisString("1"),
+	if arr, err := m.ToMap(); err != nil || !reflect.DeepEqual(arr, map[string]valkey.ValkeyMessage{
+		"a": ValkeyString("0"),
+		"b": ValkeyString("1"),
 	}) {
 		t.Fatalf("unexpected value %v", err)
 	}
 }
 
-func TestRedisResult(t *testing.T) {
-	r := Result(RedisNil())
-	if err := r.Error(); !rueidis.IsRedisNil(err) {
+func TestValkeyResult(t *testing.T) {
+	r := Result(ValkeyNil())
+	if err := r.Error(); !valkey.IsValkeyNil(err) {
 		t.Fatalf("unexpected value %v", err)
 	}
 }
@@ -106,14 +106,14 @@ func TestErrorResult(t *testing.T) {
 }
 
 func TestErrorResultStream(t *testing.T) {
-	s := RedisResultStreamError(errors.New("any"))
+	s := ValkeyResultStreamError(errors.New("any"))
 	if err := s.Error(); err.Error() != "any" {
 		t.Fatalf("unexpected value %v", err)
 	}
 }
 
 func TestErrorMultiResultStream(t *testing.T) {
-	s := MultiRedisResultStreamError(errors.New("any"))
+	s := MultiValkeyResultStreamError(errors.New("any"))
 	if err := s.Error(); err.Error() != "any" {
 		t.Fatalf("unexpected value %v", err)
 	}
@@ -121,19 +121,19 @@ func TestErrorMultiResultStream(t *testing.T) {
 
 func TestResultStream(t *testing.T) {
 	type test struct {
-		msg []rueidis.RedisMessage
+		msg []valkey.ValkeyMessage
 		out []string
 		err []string
 	}
 	tests := []test{
-		{msg: []rueidis.RedisMessage{RedisString("")}, out: []string{""}, err: []string{""}},
-		{msg: []rueidis.RedisMessage{RedisString("0"), RedisBlobString("12345")}, out: []string{"0", "12345"}, err: []string{"", ""}},
-		{msg: []rueidis.RedisMessage{RedisInt64(123), RedisInt64(-456)}, out: []string{"123", "-456"}, err: []string{"", ""}},
-		{msg: []rueidis.RedisMessage{RedisString(""), RedisNil()}, out: []string{"", ""}, err: []string{"", "nil"}},
-		{msg: []rueidis.RedisMessage{RedisArray(RedisString("n")), RedisString("ok"), RedisNil(), RedisMap(map[string]rueidis.RedisMessage{"b": RedisBlobString("b")})}, out: []string{"", "ok", "", ""}, err: []string{"unsupported", "", "nil", "unsupported"}},
+		{msg: []valkey.ValkeyMessage{ValkeyString("")}, out: []string{""}, err: []string{""}},
+		{msg: []valkey.ValkeyMessage{ValkeyString("0"), ValkeyBlobString("12345")}, out: []string{"0", "12345"}, err: []string{"", ""}},
+		{msg: []valkey.ValkeyMessage{ValkeyInt64(123), ValkeyInt64(-456)}, out: []string{"123", "-456"}, err: []string{"", ""}},
+		{msg: []valkey.ValkeyMessage{ValkeyString(""), ValkeyNil()}, out: []string{"", ""}, err: []string{"", "nil"}},
+		{msg: []valkey.ValkeyMessage{ValkeyArray(ValkeyString("n")), ValkeyString("ok"), ValkeyNil(), ValkeyMap(map[string]valkey.ValkeyMessage{"b": ValkeyBlobString("b")})}, out: []string{"", "ok", "", ""}, err: []string{"unsupported", "", "nil", "unsupported"}},
 	}
 	for _, tc := range tests {
-		s := RedisResultStream(tc.msg...)
+		s := ValkeyResultStream(tc.msg...)
 		if err := s.Error(); err != nil {
 			t.Fatalf("unexpected value %v", err)
 		}
@@ -170,19 +170,19 @@ func TestResultStream(t *testing.T) {
 
 func TestMultiResultStream(t *testing.T) {
 	type test struct {
-		msg []rueidis.RedisMessage
+		msg []valkey.ValkeyMessage
 		out []string
 		err []string
 	}
 	tests := []test{
-		{msg: []rueidis.RedisMessage{RedisString("")}, out: []string{""}, err: []string{""}},
-		{msg: []rueidis.RedisMessage{RedisString("0"), RedisBlobString("12345")}, out: []string{"0", "12345"}, err: []string{"", ""}},
-		{msg: []rueidis.RedisMessage{RedisInt64(123), RedisInt64(-456)}, out: []string{"123", "-456"}, err: []string{"", ""}},
-		{msg: []rueidis.RedisMessage{RedisString(""), RedisNil()}, out: []string{"", ""}, err: []string{"", "nil"}},
-		{msg: []rueidis.RedisMessage{RedisArray(RedisString("n")), RedisString("ok"), RedisNil(), RedisMap(map[string]rueidis.RedisMessage{"b": RedisBlobString("b")})}, out: []string{"", "ok", "", ""}, err: []string{"unsupported", "", "nil", "unsupported"}},
+		{msg: []valkey.ValkeyMessage{ValkeyString("")}, out: []string{""}, err: []string{""}},
+		{msg: []valkey.ValkeyMessage{ValkeyString("0"), ValkeyBlobString("12345")}, out: []string{"0", "12345"}, err: []string{"", ""}},
+		{msg: []valkey.ValkeyMessage{ValkeyInt64(123), ValkeyInt64(-456)}, out: []string{"123", "-456"}, err: []string{"", ""}},
+		{msg: []valkey.ValkeyMessage{ValkeyString(""), ValkeyNil()}, out: []string{"", ""}, err: []string{"", "nil"}},
+		{msg: []valkey.ValkeyMessage{ValkeyArray(ValkeyString("n")), ValkeyString("ok"), ValkeyNil(), ValkeyMap(map[string]valkey.ValkeyMessage{"b": ValkeyBlobString("b")})}, out: []string{"", "ok", "", ""}, err: []string{"unsupported", "", "nil", "unsupported"}},
 	}
 	for _, tc := range tests {
-		s := MultiRedisResultStream(tc.msg...)
+		s := MultiValkeyResultStream(tc.msg...)
 		if err := s.Error(); err != nil {
 			t.Fatalf("unexpected value %v", err)
 		}

@@ -1,4 +1,4 @@
-package rueidis
+package valkey
 
 import (
 	"context"
@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/redis/rueidis/internal/cmds"
-	"github.com/redis/rueidis/internal/util"
+	"github.com/rueian/valkey-go/internal/cmds"
+	"github.com/rueian/valkey-go/internal/util"
 )
 
 type connFn func(dst string, opt *ClientOption) conn
@@ -45,14 +45,14 @@ var batchcachep = util.NewPool(func(capacity int) *batchcache {
 })
 
 type conn interface {
-	Do(ctx context.Context, cmd Completed) RedisResult
-	DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) RedisResult
-	DoMulti(ctx context.Context, multi ...Completed) *redisresults
-	DoMultiCache(ctx context.Context, multi ...CacheableTTL) *redisresults
+	Do(ctx context.Context, cmd Completed) ValkeyResult
+	DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) ValkeyResult
+	DoMulti(ctx context.Context, multi ...Completed) *valkeyresults
+	DoMultiCache(ctx context.Context, multi ...CacheableTTL) *valkeyresults
 	Receive(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error
-	DoStream(ctx context.Context, cmd Completed) RedisResultStream
-	DoMultiStream(ctx context.Context, multi ...Completed) MultiRedisResultStream
-	Info() map[string]RedisMessage
+	DoStream(ctx context.Context, cmd Completed) ValkeyResultStream
+	DoMultiStream(ctx context.Context, multi ...Completed) MultiValkeyResultStream
+	Info() map[string]ValkeyMessage
 	Version() int
 	Error() error
 	Close()
@@ -197,7 +197,7 @@ func (m *mux) Dial() error {
 	return err
 }
 
-func (m *mux) Info() map[string]RedisMessage {
+func (m *mux) Info() map[string]ValkeyMessage {
 	return m.pipe(0).Info()
 }
 
@@ -209,17 +209,17 @@ func (m *mux) Error() error {
 	return m.pipe(0).Error()
 }
 
-func (m *mux) DoStream(ctx context.Context, cmd Completed) RedisResultStream {
+func (m *mux) DoStream(ctx context.Context, cmd Completed) ValkeyResultStream {
 	wire := m.spool.Acquire()
 	return wire.DoStream(ctx, m.spool, cmd)
 }
 
-func (m *mux) DoMultiStream(ctx context.Context, multi ...Completed) MultiRedisResultStream {
+func (m *mux) DoMultiStream(ctx context.Context, multi ...Completed) MultiValkeyResultStream {
 	wire := m.spool.Acquire()
 	return wire.DoMultiStream(ctx, m.spool, multi...)
 }
 
-func (m *mux) Do(ctx context.Context, cmd Completed) (resp RedisResult) {
+func (m *mux) Do(ctx context.Context, cmd Completed) (resp ValkeyResult) {
 	if cmd.IsBlock() {
 		resp = m.blocking(ctx, cmd)
 	} else {
@@ -228,7 +228,7 @@ func (m *mux) Do(ctx context.Context, cmd Completed) (resp RedisResult) {
 	return resp
 }
 
-func (m *mux) DoMulti(ctx context.Context, multi ...Completed) (resp *redisresults) {
+func (m *mux) DoMulti(ctx context.Context, multi ...Completed) (resp *valkeyresults) {
 	for _, cmd := range multi {
 		if cmd.IsBlock() {
 			goto block
@@ -240,21 +240,21 @@ block:
 	return m.blockingMulti(ctx, multi)
 }
 
-func (m *mux) blocking(ctx context.Context, cmd Completed) (resp RedisResult) {
+func (m *mux) blocking(ctx context.Context, cmd Completed) (resp ValkeyResult) {
 	wire := m.dpool.Acquire()
 	resp = wire.Do(ctx, cmd)
-	if resp.NonRedisError() != nil { // abort the wire if blocking command return early (ex. context.DeadlineExceeded)
+	if resp.NonValkeyError() != nil { // abort the wire if blocking command return early (ex. context.DeadlineExceeded)
 		wire.Close()
 	}
 	m.dpool.Store(wire)
 	return resp
 }
 
-func (m *mux) blockingMulti(ctx context.Context, cmd []Completed) (resp *redisresults) {
+func (m *mux) blockingMulti(ctx context.Context, cmd []Completed) (resp *valkeyresults) {
 	wire := m.dpool.Acquire()
 	resp = wire.DoMulti(ctx, cmd...)
 	for _, res := range resp.s {
-		if res.NonRedisError() != nil { // abort the wire if blocking command return early (ex. context.DeadlineExceeded)
+		if res.NonValkeyError() != nil { // abort the wire if blocking command return early (ex. context.DeadlineExceeded)
 			wire.Close()
 			break
 		}
@@ -263,21 +263,21 @@ func (m *mux) blockingMulti(ctx context.Context, cmd []Completed) (resp *redisre
 	return resp
 }
 
-func (m *mux) pipeline(ctx context.Context, cmd Completed) (resp RedisResult) {
+func (m *mux) pipeline(ctx context.Context, cmd Completed) (resp ValkeyResult) {
 	slot := slotfn(len(m.wire), cmd.Slot(), cmd.NoReply())
 	wire := m.pipe(slot)
-	if resp = wire.Do(ctx, cmd); isBroken(resp.NonRedisError(), wire) {
+	if resp = wire.Do(ctx, cmd); isBroken(resp.NonValkeyError(), wire) {
 		m.wire[slot].CompareAndSwap(wire, m.init)
 	}
 	return resp
 }
 
-func (m *mux) pipelineMulti(ctx context.Context, cmd []Completed) (resp *redisresults) {
+func (m *mux) pipelineMulti(ctx context.Context, cmd []Completed) (resp *valkeyresults) {
 	slot := slotfn(len(m.wire), cmd[0].Slot(), cmd[0].NoReply())
 	wire := m.pipe(slot)
 	resp = wire.DoMulti(ctx, cmd...)
 	for _, r := range resp.s {
-		if isBroken(r.NonRedisError(), wire) {
+		if isBroken(r.NonValkeyError(), wire) {
 			m.wire[slot].CompareAndSwap(wire, m.init)
 			return resp
 		}
@@ -285,17 +285,17 @@ func (m *mux) pipelineMulti(ctx context.Context, cmd []Completed) (resp *redisre
 	return resp
 }
 
-func (m *mux) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) RedisResult {
+func (m *mux) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) ValkeyResult {
 	slot := cmd.Slot() & uint16(len(m.wire)-1)
 	wire := m.pipe(slot)
 	resp := wire.DoCache(ctx, cmd, ttl)
-	if isBroken(resp.NonRedisError(), wire) {
+	if isBroken(resp.NonValkeyError(), wire) {
 		m.wire[slot].CompareAndSwap(wire, m.init)
 	}
 	return resp
 }
 
-func (m *mux) DoMultiCache(ctx context.Context, multi ...CacheableTTL) (results *redisresults) {
+func (m *mux) DoMultiCache(ctx context.Context, multi ...CacheableTTL) (results *valkeyresults) {
 	var slots *muxslots
 	var mask = uint16(len(m.wire) - 1)
 
@@ -344,11 +344,11 @@ func (m *mux) DoMultiCache(ctx context.Context, multi ...CacheableTTL) (results 
 	return results
 }
 
-func (m *mux) doMultiCache(ctx context.Context, slot uint16, multi []CacheableTTL) (resps *redisresults) {
+func (m *mux) doMultiCache(ctx context.Context, slot uint16, multi []CacheableTTL) (resps *valkeyresults) {
 	wire := m.pipe(slot)
 	resps = wire.DoMultiCache(ctx, multi...)
 	for _, r := range resps.s {
-		if isBroken(r.NonRedisError(), wire) {
+		if isBroken(r.NonValkeyError(), wire) {
 			m.wire[slot].CompareAndSwap(wire, m.init)
 			return resps
 		}

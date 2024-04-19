@@ -3,11 +3,11 @@ package om
 import (
 	"testing"
 
-	"github.com/redis/rueidis"
+	"github.com/rueian/valkey-go"
 )
 
-func setup(t *testing.T) rueidis.Client {
-	client, err := rueidis.NewClient(rueidis.ClientOption{InitAddress: []string{"127.0.0.1:6377"}})
+func setup(t *testing.T) valkey.Client {
+	client, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{"127.0.0.1:6377"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -15,8 +15,8 @@ func setup(t *testing.T) rueidis.Client {
 }
 
 type TestStruct struct {
-	Key string `redis:",key"`
-	Ver int64  `redis:",ver"`
+	Key string `valkey:",key"`
+	Ver int64  `valkey:",ver"`
 }
 
 func TestWithIndexName(t *testing.T) {

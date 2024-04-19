@@ -6,13 +6,13 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/redis/rueidis"
+	"github.com/rueian/valkey-go"
 )
 
 // NewHashRepository creates an HashRepository.
-// The prefix parameter is used as redis key prefix. The entity stored by the repository will be named in the form of `{prefix}:{id}`
-// The schema parameter should be a struct with fields tagged with `redis:",key"` and `redis:",ver"`
-func NewHashRepository[T any](prefix string, schema T, client rueidis.Client, opts ...RepositoryOption) Repository[T] {
+// The prefix parameter is used as valkey key prefix. The entity stored by the repository will be named in the form of `{prefix}:{id}`
+// The schema parameter should be a struct with fields tagged with `valkey:",key"` and `valkey:",ver"`
+func NewHashRepository[T any](prefix string, schema T, client valkey.Client, opts ...RepositoryOption) Repository[T] {
 	repo := &HashRepository[T]{
 		prefix: prefix,
 		idx:    "hashidx:" + prefix,
@@ -29,17 +29,17 @@ func NewHashRepository[T any](prefix string, schema T, client rueidis.Client, op
 
 var _ Repository[any] = (*HashRepository[any])(nil)
 
-// HashRepository is an OM repository backed by redis hash.
+// HashRepository is an OM repository backed by valkey hash.
 type HashRepository[T any] struct {
 	schema  schema
 	typ     reflect.Type
-	client  rueidis.Client
+	client  valkey.Client
 	factory *hashConvFactory
 	prefix  string
 	idx     string
 }
 
-// NewEntity returns an empty entity and will have the `redis:",key"` field be set with ULID automatically.
+// NewEntity returns an empty entity and will have the `valkey:",key"` field be set with ULID automatically.
 func (r *HashRepository[T]) NewEntity() (entity *T) {
 	var v T
 	reflect.ValueOf(&v).Elem().Field(r.schema.key.idx).Set(reflect.ValueOf(id()))
@@ -64,7 +64,7 @@ func (r *HashRepository[T]) FetchCache(ctx context.Context, id string, ttl time.
 	return v, err
 }
 
-func (r *HashRepository[T]) toExec(entity *T) (val reflect.Value, exec rueidis.LuaExec) {
+func (r *HashRepository[T]) toExec(entity *T) (val reflect.Value, exec valkey.LuaExec) {
 	val = reflect.ValueOf(entity).Elem()
 	fields := r.factory.NewConverter(val).ToHash()
 	keyVal := fields[r.schema.key.name]
@@ -92,12 +92,12 @@ func (r *HashRepository[T]) toExec(entity *T) (val reflect.Value, exec rueidis.L
 	return
 }
 
-// Save the entity under the redis key of `{prefix}:{id}`.
-// It also uses the `redis:",ver"` field and lua script to perform optimistic locking and prevent lost update.
+// Save the entity under the valkey key of `{prefix}:{id}`.
+// It also uses the `valkey:",ver"` field and lua script to perform optimistic locking and prevent lost update.
 func (r *HashRepository[T]) Save(ctx context.Context, entity *T) (err error) {
 	val, exec := r.toExec(entity)
 	str, err := hashSaveScript.Exec(ctx, r.client, exec.Keys, exec.Args).ToString()
-	if rueidis.IsRedisNil(err) {
+	if valkey.IsValkeyNil(err) {
 		return ErrVersionMismatch
 	}
 	if err == nil {
@@ -111,13 +111,13 @@ func (r *HashRepository[T]) Save(ctx context.Context, entity *T) (err error) {
 func (r *HashRepository[T]) SaveMulti(ctx context.Context, entities ...*T) []error {
 	errs := make([]error, len(entities))
 	vals := make([]reflect.Value, len(entities))
-	exec := make([]rueidis.LuaExec, len(entities))
+	exec := make([]valkey.LuaExec, len(entities))
 	for i, entity := range entities {
 		vals[i], exec[i] = r.toExec(entity)
 	}
 	for i, resp := range hashSaveScript.ExecMulti(ctx, r.client, exec...) {
 		if str, err := resp.ToString(); err != nil {
-			if errs[i] = err; rueidis.IsRedisNil(err) {
+			if errs[i] = err; valkey.IsValkeyNil(err) {
 				errs[i] = ErrVersionMismatch
 			}
 		} else {
@@ -128,14 +128,14 @@ func (r *HashRepository[T]) SaveMulti(ctx context.Context, entities ...*T) []err
 	return errs
 }
 
-// Remove the entity under the redis key of `{prefix}:{id}`.
+// Remove the entity under the valkey key of `{prefix}:{id}`.
 func (r *HashRepository[T]) Remove(ctx context.Context, id string) error {
 	return r.client.Do(ctx, r.client.B().Del().Key(key(r.prefix, id)).Build()).Error()
 }
 
 // CreateIndex uses FT.CREATE from the RediSearch module to create inverted index under the name `hashidx:{prefix}`
 // You can use the cmdFn parameter to mutate the index construction command.
-func (r *HashRepository[T]) CreateIndex(ctx context.Context, cmdFn func(schema FtCreateSchema) rueidis.Completed) error {
+func (r *HashRepository[T]) CreateIndex(ctx context.Context, cmdFn func(schema FtCreateSchema) valkey.Completed) error {
 	return r.client.Do(ctx, cmdFn(r.client.B().FtCreate().Index(r.idx).OnHash().Prefix(1).Prefix(r.prefix+":").Schema())).Error()
 }
 
@@ -146,11 +146,11 @@ func (r *HashRepository[T]) DropIndex(ctx context.Context) error {
 
 // Search uses FT.SEARCH from the RediSearch module to search the index whose name is `hashidx:{prefix}`
 // It returns three values:
-// 1. total count of match results inside the redis, and note that it might be larger than returned search result.
+// 1. total count of match results inside the valkey, and note that it might be larger than returned search result.
 // 2. search result, and note that its length might smaller than the first return value.
 // 3. error if any
 // You can use the cmdFn parameter to mutate the search command.
-func (r *HashRepository[T]) Search(ctx context.Context, cmdFn func(search FtSearchIndex) rueidis.Completed) (n int64, s []*T, err error) {
+func (r *HashRepository[T]) Search(ctx context.Context, cmdFn func(search FtSearchIndex) valkey.Completed) (n int64, s []*T, err error) {
 	n, resp, err := r.client.Do(ctx, cmdFn(r.client.B().FtSearch().Index(r.idx))).AsFtSearch()
 	if err == nil {
 		s = make([]*T, len(resp))
@@ -164,7 +164,7 @@ func (r *HashRepository[T]) Search(ctx context.Context, cmdFn func(search FtSear
 }
 
 // Aggregate performs the FT.AGGREGATE and returns a *AggregateCursor for accessing the results
-func (r *HashRepository[T]) Aggregate(ctx context.Context, cmdFn func(agg FtAggregateIndex) rueidis.Completed) (cursor *AggregateCursor, err error) {
+func (r *HashRepository[T]) Aggregate(ctx context.Context, cmdFn func(agg FtAggregateIndex) valkey.Completed) (cursor *AggregateCursor, err error) {
 	cid, total, resp, err := r.client.Do(ctx, cmdFn(r.client.B().FtAggregate().Index(r.idx))).AsFtAggregateCursor()
 	if err != nil {
 		return nil, err
@@ -192,7 +192,7 @@ func (r *HashRepository[T]) fromFields(fields map[string]string) (*T, error) {
 	return &v, nil
 }
 
-var hashSaveScript = rueidis.NewLuaScript(`
+var hashSaveScript = valkey.NewLuaScript(`
 local v = redis.call('HGET',KEYS[1],ARGV[1])
 if (not v or v == ARGV[2])
 then

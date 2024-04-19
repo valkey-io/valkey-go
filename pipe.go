@@ -1,4 +1,4 @@
-package rueidis
+package valkey
 
 import (
 	"bufio"
@@ -16,24 +16,24 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/redis/rueidis/internal/cmds"
-	"github.com/redis/rueidis/internal/util"
+	"github.com/rueian/valkey-go/internal/cmds"
+	"github.com/rueian/valkey-go/internal/util"
 )
 
-const LibName = "rueidis"
+const LibName = "valkey"
 const LibVer = "1.0.34"
 
 var noHello = regexp.MustCompile("unknown command .?(HELLO|hello).?")
 
 type wire interface {
-	Do(ctx context.Context, cmd Completed) RedisResult
-	DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) RedisResult
-	DoMulti(ctx context.Context, multi ...Completed) *redisresults
-	DoMultiCache(ctx context.Context, multi ...CacheableTTL) *redisresults
+	Do(ctx context.Context, cmd Completed) ValkeyResult
+	DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) ValkeyResult
+	DoMulti(ctx context.Context, multi ...Completed) *valkeyresults
+	DoMultiCache(ctx context.Context, multi ...CacheableTTL) *valkeyresults
 	Receive(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error
-	DoStream(ctx context.Context, pool *pool, cmd Completed) RedisResultStream
-	DoMultiStream(ctx context.Context, pool *pool, multi ...Completed) MultiRedisResultStream
-	Info() map[string]RedisMessage
+	DoStream(ctx context.Context, pool *pool, cmd Completed) ValkeyResultStream
+	DoMultiStream(ctx context.Context, pool *pool, multi ...Completed) MultiValkeyResultStream
+	Info() map[string]ValkeyMessage
 	Version() int
 	Error() error
 	Close()
@@ -43,23 +43,23 @@ type wire interface {
 	SetOnCloseHook(fn func(error))
 }
 
-type redisresults struct {
-	s []RedisResult
+type valkeyresults struct {
+	s []ValkeyResult
 }
 
-func (r *redisresults) Capacity() int {
+func (r *valkeyresults) Capacity() int {
 	return cap(r.s)
 }
 
-func (r *redisresults) ResetLen(n int) {
+func (r *valkeyresults) ResetLen(n int) {
 	r.s = r.s[:n]
 	for i := 0; i < n; i++ {
-		r.s[i] = RedisResult{}
+		r.s[i] = ValkeyResult{}
 	}
 }
 
-var resultsp = util.NewPool(func(capacity int) *redisresults {
-	return &redisresults{s: make([]RedisResult, 0, capacity)}
+var resultsp = util.NewPool(func(capacity int) *valkeyresults {
+	return &valkeyresults{s: make([]ValkeyResult, 0, capacity)}
 })
 
 type cacheentries struct {
@@ -93,13 +93,13 @@ type pipe struct {
 	r               *bufio.Reader
 	w               *bufio.Writer
 	close           chan struct{}
-	onInvalidations func([]RedisMessage)
+	onInvalidations func([]ValkeyMessage)
 	r2psFn          func() (p *pipe, err error) // func to build pipe for resp2 pubsub
 	r2pipe          *pipe                       // internal pipe for resp2 pubsub only
 	ssubs           *subs                       // pubsub smessage subscriptions
 	nsubs           *subs                       // pubsub  message subscriptions
 	psubs           *subs                       // pubsub pmessage subscriptions
-	info            map[string]RedisMessage
+	info            map[string]ValkeyMessage
 	timeout         time.Duration
 	pinggap         time.Duration
 	maxFlushDelay   time.Duration
@@ -236,7 +236,7 @@ func _newPipe(connFn func() (net.Conn, error), option *ClientOption, r2ps, nobg 
 					// ignore READONLY command error
 					continue
 				}
-				if re, ok := err.(*RedisError); ok {
+				if re, ok := err.(*ValkeyError); ok {
 					if !r2 && noHello.MatchString(re.string) {
 						r2 = true
 						continue
@@ -357,8 +357,8 @@ func (p *pipe) _background() {
 	}
 
 	var (
-		resps []RedisResult
-		ch    chan RedisResult
+		resps []ValkeyResult
+		ch    chan ValkeyResult
 		cond  *sync.Cond
 	)
 
@@ -398,7 +398,7 @@ func (p *pipe) _backgroundWrite() (err error) {
 	var (
 		ones  = make([]Completed, 1)
 		multi []Completed
-		ch    chan RedisResult
+		ch    chan ValkeyResult
 
 		flushDelay = p.maxFlushDelay
 		flushStart = time.Time{}
@@ -453,12 +453,12 @@ func (p *pipe) _backgroundWrite() (err error) {
 
 func (p *pipe) _backgroundRead() (err error) {
 	var (
-		msg   RedisMessage
+		msg   ValkeyMessage
 		cond  *sync.Cond
 		ones  = make([]Completed, 1)
 		multi []Completed
-		resps []RedisResult
-		ch    chan RedisResult
+		resps []ValkeyResult
+		ch    chan ValkeyResult
 		ff    int // fulfilled count
 		skip  int // skip rest push messages
 		ver   = p.version
@@ -494,8 +494,8 @@ func (p *pipe) _backgroundRead() (err error) {
 				continue
 			}
 		} else if ver == 6 && len(msg.values) != 0 {
-			// This is a workaround for Redis 6's broken invalidation protocol: https://github.com/redis/redis/issues/8935
-			// When Redis 6 handles MULTI, MGET, or other multi-keys command,
+			// This is a workaround for Valkey 6's broken invalidation protocol: https://github.com/redis/redis/issues/8935
+			// When Valkey 6 handles MULTI, MGET, or other multi-keys command,
 			// it will send invalidation message immediately if it finds the keys are expired, thus causing the multi-keys command response to be broken.
 			// We fix this by fetching the next message and patch it back to the response.
 			i := 0
@@ -520,7 +520,7 @@ func (p *pipe) _backgroundRead() (err error) {
 			ones[0], multi, ch, resps, cond = p.queue.NextResultCh() // ch should not be nil, otherwise it must be a protocol bug
 			if ch == nil {
 				cond.L.Unlock()
-				// Redis will send sunsubscribe notification proactively in the event of slot migration.
+				// Valkey will send sunsubscribe notification proactively in the event of slot migration.
 				// We should ignore them and go fetch next message.
 				// We also treat all the other unsubscribe notifications just like sunsubscribe,
 				// so that we don't need to track how many channels we have subscribed to deal with wildcard unsubscribe command
@@ -559,7 +559,7 @@ func (p *pipe) _backgroundRead() (err error) {
 			}
 		}
 		if prply {
-			// Redis will send sunsubscribe notification proactively in the event of slot migration.
+			// Valkey will send sunsubscribe notification proactively in the event of slot migration.
 			// We should ignore them and go fetch next message.
 			// We also treat all the other unsubscribe notifications just like sunsubscribe,
 			// so that we don't need to track how many channels we have subscribed to deal with wildcard unsubscribe command
@@ -574,7 +574,7 @@ func (p *pipe) _backgroundRead() (err error) {
 				panic(protocolbug)
 			}
 			skip = len(multi[ff].Commands()) - 2
-			msg = RedisMessage{} // override successful subscribe/unsubscribe response to empty
+			msg = ValkeyMessage{} // override successful subscribe/unsubscribe response to empty
 		} else if multi[ff].NoReply() && msg.string == "QUEUED" {
 			panic(multiexecsub)
 		}
@@ -605,7 +605,7 @@ func (p *pipe) backgroundPing() {
 			}
 			ch := make(chan error, 1)
 			tm := time.NewTimer(p.timeout)
-			go func() { ch <- p.Do(context.Background(), cmds.PingCmd).NonRedisError() }()
+			go func() { ch <- p.Do(context.Background(), cmds.PingCmd).NonValkeyError() }()
 			select {
 			case <-tm.C:
 				err = context.DeadlineExceeded
@@ -624,7 +624,7 @@ func (p *pipe) backgroundPing() {
 	}
 }
 
-func (p *pipe) handlePush(values []RedisMessage) (reply bool, unsubscribe bool) {
+func (p *pipe) handlePush(values []ValkeyMessage) (reply bool, unsubscribe bool) {
 	if len(values) < 2 {
 		return
 	}
@@ -805,7 +805,7 @@ func (p *pipe) SetOnCloseHook(fn func(error)) {
 	p.clhks.Store(fn)
 }
 
-func (p *pipe) Info() map[string]RedisMessage {
+func (p *pipe) Info() map[string]ValkeyMessage {
 	return p.info
 }
 
@@ -813,7 +813,7 @@ func (p *pipe) Version() int {
 	return int(p.version)
 }
 
-func (p *pipe) Do(ctx context.Context, cmd Completed) (resp RedisResult) {
+func (p *pipe) Do(ctx context.Context, cmd Completed) (resp ValkeyResult) {
 	if err := ctx.Err(); err != nil {
 		return newErrResult(err)
 	}
@@ -880,7 +880,7 @@ queue:
 	atomic.AddInt32(&p.recvs, 1)
 	return resp
 abort:
-	go func(ch chan RedisResult) {
+	go func(ch chan ValkeyResult) {
 		<-ch
 		atomic.AddInt32(&p.waits, -1)
 		atomic.AddInt32(&p.recvs, 1)
@@ -888,7 +888,7 @@ abort:
 	return newErrResult(ctx.Err())
 }
 
-func (p *pipe) DoMulti(ctx context.Context, multi ...Completed) *redisresults {
+func (p *pipe) DoMulti(ctx context.Context, multi ...Completed) *valkeyresults {
 	resp := resultsp.Get(len(multi), len(multi))
 	if err := ctx.Err(); err != nil {
 		for i := 0; i < len(resp.s); i++ {
@@ -983,7 +983,7 @@ queue:
 	atomic.AddInt32(&p.recvs, 1)
 	return resp
 abort:
-	go func(resp *redisresults, ch chan RedisResult) {
+	go func(resp *valkeyresults, ch chan ValkeyResult) {
 		<-ch
 		resultsp.Put(resp)
 		atomic.AddInt32(&p.waits, -1)
@@ -997,9 +997,9 @@ abort:
 	return resp
 }
 
-type MultiRedisResultStream = RedisResultStream
+type MultiValkeyResultStream = ValkeyResultStream
 
-type RedisResultStream struct {
+type ValkeyResultStream struct {
 	p *pool
 	w *pipe
 	e error
@@ -1007,20 +1007,20 @@ type RedisResultStream struct {
 }
 
 // HasNext can be used in a for loop condition to check if a further WriteTo call is needed.
-func (s *RedisResultStream) HasNext() bool {
+func (s *ValkeyResultStream) HasNext() bool {
 	return s.n > 0 && s.e == nil
 }
 
-// Error returns the error happened when sending commands to redis or reading response from redis.
+// Error returns the error happened when sending commands to valkey or reading response from valkey.
 // Usually a user is not required to use this function because the error is also reported by the WriteTo.
-func (s *RedisResultStream) Error() error {
+func (s *ValkeyResultStream) Error() error {
 	return s.e
 }
 
-// WriteTo reads a redis response from redis and then write it to the given writer.
+// WriteTo reads a valkey response from valkey and then write it to the given writer.
 // This function is not thread safe and should be called sequentially to read multiple responses.
 // An io.EOF error will be reported if all responses are read.
-func (s *RedisResultStream) WriteTo(w io.Writer) (n int64, err error) {
+func (s *ValkeyResultStream) WriteTo(w io.Writer) (n int64, err error) {
 	if err = s.e; err == nil && s.n > 0 {
 		var clean bool
 		if n, err, clean = streamTo(s.w.r, w); !clean {
@@ -1041,11 +1041,11 @@ func (s *RedisResultStream) WriteTo(w io.Writer) (n int64, err error) {
 	return n, err
 }
 
-func (p *pipe) DoStream(ctx context.Context, pool *pool, cmd Completed) RedisResultStream {
+func (p *pipe) DoStream(ctx context.Context, pool *pool, cmd Completed) ValkeyResultStream {
 	cmds.CompletedCS(cmd).Verify()
 
 	if err := ctx.Err(); err != nil {
-		return RedisResultStream{e: err}
+		return ValkeyResultStream{e: err}
 	}
 
 	state := atomic.LoadInt32(&p.state)
@@ -1080,22 +1080,22 @@ func (p *pipe) DoStream(ctx context.Context, pool *pool, cmd Completed) RedisRes
 			p.conn.Close()
 			p.background() // start the background worker to clean up goroutines
 		} else {
-			return RedisResultStream{p: pool, w: p, n: 1}
+			return ValkeyResultStream{p: pool, w: p, n: 1}
 		}
 	}
 	atomic.AddInt32(&p.blcksig, -1)
 	atomic.AddInt32(&p.waits, -1)
 	pool.Store(p)
-	return RedisResultStream{e: p.Error()}
+	return ValkeyResultStream{e: p.Error()}
 }
 
-func (p *pipe) DoMultiStream(ctx context.Context, pool *pool, multi ...Completed) MultiRedisResultStream {
+func (p *pipe) DoMultiStream(ctx context.Context, pool *pool, multi ...Completed) MultiValkeyResultStream {
 	for _, cmd := range multi {
 		cmds.CompletedCS(cmd).Verify()
 	}
 
 	if err := ctx.Err(); err != nil {
-		return RedisResultStream{e: err}
+		return ValkeyResultStream{e: err}
 	}
 
 	state := atomic.LoadInt32(&p.state)
@@ -1139,16 +1139,16 @@ func (p *pipe) DoMultiStream(ctx context.Context, pool *pool, multi ...Completed
 			p.conn.Close()
 			p.background() // start the background worker to clean up goroutines
 		} else {
-			return RedisResultStream{p: pool, w: p, n: len(multi)}
+			return ValkeyResultStream{p: pool, w: p, n: len(multi)}
 		}
 	}
 	atomic.AddInt32(&p.blcksig, -1)
 	atomic.AddInt32(&p.waits, -1)
 	pool.Store(p)
-	return RedisResultStream{e: p.Error()}
+	return ValkeyResultStream{e: p.Error()}
 }
 
-func (p *pipe) syncDo(dl time.Time, dlOk bool, cmd Completed) (resp RedisResult) {
+func (p *pipe) syncDo(dl time.Time, dlOk bool, cmd Completed) (resp ValkeyResult) {
 	if dlOk {
 		if p.timeout > 0 {
 			defaultDeadline := time.Now().Add(p.timeout)
@@ -1163,7 +1163,7 @@ func (p *pipe) syncDo(dl time.Time, dlOk bool, cmd Completed) (resp RedisResult)
 		p.conn.SetDeadline(time.Time{})
 	}
 
-	var msg RedisMessage
+	var msg ValkeyMessage
 	err := writeCmd(p.w, cmd.Commands())
 	if err = p.w.Flush(); err == nil {
 		msg, err = syncRead(p.r)
@@ -1179,7 +1179,7 @@ func (p *pipe) syncDo(dl time.Time, dlOk bool, cmd Completed) (resp RedisResult)
 	return newResult(msg, err)
 }
 
-func (p *pipe) syncDoMulti(dl time.Time, dlOk bool, resp []RedisResult, multi []Completed) {
+func (p *pipe) syncDoMulti(dl time.Time, dlOk bool, resp []ValkeyResult, multi []Completed) {
 	if dlOk {
 		if p.timeout > 0 {
 			defaultDeadline := time.Now().Add(p.timeout)
@@ -1201,7 +1201,7 @@ func (p *pipe) syncDoMulti(dl time.Time, dlOk bool, resp []RedisResult, multi []
 	}
 process:
 	var err error
-	var msg RedisMessage
+	var msg ValkeyMessage
 	for _, cmd := range multi {
 		_ = writeCmd(p.w, cmd.Commands())
 	}
@@ -1228,7 +1228,7 @@ abort:
 	return
 }
 
-func syncRead(r *bufio.Reader) (m RedisMessage, err error) {
+func syncRead(r *bufio.Reader) (m ValkeyMessage, err error) {
 next:
 	if m, err = readNextMessage(r); err != nil {
 		return m, err
@@ -1239,7 +1239,7 @@ next:
 	return m, nil
 }
 
-func (p *pipe) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) RedisResult {
+func (p *pipe) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) ValkeyResult {
 	if p.cache == nil {
 		return p.Do(ctx, Completed(cmd))
 	}
@@ -1267,7 +1267,7 @@ func (p *pipe) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) Re
 	defer resultsp.Put(resp)
 	exec, err := resp.s[4].ToArray()
 	if err != nil {
-		if _, ok := err.(*RedisError); ok {
+		if _, ok := err.(*ValkeyError); ok {
 			err = ErrDoCacheAborted
 		}
 		p.cache.Cancel(ck, cc, err)
@@ -1276,11 +1276,11 @@ func (p *pipe) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) Re
 	return newResult(exec[1], nil)
 }
 
-func (p *pipe) doCacheMGet(ctx context.Context, cmd Cacheable, ttl time.Duration) RedisResult {
+func (p *pipe) doCacheMGet(ctx context.Context, cmd Cacheable, ttl time.Duration) ValkeyResult {
 	commands := cmd.Commands()
 	keys := len(commands) - 1
 	builder := cmds.NewBuilder(cmds.InitSlot)
-	result := RedisResult{val: RedisMessage{typ: '*', values: nil}}
+	result := ValkeyResult{val: ValkeyMessage{typ: '*', values: nil}}
 	mgetcc := cmds.MGetCacheCmd(cmd)
 	if mgetcc[0] == 'J' {
 		keys-- // the last one of JSON.MGET is a path, not a key
@@ -1293,7 +1293,7 @@ func (p *pipe) doCacheMGet(ctx context.Context, cmd Cacheable, ttl time.Duration
 		v, entry := p.cache.Flight(key, mgetcc, ttl, now)
 		if v.typ != 0 { // cache hit for one key
 			if len(result.val.values) == 0 {
-				result.val.values = make([]RedisMessage, keys)
+				result.val.values = make([]ValkeyMessage, keys)
 			}
 			result.val.values[i] = v
 			continue
@@ -1308,7 +1308,7 @@ func (p *pipe) doCacheMGet(ctx context.Context, cmd Cacheable, ttl time.Duration
 		rewrite = rewrite.Args(key)
 	}
 
-	var partial []RedisMessage
+	var partial []ValkeyMessage
 	if !rewrite.IsZero() {
 		var rewritten Completed
 		var keys int
@@ -1331,7 +1331,7 @@ func (p *pipe) doCacheMGet(ctx context.Context, cmd Cacheable, ttl time.Duration
 		defer resultsp.Put(resp)
 		exec, err := resp.s[len(multi)-1].ToArray()
 		if err != nil {
-			if _, ok := err.(*RedisError); ok {
+			if _, ok := err.(*ValkeyError); ok {
 				err = ErrDoCacheAborted
 			}
 			for _, key := range rewritten.Commands()[1 : keys+1] {
@@ -1354,7 +1354,7 @@ func (p *pipe) doCacheMGet(ctx context.Context, cmd Cacheable, ttl time.Duration
 	}
 
 	if len(result.val.values) == 0 {
-		result.val.values = make([]RedisMessage, keys)
+		result.val.values = make([]ValkeyMessage, keys)
 	}
 	for i, entry := range entries.e {
 		v, err := entry.Wait(ctx)
@@ -1376,7 +1376,7 @@ func (p *pipe) doCacheMGet(ctx context.Context, cmd Cacheable, ttl time.Duration
 	return result
 }
 
-func (p *pipe) DoMultiCache(ctx context.Context, multi ...CacheableTTL) *redisresults {
+func (p *pipe) DoMultiCache(ctx context.Context, multi ...CacheableTTL) *valkeyresults {
 	if p.cache == nil {
 		commands := make([]Completed, len(multi))
 		for i, ct := range multi {
@@ -1420,13 +1420,13 @@ func (p *pipe) DoMultiCache(ctx context.Context, multi ...CacheableTTL) *redisre
 		}
 	}
 
-	var resp *redisresults
+	var resp *valkeyresults
 	if len(missing) > 0 {
 		resp = p.DoMulti(ctx, missing...)
 		defer resultsp.Put(resp)
 		for i := 4; i < len(resp.s); i += 5 {
 			if err := resp.s[i].Error(); err != nil {
-				if _, ok := err.(*RedisError); ok {
+				if _, ok := err.(*ValkeyError); ok {
 					err = ErrDoCacheAborted
 				}
 				ck, cc := cmds.CacheKey(Cacheable(missing[i-1]))
@@ -1449,7 +1449,7 @@ func (p *pipe) DoMultiCache(ctx context.Context, multi ...CacheableTTL) *redisre
 			if results.s[j].val.typ == 0 && results.s[j].err == nil {
 				exec, err := resp.s[i].ToArray()
 				if err != nil {
-					if _, ok := err.(*RedisError); ok {
+					if _, ok := err.(*ValkeyError); ok {
 						err = ErrDoCacheAborted
 					}
 					results.s[j] = newErrResult(err)
@@ -1534,7 +1534,7 @@ const (
 	panicmgetcsc = "MGET and JSON.MGET in DoMultiCache are not implemented, use DoCache instead"
 )
 
-var cacheMark = &(RedisMessage{})
+var cacheMark = &(ValkeyMessage{})
 var errClosing = &errs{error: ErrClosing}
 
 type errs struct{ error }

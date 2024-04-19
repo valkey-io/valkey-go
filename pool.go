@@ -1,4 +1,4 @@
-package rueidis
+package valkey
 
 import "sync"
 

@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/oklog/ulid/v2"
-	"github.com/redis/rueidis"
+	"github.com/rueian/valkey-go"
 )
 
 type HashTestStruct struct {
-	Key   string `redis:",key"`
+	Key   string `valkey:",key"`
 	F2    *bool
 	F2N   *bool
 	F3    *string
@@ -22,7 +22,7 @@ type HashTestStruct struct {
 	F4    *int64
 	F4N   *int64
 	Val   []byte
-	Ver   int64 `redis:",ver"`
+	Ver   int64 `valkey:",ver"`
 	F1    bool
 	F5    *bool
 	Vec32 []float32
@@ -31,14 +31,14 @@ type HashTestStruct struct {
 }
 
 type Unsupported struct {
-	Key string `redis:",key"`
-	Ver int64  `redis:",ver"`
+	Key string `valkey:",key"`
+	Ver int64  `valkey:",ver"`
 	F1  int32
 }
 
 type Mismatch struct {
-	Key string `redis:",key"`
-	Ver int64  `redis:",ver"`
+	Key string `valkey:",key"`
+	Ver int64  `valkey:",ver"`
 	F1  int64
 	F2  *int64
 }
@@ -59,7 +59,7 @@ func TestNewHashRepositoryMismatch(t *testing.T) {
 	defer client.Close()
 
 	repo := NewHashRepository("hashmismatch", Mismatch{}, client)
-	if err := repo.CreateIndex(ctx, func(schema FtCreateSchema) rueidis.Completed {
+	if err := repo.CreateIndex(ctx, func(schema FtCreateSchema) valkey.Completed {
 		return schema.FieldName("F1").Tag().Build()
 	}); err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func TestNewHashRepositoryMismatch(t *testing.T) {
 		if _, err := repo.Fetch(ctx, e.Key); err == nil {
 			t.Fatal("Fetch not failed as expected")
 		}
-		if _, _, err := repo.Search(ctx, func(search FtSearchIndex) rueidis.Completed {
+		if _, _, err := repo.Search(ctx, func(search FtSearchIndex) valkey.Completed {
 			return search.Query("*").Build()
 		}); err == nil {
 			t.Fatal("Search not failed as expected")
@@ -94,7 +94,7 @@ func TestNewHashRepositoryMismatch(t *testing.T) {
 		if _, err := repo.Fetch(ctx, e.Key); err == nil {
 			t.Fatal("Fetch not failed as expected")
 		}
-		if _, _, err := repo.Search(ctx, func(search FtSearchIndex) rueidis.Completed {
+		if _, _, err := repo.Search(ctx, func(search FtSearchIndex) valkey.Completed {
 			return search.Query("*").Build()
 		}); err == nil {
 			t.Fatal("Search not failed as expected")
@@ -172,14 +172,14 @@ func TestNewHashRepository(t *testing.T) {
 		})
 
 		t.Run("Search", func(t *testing.T) {
-			err := repo.CreateIndex(ctx, func(schema FtCreateSchema) rueidis.Completed {
+			err := repo.CreateIndex(ctx, func(schema FtCreateSchema) valkey.Completed {
 				return schema.FieldName("Val").Text().Build()
 			})
 			time.Sleep(time.Second)
 			if err != nil {
 				t.Fatal(err)
 			}
-			n, records, err := repo.Search(ctx, func(search FtSearchIndex) rueidis.Completed {
+			n, records, err := repo.Search(ctx, func(search FtSearchIndex) valkey.Completed {
 				return search.Query("*").Build()
 			})
 			if err != nil {
@@ -200,14 +200,14 @@ func TestNewHashRepository(t *testing.T) {
 		})
 
 		t.Run("Search Sort", func(t *testing.T) {
-			err := repo.CreateIndex(ctx, func(schema FtCreateSchema) rueidis.Completed {
+			err := repo.CreateIndex(ctx, func(schema FtCreateSchema) valkey.Completed {
 				return schema.FieldName("Val").Text().Sortable().Build()
 			})
 			time.Sleep(time.Second)
 			if err != nil {
 				t.Fatal(err)
 			}
-			n, records, err := repo.Search(ctx, func(search FtSearchIndex) rueidis.Completed {
+			n, records, err := repo.Search(ctx, func(search FtSearchIndex) valkey.Completed {
 				return search.Query("*").Sortby("Val").Build()
 			})
 			if err != nil {
@@ -282,9 +282,9 @@ func TestNewHashRepository(t *testing.T) {
 }
 
 type HashTestTTLStruct struct {
-	Key  string    `redis:",key"`
-	Ver  int64     `redis:",ver"`
-	Exat time.Time `redis:",exat"`
+	Key  string    `valkey:",key"`
+	Ver  int64     `valkey:",ver"`
+	Exat time.Time `valkey:",exat"`
 }
 
 //gocyclo:ignore

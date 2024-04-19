@@ -1,4 +1,4 @@
-package rueidis
+package valkey
 
 import (
 	"context"
@@ -13,14 +13,14 @@ import (
 )
 
 type mockConn struct {
-	DoFn            func(cmd Completed) RedisResult
-	DoCacheFn       func(cmd Cacheable, ttl time.Duration) RedisResult
-	DoMultiFn       func(multi ...Completed) *redisresults
-	DoMultiCacheFn  func(multi ...CacheableTTL) *redisresults
+	DoFn            func(cmd Completed) ValkeyResult
+	DoCacheFn       func(cmd Cacheable, ttl time.Duration) ValkeyResult
+	DoMultiFn       func(multi ...Completed) *valkeyresults
+	DoMultiCacheFn  func(multi ...CacheableTTL) *valkeyresults
 	ReceiveFn       func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error
-	DoStreamFn      func(cmd Completed) RedisResultStream
-	DoMultiStreamFn func(cmd ...Completed) MultiRedisResultStream
-	InfoFn          func() map[string]RedisMessage
+	DoStreamFn      func(cmd Completed) ValkeyResultStream
+	DoMultiStreamFn func(cmd ...Completed) MultiValkeyResultStream
+	InfoFn          func() map[string]ValkeyMessage
 	VersionFn       func() int
 	ErrorFn         func() error
 	CloseFn         func()
@@ -30,8 +30,8 @@ type mockConn struct {
 	OverrideFn      func(c conn)
 	AddrFn          func() string
 
-	DoOverride      map[string]func(cmd Completed) RedisResult
-	DoCacheOverride map[string]func(cmd Cacheable, ttl time.Duration) RedisResult
+	DoOverride      map[string]func(cmd Completed) ValkeyResult
+	DoCacheOverride map[string]func(cmd Cacheable, ttl time.Duration) ValkeyResult
 	ReceiveOverride map[string]func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error
 }
 
@@ -61,35 +61,35 @@ func (m *mockConn) Store(w wire) {
 	}
 }
 
-func (m *mockConn) Do(ctx context.Context, cmd Completed) RedisResult {
+func (m *mockConn) Do(ctx context.Context, cmd Completed) ValkeyResult {
 	if fn := m.DoOverride[strings.Join(cmd.Commands(), " ")]; fn != nil {
 		return fn(cmd)
 	}
 	if m.DoFn != nil {
 		return m.DoFn(cmd)
 	}
-	return RedisResult{}
+	return ValkeyResult{}
 }
 
-func (m *mockConn) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) RedisResult {
+func (m *mockConn) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) ValkeyResult {
 	if fn := m.DoCacheOverride[strings.Join(cmd.Commands(), " ")]; fn != nil {
 		return fn(cmd, ttl)
 	}
 	if m.DoCacheFn != nil {
 		return m.DoCacheFn(cmd, ttl)
 	}
-	return RedisResult{}
+	return ValkeyResult{}
 }
 
-func (m *mockConn) DoMultiCache(ctx context.Context, multi ...CacheableTTL) *redisresults {
-	overrides := make([]RedisResult, 0, len(multi))
+func (m *mockConn) DoMultiCache(ctx context.Context, multi ...CacheableTTL) *valkeyresults {
+	overrides := make([]ValkeyResult, 0, len(multi))
 	for _, cmd := range multi {
 		if fn := m.DoCacheOverride[strings.Join(cmd.Cmd.Commands(), " ")]; fn != nil {
 			overrides = append(overrides, fn(cmd.Cmd, cmd.TTL))
 		}
 	}
 	if len(overrides) == len(multi) {
-		return &redisresults{s: overrides}
+		return &valkeyresults{s: overrides}
 	}
 	if m.DoMultiCacheFn != nil {
 		return m.DoMultiCacheFn(multi...)
@@ -97,15 +97,15 @@ func (m *mockConn) DoMultiCache(ctx context.Context, multi ...CacheableTTL) *red
 	return nil
 }
 
-func (m *mockConn) DoMulti(ctx context.Context, multi ...Completed) *redisresults {
-	overrides := make([]RedisResult, 0, len(multi))
+func (m *mockConn) DoMulti(ctx context.Context, multi ...Completed) *valkeyresults {
+	overrides := make([]ValkeyResult, 0, len(multi))
 	for _, cmd := range multi {
 		if fn := m.DoOverride[strings.Join(cmd.Commands(), " ")]; fn != nil {
 			overrides = append(overrides, fn(cmd))
 		}
 	}
 	if len(overrides) == len(multi) {
-		return &redisresults{s: overrides}
+		return &valkeyresults{s: overrides}
 	}
 	if m.DoMultiFn != nil {
 		return m.DoMultiFn(multi...)
@@ -123,18 +123,18 @@ func (m *mockConn) Receive(ctx context.Context, subscribe Completed, hdl func(me
 	return nil
 }
 
-func (m *mockConn) DoStream(ctx context.Context, cmd Completed) RedisResultStream {
+func (m *mockConn) DoStream(ctx context.Context, cmd Completed) ValkeyResultStream {
 	if m.DoStreamFn != nil {
 		return m.DoStreamFn(cmd)
 	}
-	return RedisResultStream{}
+	return ValkeyResultStream{}
 }
 
-func (m *mockConn) DoMultiStream(ctx context.Context, cmd ...Completed) MultiRedisResultStream {
+func (m *mockConn) DoMultiStream(ctx context.Context, cmd ...Completed) MultiValkeyResultStream {
 	if m.DoMultiStreamFn != nil {
 		return m.DoMultiStreamFn(cmd...)
 	}
-	return MultiRedisResultStream{}
+	return MultiValkeyResultStream{}
 }
 
 func (m *mockConn) CleanSubscriptions() {
@@ -149,7 +149,7 @@ func (m *mockConn) SetOnCloseHook(func(error)) {
 
 }
 
-func (m *mockConn) Info() map[string]RedisMessage {
+func (m *mockConn) Info() map[string]ValkeyMessage {
 	if m.InfoFn != nil {
 		return m.InfoFn()
 	}
@@ -243,11 +243,11 @@ func TestSingleClient(t *testing.T) {
 
 	t.Run("Delegate Do", func(t *testing.T) {
 		c := client.B().Get().Key("Do").Build()
-		m.DoFn = func(cmd Completed) RedisResult {
+		m.DoFn = func(cmd Completed) ValkeyResult {
 			if !reflect.DeepEqual(cmd.Commands(), c.Commands()) {
 				t.Fatalf("unexpected command %v", cmd)
 			}
-			return newResult(RedisMessage{typ: '+', string: "Do"}, nil)
+			return newResult(ValkeyMessage{typ: '+', string: "Do"}, nil)
 		}
 		if v, err := client.Do(context.Background(), c).ToString(); err != nil || v != "Do" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -256,8 +256,8 @@ func TestSingleClient(t *testing.T) {
 
 	t.Run("Delegate DoStream", func(t *testing.T) {
 		c := client.B().Get().Key("Do").Build()
-		m.DoStreamFn = func(cmd Completed) RedisResultStream {
-			return RedisResultStream{e: errors.New(cmd.Commands()[1])}
+		m.DoStreamFn = func(cmd Completed) ValkeyResultStream {
+			return ValkeyResultStream{e: errors.New(cmd.Commands()[1])}
 		}
 		if s := client.DoStream(context.Background(), c); s.Error().Error() != "Do" {
 			t.Fatalf("unexpected response %v", s.Error())
@@ -266,11 +266,11 @@ func TestSingleClient(t *testing.T) {
 
 	t.Run("Delegate DoMulti", func(t *testing.T) {
 		c := client.B().Get().Key("Do").Build()
-		m.DoMultiFn = func(cmd ...Completed) *redisresults {
+		m.DoMultiFn = func(cmd ...Completed) *valkeyresults {
 			if !reflect.DeepEqual(cmd[0].Commands(), c.Commands()) {
 				t.Fatalf("unexpected command %v", cmd)
 			}
-			return &redisresults{s: []RedisResult{newResult(RedisMessage{typ: '+', string: "Do"}, nil)}}
+			return &valkeyresults{s: []ValkeyResult{newResult(ValkeyMessage{typ: '+', string: "Do"}, nil)}}
 		}
 		if len(client.DoMulti(context.Background())) != 0 {
 			t.Fatalf("unexpected response length")
@@ -282,8 +282,8 @@ func TestSingleClient(t *testing.T) {
 
 	t.Run("Delegate DoMultiStream", func(t *testing.T) {
 		c := client.B().Get().Key("Do").Build()
-		m.DoMultiStreamFn = func(cmd ...Completed) MultiRedisResultStream {
-			return MultiRedisResultStream{e: errors.New(cmd[0].Commands()[1])}
+		m.DoMultiStreamFn = func(cmd ...Completed) MultiValkeyResultStream {
+			return MultiValkeyResultStream{e: errors.New(cmd[0].Commands()[1])}
 		}
 		if s := client.DoMultiStream(context.Background()); s.Error() != io.EOF {
 			t.Fatalf("unexpected response %v", err)
@@ -295,11 +295,11 @@ func TestSingleClient(t *testing.T) {
 
 	t.Run("Delegate DoCache", func(t *testing.T) {
 		c := client.B().Get().Key("DoCache").Cache()
-		m.DoCacheFn = func(cmd Cacheable, ttl time.Duration) RedisResult {
+		m.DoCacheFn = func(cmd Cacheable, ttl time.Duration) ValkeyResult {
 			if !reflect.DeepEqual(cmd.Commands(), c.Commands()) || ttl != 100 {
 				t.Fatalf("unexpected command %v, %v", cmd, ttl)
 			}
-			return newResult(RedisMessage{typ: '+', string: "DoCache"}, nil)
+			return newResult(ValkeyMessage{typ: '+', string: "DoCache"}, nil)
 		}
 		if v, err := client.DoCache(context.Background(), c, 100).ToString(); err != nil || v != "DoCache" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -308,11 +308,11 @@ func TestSingleClient(t *testing.T) {
 
 	t.Run("Delegate DoMultiCache", func(t *testing.T) {
 		c := client.B().Get().Key("DoCache").Cache()
-		m.DoMultiCacheFn = func(multi ...CacheableTTL) *redisresults {
+		m.DoMultiCacheFn = func(multi ...CacheableTTL) *valkeyresults {
 			if !reflect.DeepEqual(multi[0].Cmd.Commands(), c.Commands()) || multi[0].TTL != 100 {
 				t.Fatalf("unexpected command %v, %v", multi[0].Cmd, multi[0].TTL)
 			}
-			return &redisresults{s: []RedisResult{newResult(RedisMessage{typ: '+', string: "DoCache"}, nil)}}
+			return &valkeyresults{s: []ValkeyResult{newResult(ValkeyMessage{typ: '+', string: "DoCache"}, nil)}}
 		}
 		if len(client.DoMultiCache(context.Background())) != 0 {
 			t.Fatalf("unexpected response length")
@@ -336,9 +336,9 @@ func TestSingleClient(t *testing.T) {
 		}
 	})
 
-	t.Run("Delegate Receive Redis Err", func(t *testing.T) {
+	t.Run("Delegate Receive Valkey Err", func(t *testing.T) {
 		c := client.B().Subscribe().Channel("ch").Build()
-		e := &RedisError{}
+		e := &ValkeyError{}
 		m.ReceiveFn = func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 			return e
 		}
@@ -365,8 +365,8 @@ func TestSingleClient(t *testing.T) {
 		}
 	})
 
-	t.Run("Dedicated Delegate Receive Redis Err", func(t *testing.T) {
-		e := &RedisError{}
+	t.Run("Dedicated Delegate Receive Valkey Err", func(t *testing.T) {
+		e := &ValkeyError{}
 		w := &mockWire{
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 				return e
@@ -385,11 +385,11 @@ func TestSingleClient(t *testing.T) {
 	t.Run("Dedicated Delegate", func(t *testing.T) {
 		closed := false
 		w := &mockWire{
-			DoFn: func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "Delegate"}, nil)
+			DoFn: func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "Delegate"}, nil)
 			},
-			DoMultiFn: func(cmd ...Completed) *redisresults {
-				return &redisresults{s: []RedisResult{newResult(RedisMessage{typ: '+', string: "Delegate"}, nil)}}
+			DoMultiFn: func(cmd ...Completed) *valkeyresults {
+				return &valkeyresults{s: []ValkeyResult{newResult(ValkeyMessage{typ: '+', string: "Delegate"}, nil)}}
 			},
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 				return ErrClosing
@@ -451,11 +451,11 @@ func TestSingleClient(t *testing.T) {
 	t.Run("Dedicate Delegate", func(t *testing.T) {
 		closed := false
 		w := &mockWire{
-			DoFn: func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "Delegate"}, nil)
+			DoFn: func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "Delegate"}, nil)
 			},
-			DoMultiFn: func(cmd ...Completed) *redisresults {
-				return &redisresults{s: []RedisResult{newResult(RedisMessage{typ: '+', string: "Delegate"}, nil)}}
+			DoMultiFn: func(cmd ...Completed) *valkeyresults {
+				return &valkeyresults{s: []ValkeyResult{newResult(ValkeyMessage{typ: '+', string: "Delegate"}, nil)}}
 			},
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 				return ErrClosing
@@ -605,17 +605,17 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 		return fn(m), m
 	}
 
-	makeDoFn := func(results ...RedisResult) func(cmd Completed) RedisResult {
+	makeDoFn := func(results ...ValkeyResult) func(cmd Completed) ValkeyResult {
 		count := -1
-		return func(cmd Completed) RedisResult {
+		return func(cmd Completed) ValkeyResult {
 			count++
 			return results[count]
 		}
 	}
 
-	makeDoCacheFn := func(results ...RedisResult) func(cmd Cacheable, ttl time.Duration) RedisResult {
+	makeDoCacheFn := func(results ...ValkeyResult) func(cmd Cacheable, ttl time.Duration) ValkeyResult {
 		count := -1
-		return func(cmd Cacheable, ttl time.Duration) RedisResult {
+		return func(cmd Cacheable, ttl time.Duration) ValkeyResult {
 			count++
 			return results[count]
 		}
@@ -629,19 +629,19 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 		}
 	}
 
-	makeDoMultiFn := func(results ...[]RedisResult) func(multi ...Completed) *redisresults {
+	makeDoMultiFn := func(results ...[]ValkeyResult) func(multi ...Completed) *valkeyresults {
 		count := -1
-		return func(multi ...Completed) *redisresults {
+		return func(multi ...Completed) *valkeyresults {
 			count++
-			return &redisresults{s: results[count]}
+			return &valkeyresults{s: results[count]}
 		}
 	}
 
-	makeDoMultiCacheFn := func(results ...[]RedisResult) func(multi ...CacheableTTL) *redisresults {
+	makeDoMultiCacheFn := func(results ...[]ValkeyResult) func(multi ...CacheableTTL) *valkeyresults {
 		count := -1
-		return func(multi ...CacheableTTL) *redisresults {
+		return func(multi ...CacheableTTL) *valkeyresults {
 			count++
-			return &redisresults{s: results[count]}
+			return &valkeyresults{s: results[count]}
 		}
 	}
 
@@ -649,7 +649,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 		c, m := setup()
 		m.DoFn = makeDoFn(
 			newErrResult(ErrClosing),
-			newResult(RedisMessage{typ: '+', string: "Do"}, nil),
+			newResult(ValkeyMessage{typ: '+', string: "Do"}, nil),
 		)
 		if v, err := c.Do(context.Background(), c.B().Get().Key("Do").Build()).ToString(); err != nil || v != "Do" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -686,8 +686,8 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 	t.Run("Delegate DoMulti ReadOnly Retry", func(t *testing.T) {
 		c, m := setup()
 		m.DoMultiFn = makeDoMultiFn(
-			[]RedisResult{newErrResult(ErrClosing)},
-			[]RedisResult{newResult(RedisMessage{typ: '+', string: "Do"}, nil)},
+			[]ValkeyResult{newErrResult(ErrClosing)},
+			[]ValkeyResult{newResult(ValkeyMessage{typ: '+', string: "Do"}, nil)},
 		)
 		if v, err := c.DoMulti(context.Background(), c.B().Get().Key("Do").Build())[0].ToString(); err != nil || v != "Do" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -696,7 +696,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 
 	t.Run("Delegate DoMulti ReadOnly NoRetry - closed", func(t *testing.T) {
 		c, m := setup()
-		m.DoMultiFn = makeDoMultiFn([]RedisResult{newErrResult(ErrClosing)})
+		m.DoMultiFn = makeDoMultiFn([]ValkeyResult{newErrResult(ErrClosing)})
 		c.Close()
 		if v, err := c.DoMulti(context.Background(), c.B().Get().Key("Do").Build())[0].ToString(); err != ErrClosing {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -705,7 +705,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 
 	t.Run("Delegate DoMulti ReadOnly NoRetry - ctx done", func(t *testing.T) {
 		c, m := setup()
-		m.DoMultiFn = makeDoMultiFn([]RedisResult{newErrResult(ErrClosing)})
+		m.DoMultiFn = makeDoMultiFn([]ValkeyResult{newErrResult(ErrClosing)})
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		if v, err := c.DoMulti(ctx, c.B().Get().Key("Do").Build())[0].ToString(); err != ErrClosing {
@@ -715,7 +715,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 
 	t.Run("Delegate DoMulti Write NoRetry", func(t *testing.T) {
 		c, m := setup()
-		m.DoMultiFn = makeDoMultiFn([]RedisResult{newErrResult(ErrClosing)})
+		m.DoMultiFn = makeDoMultiFn([]ValkeyResult{newErrResult(ErrClosing)})
 		if v, err := c.DoMulti(context.Background(), c.B().Set().Key("Do").Value("V").Build())[0].ToString(); err != ErrClosing {
 			t.Fatalf("unexpected response %v %v", v, err)
 		}
@@ -725,7 +725,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 		c, m := setup()
 		m.DoCacheFn = makeDoCacheFn(
 			newErrResult(ErrClosing),
-			newResult(RedisMessage{typ: '+', string: "Do"}, nil),
+			newResult(ValkeyMessage{typ: '+', string: "Do"}, nil),
 		)
 		if v, err := c.DoCache(context.Background(), c.B().Get().Key("Do").Cache(), 0).ToString(); err != nil || v != "Do" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -754,8 +754,8 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 	t.Run("Delegate DoMultiCache Retry", func(t *testing.T) {
 		c, m := setup()
 		m.DoMultiCacheFn = makeDoMultiCacheFn(
-			[]RedisResult{newErrResult(ErrClosing)},
-			[]RedisResult{newResult(RedisMessage{typ: '+', string: "Do"}, nil)},
+			[]ValkeyResult{newErrResult(ErrClosing)},
+			[]ValkeyResult{newResult(ValkeyMessage{typ: '+', string: "Do"}, nil)},
 		)
 		if v, err := c.DoMultiCache(context.Background(), CT(c.B().Get().Key("Do").Cache(), 0))[0].ToString(); err != nil || v != "Do" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -764,7 +764,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 
 	t.Run("Delegate DoMultiCache NoRetry - closed", func(t *testing.T) {
 		c, m := setup()
-		m.DoMultiCacheFn = makeDoMultiCacheFn([]RedisResult{newErrResult(ErrClosing)})
+		m.DoMultiCacheFn = makeDoMultiCacheFn([]ValkeyResult{newErrResult(ErrClosing)})
 		c.Close()
 		if v, err := c.DoMultiCache(context.Background(), CT(c.B().Get().Key("Do").Cache(), 0))[0].ToString(); err != ErrClosing {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -773,7 +773,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 
 	t.Run("Delegate DoMultiCache ReadOnly NoRetry - ctx done", func(t *testing.T) {
 		c, m := setup()
-		m.DoMultiCacheFn = makeDoMultiCacheFn([]RedisResult{newErrResult(ErrClosing)})
+		m.DoMultiCacheFn = makeDoMultiCacheFn([]ValkeyResult{newErrResult(ErrClosing)})
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		if v, err := c.DoMultiCache(ctx, CT(c.B().Get().Key("Do").Cache(), 0))[0].ToString(); err != ErrClosing {
@@ -812,7 +812,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 		c, m := setup()
 		m.DoFn = makeDoFn(
 			newErrResult(ErrClosing),
-			newResult(RedisMessage{typ: '+', string: "Do"}, nil),
+			newResult(ValkeyMessage{typ: '+', string: "Do"}, nil),
 		)
 		m.AcquireFn = func() wire { return &mockWire{DoFn: m.DoFn} }
 		if ret := c.Dedicated(func(cc DedicatedClient) error {
@@ -864,8 +864,8 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 	t.Run("Dedicate Delegate DoMulti ReadOnly Retry", func(t *testing.T) {
 		c, m := setup()
 		m.DoMultiFn = makeDoMultiFn(
-			[]RedisResult{newErrResult(ErrClosing)},
-			[]RedisResult{newResult(RedisMessage{typ: '+', string: "Do"}, nil)},
+			[]ValkeyResult{newErrResult(ErrClosing)},
+			[]ValkeyResult{newResult(ValkeyMessage{typ: '+', string: "Do"}, nil)},
 		)
 		m.AcquireFn = func() wire { return &mockWire{DoMultiFn: m.DoMultiFn} }
 		if ret := c.Dedicated(func(cc DedicatedClient) error {
@@ -880,7 +880,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 
 	t.Run("Dedicate Delegate DoMulti ReadOnly NoRetry - broken", func(t *testing.T) {
 		c, m := setup()
-		m.DoMultiFn = makeDoMultiFn([]RedisResult{newErrResult(ErrClosing)})
+		m.DoMultiFn = makeDoMultiFn([]ValkeyResult{newErrResult(ErrClosing)})
 		m.ErrorFn = func() error { return ErrClosing }
 		m.AcquireFn = func() wire { return &mockWire{DoMultiFn: m.DoMultiFn, ErrorFn: m.ErrorFn} }
 		if ret := c.Dedicated(func(cc DedicatedClient) error {
@@ -892,7 +892,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 
 	t.Run("Dedicate Delegate DoMulti ReadOnly NoRetry - ctx done", func(t *testing.T) {
 		c, m := setup()
-		m.DoMultiFn = makeDoMultiFn([]RedisResult{newErrResult(ErrClosing)})
+		m.DoMultiFn = makeDoMultiFn([]ValkeyResult{newErrResult(ErrClosing)})
 		m.AcquireFn = func() wire { return &mockWire{DoMultiFn: m.DoMultiFn} }
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -905,7 +905,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 
 	t.Run("Dedicate Delegate DoMulti Write NoRetry", func(t *testing.T) {
 		c, m := setup()
-		m.DoMultiFn = makeDoMultiFn([]RedisResult{newErrResult(ErrClosing)})
+		m.DoMultiFn = makeDoMultiFn([]ValkeyResult{newErrResult(ErrClosing)})
 		m.AcquireFn = func() wire { return &mockWire{DoMultiFn: m.DoMultiFn} }
 		if ret := c.Dedicated(func(cc DedicatedClient) error {
 			return cc.DoMulti(context.Background(), c.B().Set().Key("Do").Value("Do").Build())[0].Error()

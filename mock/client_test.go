@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/redis/rueidis"
+	"github.com/rueian/valkey-go"
 	"go.uber.org/mock/gomock"
 )
 
@@ -18,27 +18,27 @@ func TestNewClient(t *testing.T) {
 	ctx := context.Background()
 	client := NewClient(ctrl)
 	{
-		client.EXPECT().Do(ctx, Match("GET", "a")).Return(Result(RedisNil()))
-		if err := client.Do(ctx, client.B().Get().Key("a").Build()).Error(); !rueidis.IsRedisNil(err) {
+		client.EXPECT().Do(ctx, Match("GET", "a")).Return(Result(ValkeyNil()))
+		if err := client.Do(ctx, client.B().Get().Key("a").Build()).Error(); !valkey.IsValkeyNil(err) {
 			t.Fatalf("unexpected err %v", err)
 		}
 	}
 	{
-		client.EXPECT().DoCache(ctx, Match("GET", "b"), time.Second).Return(Result(RedisNil()))
-		if err := client.DoCache(ctx, client.B().Get().Key("b").Cache(), time.Second).Error(); !rueidis.IsRedisNil(err) {
+		client.EXPECT().DoCache(ctx, Match("GET", "b"), time.Second).Return(Result(ValkeyNil()))
+		if err := client.DoCache(ctx, client.B().Get().Key("b").Cache(), time.Second).Error(); !valkey.IsValkeyNil(err) {
 			t.Fatalf("unexpected err %v", err)
 		}
 	}
 	{
 		client.EXPECT().DoMulti(ctx,
 			Match("GET", "c"),
-			Match("GET", "d")).Return([]rueidis.RedisResult{
-			Result(RedisNil()),
-			Result(RedisNil())})
+			Match("GET", "d")).Return([]valkey.ValkeyResult{
+			Result(ValkeyNil()),
+			Result(ValkeyNil())})
 		for _, resp := range client.DoMulti(ctx,
 			client.B().Get().Key("c").Build(),
 			client.B().Get().Key("d").Build()) {
-			if err := resp.Error(); !rueidis.IsRedisNil(err) {
+			if err := resp.Error(); !valkey.IsValkeyNil(err) {
 				t.Fatalf("unexpected err %v", err)
 			}
 		}
@@ -46,33 +46,33 @@ func TestNewClient(t *testing.T) {
 	{
 		client.EXPECT().DoMultiCache(ctx,
 			Match("GET", "e"),
-			Match("GET", "f")).Return([]rueidis.RedisResult{
-			Result(RedisNil()),
-			Result(RedisNil())})
+			Match("GET", "f")).Return([]valkey.ValkeyResult{
+			Result(ValkeyNil()),
+			Result(ValkeyNil())})
 		for _, resp := range client.DoMultiCache(ctx,
-			rueidis.CT(client.B().Get().Key("e").Cache(), time.Second),
-			rueidis.CT(client.B().Get().Key("f").Cache(), time.Second)) {
-			if err := resp.Error(); !rueidis.IsRedisNil(err) {
+			valkey.CT(client.B().Get().Key("e").Cache(), time.Second),
+			valkey.CT(client.B().Get().Key("f").Cache(), time.Second)) {
+			if err := resp.Error(); !valkey.IsValkeyNil(err) {
 				t.Fatalf("unexpected err %v", err)
 			}
 		}
 	}
 	{
-		client.EXPECT().DoStream(ctx, Match("GET", "e")).Return(RedisResultStream(RedisNil()))
+		client.EXPECT().DoStream(ctx, Match("GET", "e")).Return(ValkeyResultStream(ValkeyNil()))
 		s := client.DoStream(ctx, client.B().Get().Key("e").Build())
-		if _, err := s.WriteTo(io.Discard); !rueidis.IsRedisNil(err) {
+		if _, err := s.WriteTo(io.Discard); !valkey.IsValkeyNil(err) {
 			t.Fatalf("unexpected err %v", err)
 		}
 	}
 	{
-		client.EXPECT().DoMultiStream(ctx, Match("GET", "e"), Match("GET", "f")).Return(MultiRedisResultStream(RedisNil()))
+		client.EXPECT().DoMultiStream(ctx, Match("GET", "e"), Match("GET", "f")).Return(MultiValkeyResultStream(ValkeyNil()))
 		s := client.DoMultiStream(ctx, client.B().Get().Key("e").Build(), client.B().Get().Key("f").Build())
-		if _, err := s.WriteTo(io.Discard); !rueidis.IsRedisNil(err) {
+		if _, err := s.WriteTo(io.Discard); !valkey.IsValkeyNil(err) {
 			t.Fatalf("unexpected err %v", err)
 		}
 	}
 	{
-		client.EXPECT().Nodes().Return(map[string]rueidis.Client{"addr": client})
+		client.EXPECT().Nodes().Return(map[string]valkey.Client{"addr": client})
 		if nodes := client.Nodes(); nodes["addr"] != client {
 			t.Fatalf("unexpected val %v", nodes)
 		}
@@ -84,14 +84,14 @@ func TestNewClient(t *testing.T) {
 		<-ch
 	}
 	{
-		client.EXPECT().Receive(ctx, Match("SUBSCRIBE", "a"), gomock.Any()).DoAndReturn(func(ctx context.Context, cmd any, fn func(msg rueidis.PubSubMessage)) error {
-			fn(rueidis.PubSubMessage{
+		client.EXPECT().Receive(ctx, Match("SUBSCRIBE", "a"), gomock.Any()).DoAndReturn(func(ctx context.Context, cmd any, fn func(msg valkey.PubSubMessage)) error {
+			fn(valkey.PubSubMessage{
 				Channel: "s",
 				Message: "s",
 			})
 			return errors.New("any")
 		})
-		if err := client.Receive(ctx, client.B().Subscribe().Channel("a").Build(), func(msg rueidis.PubSubMessage) {
+		if err := client.Receive(ctx, client.B().Subscribe().Channel("a").Build(), func(msg valkey.PubSubMessage) {
 			if msg.Message != "s" && msg.Channel != "s" {
 				t.Fatalf("unexpected val %v", msg)
 			}
@@ -108,13 +108,13 @@ func TestNewClient(t *testing.T) {
 	}
 	{
 		dc := NewDedicatedClient(ctrl)
-		cb := func(c rueidis.DedicatedClient) error {
+		cb := func(c valkey.DedicatedClient) error {
 			if c != dc {
 				t.Fatalf("unexpected val %v", c)
 			}
 			return errors.New("any")
 		}
-		client.EXPECT().Dedicated(gomock.Any()).DoAndReturn(func(fn func(c rueidis.DedicatedClient) error) error {
+		client.EXPECT().Dedicated(gomock.Any()).DoAndReturn(func(fn func(c valkey.DedicatedClient) error) error {
 			return fn(dc)
 		})
 		if err := client.Dedicated(cb); err.Error() != "any" {
@@ -130,21 +130,21 @@ func TestNewDedicatedClient(t *testing.T) {
 	ctx := context.Background()
 	client := NewDedicatedClient(ctrl)
 	{
-		client.EXPECT().Do(ctx, Match("GET", "a")).Return(Result(RedisNil()))
-		if err := client.Do(ctx, client.B().Get().Key("a").Build()).Error(); !rueidis.IsRedisNil(err) {
+		client.EXPECT().Do(ctx, Match("GET", "a")).Return(Result(ValkeyNil()))
+		if err := client.Do(ctx, client.B().Get().Key("a").Build()).Error(); !valkey.IsValkeyNil(err) {
 			t.Fatalf("unexpected err %v", err)
 		}
 	}
 	{
 		client.EXPECT().DoMulti(ctx,
 			Match("GET", "c"),
-			Match("GET", "d")).Return([]rueidis.RedisResult{
-			Result(RedisNil()),
-			Result(RedisNil())})
+			Match("GET", "d")).Return([]valkey.ValkeyResult{
+			Result(ValkeyNil()),
+			Result(ValkeyNil())})
 		for _, resp := range client.DoMulti(ctx,
 			client.B().Get().Key("c").Build(),
 			client.B().Get().Key("d").Build()) {
-			if err := resp.Error(); !rueidis.IsRedisNil(err) {
+			if err := resp.Error(); !valkey.IsValkeyNil(err) {
 				t.Fatalf("unexpected err %v", err)
 			}
 		}
@@ -156,14 +156,14 @@ func TestNewDedicatedClient(t *testing.T) {
 		<-ch
 	}
 	{
-		client.EXPECT().Receive(ctx, Match("SUBSCRIBE", "a"), gomock.Any()).DoAndReturn(func(ctx context.Context, cmd any, fn func(msg rueidis.PubSubMessage)) error {
-			fn(rueidis.PubSubMessage{
+		client.EXPECT().Receive(ctx, Match("SUBSCRIBE", "a"), gomock.Any()).DoAndReturn(func(ctx context.Context, cmd any, fn func(msg valkey.PubSubMessage)) error {
+			fn(valkey.PubSubMessage{
 				Channel: "s",
 				Message: "s",
 			})
 			return errors.New("any")
 		})
-		if err := client.Receive(ctx, client.B().Subscribe().Channel("a").Build(), func(msg rueidis.PubSubMessage) {
+		if err := client.Receive(ctx, client.B().Subscribe().Channel("a").Build(), func(msg valkey.PubSubMessage) {
 			if msg.Message != "s" && msg.Channel != "s" {
 				t.Fatalf("unexpected val %v", msg)
 			}
@@ -172,14 +172,14 @@ func TestNewDedicatedClient(t *testing.T) {
 		}
 	}
 	{
-		client.EXPECT().SetPubSubHooks(gomock.Any()).Do(func(hooks rueidis.PubSubHooks) {
+		client.EXPECT().SetPubSubHooks(gomock.Any()).Do(func(hooks valkey.PubSubHooks) {
 			if hooks.OnMessage == nil || hooks.OnSubscription == nil {
 				t.Fatalf("unexpected val %v", hooks)
 			}
 		})
-		client.SetPubSubHooks(rueidis.PubSubHooks{
-			OnMessage:      func(m rueidis.PubSubMessage) {},
-			OnSubscription: func(s rueidis.PubSubSubscription) {},
+		client.SetPubSubHooks(valkey.PubSubHooks{
+			OnMessage:      func(m valkey.PubSubMessage) {},
+			OnSubscription: func(s valkey.PubSubSubscription) {},
 		})
 	}
 }

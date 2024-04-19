@@ -1,17 +1,17 @@
-package rueidis
+package valkey
 
-import "github.com/redis/rueidis/internal/cmds"
+import "github.com/rueian/valkey-go/internal/cmds"
 
 // Builder represents a command builder. It should only be created from the client.B() method.
 type Builder = cmds.Builder
 
-// Incomplete represents an incomplete Redis command. It should then be completed by calling the Build().
+// Incomplete represents an incomplete Valkey command. It should then be completed by calling the Build().
 type Incomplete = cmds.Incomplete
 
-// Completed represents a completed Redis command. It should only be created from the Build() of a command builder.
+// Completed represents a completed Valkey command. It should only be created from the Build() of a command builder.
 type Completed = cmds.Completed
 
-// Cacheable represents a completed Redis command which supports server-assisted client side caching,
+// Cacheable represents a completed Valkey command which supports server-assisted client side caching,
 // and it should be created by the Cache() of command builder.
 type Cacheable = cmds.Cacheable
 
@@ -21,7 +21,7 @@ type Cacheable = cmds.Cacheable
 //	c, release := client.Dedicate()
 //	defer release()
 //
-//	cmds := make(rueidis.Commands, 0, 10)
+//	cmds := make(valkey.Commands, 0, 10)
 //	for i := 0; i < 10; i++ {
 //	    cmds = append(cmds, c.B().Set().Key(strconv.Itoa(i)).Value(strconv.Itoa(i)).Build())
 //	}

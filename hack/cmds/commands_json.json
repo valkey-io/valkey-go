@@ -469,7 +469,7 @@
     "group": "json"
   },
   "JSON.RESP": {
-    "summary": "Returns the JSON value at path in Redis Serialization Protocol (RESP)",
+    "summary": "Returns the JSON value at path in Valkey Serialization Protocol (RESP)",
     "complexity": "O(N) when path is evaluated to a single value, where N is the size of the value, O(N) when path is evaluated to multiple values, where N is the size of the key",
     "arguments": [
       {

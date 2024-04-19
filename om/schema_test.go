@@ -7,29 +7,29 @@ import (
 )
 
 type s1 struct {
-	A int `redis:",key"`
+	A int `valkey:",key"`
 }
 
 type s2 struct {
-	A string `redis:",ver"`
+	A string `valkey:",ver"`
 }
 
 type s3 struct {
-	A       string `json:"-" redis:",key"`
-	B       int64  `redis:",ver"`
+	A       string `json:"-" valkey:",key"`
+	B       int64  `valkey:",ver"`
 	private int64
 }
 
 type s4 struct {
-	A       string `redis:",key"`
-	B       int64  `json:"-" redis:",ver"`
+	A       string `valkey:",key"`
+	B       int64  `json:"-" valkey:",ver"`
 	private int64
 }
 
 type s5 struct {
-	A string `redis:",key"`
-	B int64  `redis:",ver"`
-	C int64  `redis:",exat"`
+	A string `valkey:",key"`
+	B int64  `valkey:",ver"`
+	C int64  `valkey:",exat"`
 }
 
 func TestSchema(t *testing.T) {
@@ -40,35 +40,35 @@ func TestSchema(t *testing.T) {
 			t.Fatalf("unexpected msg %v", v)
 		}
 	})
-	t.Run("non string `redis:\",key\"`", func(t *testing.T) {
+	t.Run("non string `valkey:\",key\"`", func(t *testing.T) {
 		if v := recovered(func() {
 			newSchema(reflect.TypeOf(s1{}))
 		}); !strings.Contains(v, "should be a string") {
 			t.Fatalf("unexpected msg %v", v)
 		}
 	})
-	t.Run("non string `redis:\",ver\"`", func(t *testing.T) {
+	t.Run("non string `valkey:\",ver\"`", func(t *testing.T) {
 		if v := recovered(func() {
 			newSchema(reflect.TypeOf(s2{}))
 		}); !strings.Contains(v, "should be a int64") {
 			t.Fatalf("unexpected msg %v", v)
 		}
 	})
-	t.Run("missing `redis:\",key\"`", func(t *testing.T) {
+	t.Run("missing `valkey:\",key\"`", func(t *testing.T) {
 		if v := recovered(func() {
 			newSchema(reflect.TypeOf(s3{}))
-		}); !strings.Contains(v, "should have one field with `redis:\",key\"` tag") {
+		}); !strings.Contains(v, "should have one field with `valkey:\",key\"` tag") {
 			t.Fatalf("unexpected msg %v", v)
 		}
 	})
-	t.Run("missing `redis:\",ver\"`", func(t *testing.T) {
+	t.Run("missing `valkey:\",ver\"`", func(t *testing.T) {
 		if v := recovered(func() {
 			newSchema(reflect.TypeOf(s4{}))
-		}); !strings.Contains(v, "should have one field with `redis:\",ver\"` tag") {
+		}); !strings.Contains(v, "should have one field with `valkey:\",ver\"` tag") {
 			t.Fatalf("unexpected msg %v", v)
 		}
 	})
-	t.Run("non time.Time `redis:\",exat\"`", func(t *testing.T) {
+	t.Run("non time.Time `valkey:\",exat\"`", func(t *testing.T) {
 		if v := recovered(func() {
 			newSchema(reflect.TypeOf(s5{}))
 		}); !strings.Contains(v, "should be a time.Time") {

@@ -58,7 +58,7 @@
     ]
   },
   "TFUNCTION DELETE": {
-    "summary": "Delete a JavaScript library from Redis by name",
+    "summary": "Delete a JavaScript library from Valkey by name",
     "since": "2.0.0",
     "group": "triggers_and_functions",
     "complexity": "O(1)",
@@ -71,7 +71,7 @@
     ]
   },
   "TFUNCTION LOAD": {
-    "summary": "Load a new JavaScript library into Redis",
+    "summary": "Load a new JavaScript library into Valkey",
     "since": "2.0.0",
     "group": "triggers_and_functions",
     "complexity": "O(1)",
@@ -101,10 +101,10 @@
     ]
   },
   "TFUNCTION LIST": {
-    "summary": "List all JavaScript libraries loaded into Redis",
+    "summary": "List all JavaScript libraries loaded into Valkey",
     "since": "2.0.0",
     "group": "triggers_and_functions",
-    "complexity": "O(N) where N is the number of libraries loaded into Redis",
+    "complexity": "O(N) where N is the number of libraries loaded into Valkey",
     "arguments": [
       {
         "name": "library-name",

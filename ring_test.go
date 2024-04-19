@@ -1,4 +1,4 @@
-package rueidis
+package valkey
 
 import (
 	"runtime"
@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/redis/rueidis/internal/cmds"
+	"github.com/rueian/valkey-go/internal/cmds"
 )
 
 //gocyclo:ignore

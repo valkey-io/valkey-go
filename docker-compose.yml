@@ -1,12 +1,12 @@
 version: "3.8"
 
 services:
-  redis:
-    image: redis:7.2-rc-alpine
+  valkey:
+    image: valkey/valkey:7.2-alpine
     ports:
       - "6379:6379"
-  redislock:
-    image: redis:7.2-rc-alpine
+  valkeylock:
+    image: valkey/valkey:7.2-alpine
     ports:
       - "6376:6379"
   redis5:
@@ -18,11 +18,11 @@ services:
     ports:
       - "6344:6379"
   dragonflydb:
-    image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.4.0
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.17.1
     ports:
       - "6333:6379"
   kvrocks:
-    image: apache/kvrocks:2.2.0
+    image: apache/kvrocks:2.8.0
     ports:
       - "6666:6666"
   redisearch:
@@ -38,14 +38,14 @@ services:
     ports:
       - "6356:6379"
   sentinel:
-    image: redis:7.2-rc-alpine
+    image: valkey/valkey:7.2-alpine
     entrypoint:
       - /bin/sh
       - -c
       - |
-        redis-server --save "" --appendonly no --port 6380 &
+        valkey-server --save "" --appendonly no --port 6380 &
         echo "sentinel monitor test 127.0.0.1 6380 2\n" > sentinel.conf
-        redis-server sentinel.conf --sentinel
+        valkey-server sentinel.conf --sentinel
     ports:
       - "6380:6380"
       - "26379:26379"
@@ -62,15 +62,15 @@ services:
       - "6385:6385"
       - "26355:26379"
   cluster:
-    image: redis:7.2-rc-alpine
+    image: valkey/valkey:7.2-alpine
     entrypoint:
       - /bin/sh
       - -c
       - |
-        redis-server --port 7001 --save "" --appendonly no --cluster-enabled yes --cluster-config-file 7001.conf &
-        redis-server --port 7002 --save "" --appendonly no --cluster-enabled yes --cluster-config-file 7002.conf &
-        redis-server --port 7003 --save "" --appendonly no --cluster-enabled yes --cluster-config-file 7003.conf &
-        while ! redis-cli --cluster create 127.0.0.1:7001 127.0.0.1:7002 127.0.0.1:7003 --cluster-yes; do sleep 1; done
+        valkey-server --port 7001 --save "" --appendonly no --cluster-enabled yes --cluster-config-file 7001.conf &
+        valkey-server --port 7002 --save "" --appendonly no --cluster-enabled yes --cluster-config-file 7002.conf &
+        valkey-server --port 7003 --save "" --appendonly no --cluster-enabled yes --cluster-config-file 7003.conf &
+        while ! valkey-cli --cluster create 127.0.0.1:7001 127.0.0.1:7002 127.0.0.1:7003 --cluster-yes; do sleep 1; done
         wait
     ports:
       - "7001:7001"
@@ -107,15 +107,15 @@ services:
       - "7008:7008"
       - "7009:7009"
   clusteradapter:
-    image: redis:7.2-rc-alpine
+    image: valkey/valkey:7.2-alpine
     entrypoint:
       - /bin/sh
       - -c
       - |
-        redis-server --port 7010 --save "" --appendonly no --cluster-enabled yes --cluster-config-file 7010.conf &
-        redis-server --port 7011 --save "" --appendonly no --cluster-enabled yes --cluster-config-file 7011.conf &
-        redis-server --port 7012 --save "" --appendonly no --cluster-enabled yes --cluster-config-file 7012.conf &
-        while ! redis-cli --cluster create 127.0.0.1:7010 127.0.0.1:7011 127.0.0.1:7012 --cluster-yes; do sleep 1; done
+        valkey-server --port 7010 --save "" --appendonly no --cluster-enabled yes --cluster-config-file 7010.conf &
+        valkey-server --port 7011 --save "" --appendonly no --cluster-enabled yes --cluster-config-file 7011.conf &
+        valkey-server --port 7012 --save "" --appendonly no --cluster-enabled yes --cluster-config-file 7012.conf &
+        while ! valkey-cli --cluster create 127.0.0.1:7010 127.0.0.1:7011 127.0.0.1:7012 --cluster-yes; do sleep 1; done
         wait
     ports:
       - "7010:7010"

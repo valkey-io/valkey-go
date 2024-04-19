@@ -1,4 +1,4 @@
-package rueidis
+package valkey
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"sync/atomic"
 
-	"github.com/redis/rueidis/internal/util"
+	"github.com/rueian/valkey-go/internal/util"
 )
 
 // NewLuaScript creates a Lua instance whose Lua.Exec uses EVALSHA and EVAL.
@@ -23,7 +23,7 @@ func NewLuaScriptReadOnly(script string) *Lua {
 	return lua
 }
 
-// Lua represents a redis lua script. It should be created from the NewLuaScript() or NewLuaScriptReadOnly()
+// Lua represents a valkey lua script. It should be created from the NewLuaScript() or NewLuaScriptReadOnly()
 type Lua struct {
 	script   string
 	sha1     string
@@ -34,13 +34,13 @@ type Lua struct {
 // Exec the script to the given Client.
 // It will first try with the EVALSHA/EVALSHA_RO and then EVAL/EVAL_RO if first try failed.
 // Cross slot keys are prohibited if the Client is a cluster client.
-func (s *Lua) Exec(ctx context.Context, c Client, keys, args []string) (resp RedisResult) {
+func (s *Lua) Exec(ctx context.Context, c Client, keys, args []string) (resp ValkeyResult) {
 	if s.readonly {
 		resp = c.Do(ctx, c.B().EvalshaRo().Sha1(s.sha1).Numkeys(int64(len(keys))).Key(keys...).Arg(args...).Build())
 	} else {
 		resp = c.Do(ctx, c.B().Evalsha().Sha1(s.sha1).Numkeys(int64(len(keys))).Key(keys...).Arg(args...).Build())
 	}
-	if err, ok := IsRedisErr(resp.Error()); ok && err.IsNoScript() {
+	if err, ok := IsValkeyErr(resp.Error()); ok && err.IsNoScript() {
 		if s.readonly {
 			resp = c.Do(ctx, c.B().EvalRo().Script(s.script).Numkeys(int64(len(keys))).Key(keys...).Arg(args...).Build())
 		} else {
@@ -57,9 +57,9 @@ type LuaExec struct {
 }
 
 // ExecMulti exec the script multiple times by the provided LuaExec to the given Client.
-// It will first try SCRIPT LOAD the script to all redis nodes and then exec it with the EVALSHA/EVALSHA_RO.
+// It will first try SCRIPT LOAD the script to all valkey nodes and then exec it with the EVALSHA/EVALSHA_RO.
 // Cross slot keys within single LuaExec are prohibited if the Client is a cluster client.
-func (s *Lua) ExecMulti(ctx context.Context, c Client, multi ...LuaExec) (resp []RedisResult) {
+func (s *Lua) ExecMulti(ctx context.Context, c Client, multi ...LuaExec) (resp []ValkeyResult) {
 	var e atomic.Value
 	util.ParallelVals(s.maxp, c.Nodes(), func(n Client) {
 		if err := n.Do(ctx, n.B().ScriptLoad().Script(s.script).Build()).Error(); err != nil {
@@ -67,7 +67,7 @@ func (s *Lua) ExecMulti(ctx context.Context, c Client, multi ...LuaExec) (resp [
 		}
 	})
 	if err := e.Load(); err != nil {
-		resp = make([]RedisResult, len(multi))
+		resp = make([]ValkeyResult, len(multi))
 		for i := 0; i < len(resp); i++ {
 			resp[i] = newErrResult(err.(*errs).error)
 		}

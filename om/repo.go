@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/redis/rueidis"
-	"github.com/redis/rueidis/internal/cmds"
+	"github.com/rueian/valkey-go"
+	"github.com/rueian/valkey-go/internal/cmds"
 )
 
 type (
@@ -29,7 +29,7 @@ var (
 
 // IsRecordNotFound checks if the error is indicating the requested entity is not found.
 func IsRecordNotFound(err error) bool {
-	return rueidis.IsRedisNil(err) || err == ErrEmptyHashRecord
+	return valkey.IsValkeyNil(err) || err == ErrEmptyHashRecord
 }
 
 // Repository is backed by HashRepository or JSONRepository
@@ -37,12 +37,12 @@ type Repository[T any] interface {
 	NewEntity() (entity *T)
 	Fetch(ctx context.Context, id string) (*T, error)
 	FetchCache(ctx context.Context, id string, ttl time.Duration) (v *T, err error)
-	Search(ctx context.Context, cmdFn func(search FtSearchIndex) rueidis.Completed) (int64, []*T, error)
-	Aggregate(ctx context.Context, cmdFn func(agg FtAggregateIndex) rueidis.Completed) (*AggregateCursor, error)
+	Search(ctx context.Context, cmdFn func(search FtSearchIndex) valkey.Completed) (int64, []*T, error)
+	Aggregate(ctx context.Context, cmdFn func(agg FtAggregateIndex) valkey.Completed) (*AggregateCursor, error)
 	Save(ctx context.Context, entity *T) (err error)
 	SaveMulti(ctx context.Context, entity ...*T) (errs []error)
 	Remove(ctx context.Context, id string) error
-	CreateIndex(ctx context.Context, cmdFn func(schema FtCreateSchema) rueidis.Completed) error
+	CreateIndex(ctx context.Context, cmdFn func(schema FtCreateSchema) valkey.Completed) error
 	DropIndex(ctx context.Context) error
 	IndexName() string
 }

@@ -1,12 +1,12 @@
-module github.com/redis/rueidis/mock
+module github.com/rueian/valkey-go/mock
 
 go 1.20
 
-replace github.com/redis/rueidis => ../
+replace github.com/rueian/valkey-go => ../
 
 require (
-	github.com/redis/rueidis v1.0.34
+	github.com/rueian/valkey-go v1.0.34
 	go.uber.org/mock v0.3.0
 )
 
-require golang.org/x/sys v0.17.0 // indirect
+require golang.org/x/sys v0.19.0 // indirect

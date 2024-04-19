@@ -1,4 +1,4 @@
-package rueidis
+package valkey
 
 import (
 	"crypto/tls"
@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// ParseURL parses a redis URL into ClientOption.
+// ParseURL parses a valkey URL into ClientOption.
 // https://github.com/redis/redis-specifications/blob/master/uri/redis.txt
 // Example:
 //
@@ -47,7 +47,7 @@ func ParseURL(str string) (opt ClientOption, err error) {
 		}
 	case "redis":
 	default:
-		return opt, fmt.Errorf("redis: invalid URL scheme: %s", u.Scheme)
+		return opt, fmt.Errorf("valkey: invalid URL scheme: %s", u.Scheme)
 	}
 	if opt.InitAddress == nil {
 		host, addr := parseAddr(u.Host)
@@ -63,26 +63,26 @@ func ParseURL(str string) (opt ClientOption, err error) {
 	if u.Scheme != "unix" {
 		if ps := strings.Split(u.Path, "/"); len(ps) == 2 {
 			if opt.SelectDB, err = strconv.Atoi(ps[1]); err != nil {
-				return opt, fmt.Errorf("redis: invalid database number: %q", ps[1])
+				return opt, fmt.Errorf("valkey: invalid database number: %q", ps[1])
 			}
 		} else if len(ps) > 2 {
-			return opt, fmt.Errorf("redis: invalid URL path: %s", u.Path)
+			return opt, fmt.Errorf("valkey: invalid URL path: %s", u.Path)
 		}
 	}
 	q := u.Query()
 	if q.Has("db") {
 		if opt.SelectDB, err = strconv.Atoi(q.Get("db")); err != nil {
-			return opt, fmt.Errorf("redis: invalid database number: %q", q.Get("db"))
+			return opt, fmt.Errorf("valkey: invalid database number: %q", q.Get("db"))
 		}
 	}
 	if q.Has("dial_timeout") {
 		if opt.Dialer.Timeout, err = time.ParseDuration(q.Get("dial_timeout")); err != nil {
-			return opt, fmt.Errorf("redis: invalid dial timeout: %q", q.Get("dial_timeout"))
+			return opt, fmt.Errorf("valkey: invalid dial timeout: %q", q.Get("dial_timeout"))
 		}
 	}
 	if q.Has("write_timeout") {
 		if opt.Dialer.Timeout, err = time.ParseDuration(q.Get("write_timeout")); err != nil {
-			return opt, fmt.Errorf("redis: invalid write timeout: %q", q.Get("write_timeout"))
+			return opt, fmt.Errorf("valkey: invalid write timeout: %q", q.Get("write_timeout"))
 		}
 	}
 	for _, addr := range q["addr"] {

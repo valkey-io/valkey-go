@@ -1,4 +1,4 @@
-package rueidis
+package valkey
 
 import (
 	"bufio"
@@ -477,9 +477,9 @@ func TestReadAttr(t *testing.T) {
 			if m.values[1].integer != 9543892 {
 				t.Fatalf("unexpected msg values[0] %v", m.values[1])
 			}
-			if !reflect.DeepEqual(*m.attrs, RedisMessage{typ: '|', values: []RedisMessage{
+			if !reflect.DeepEqual(*m.attrs, ValkeyMessage{typ: '|', values: []ValkeyMessage{
 				{typ: '+', string: "key-popularity"},
-				{typ: '%', values: []RedisMessage{
+				{typ: '%', values: []ValkeyMessage{
 					{typ: '$', string: "a"},
 					{typ: ',', string: "0.1923"},
 					{typ: '$', string: "b"},
@@ -521,7 +521,7 @@ func TestReadRESP3NullStream(t *testing.T) {
 				t.Fatalf("unexpected no error: %v", i)
 			}
 		} else {
-			if m, ok := err.(*RedisError); !ok {
+			if m, ok := err.(*ValkeyError); !ok {
 				t.Fatal(err)
 			} else if m.typ != '_' {
 				t.Fatalf("unexpected msg type %v", m.typ)
@@ -546,7 +546,7 @@ func TestReadRESP2NullStringStream(t *testing.T) {
 				t.Fatalf("unexpected no error: %v", i)
 			}
 		} else {
-			if m, ok := err.(*RedisError); !ok {
+			if m, ok := err.(*ValkeyError); !ok {
 				t.Fatal(err)
 			} else if m.typ != '_' {
 				t.Fatalf("unexpected msg type %v", m.typ)
@@ -573,9 +573,9 @@ func TestReadRESP2NullStringInArray(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(m, RedisMessage{
+			if !reflect.DeepEqual(m, ValkeyMessage{
 				typ: '*',
-				values: []RedisMessage{
+				values: []ValkeyMessage{
 					{typ: '$', string: "hello"},
 					{typ: '_'},
 					{typ: '$', string: "world"},
@@ -638,7 +638,7 @@ func TWriterAndReader(t *testing.T, writer func(*bufio.Writer, byte, string) err
 }
 
 func TestRand(t *testing.T) {
-	read := func(in *bufio.Reader) (m RedisMessage, err error) {
+	read := func(in *bufio.Reader) (m ValkeyMessage, err error) {
 		m, err = readNextMessage(in)
 		return
 	}
@@ -646,7 +646,7 @@ func TestRand(t *testing.T) {
 		if _, err := read(bufio.NewReader(strings.NewReader(random(false)))); err != nil {
 			if err != io.EOF &&
 				err.Error() != "panic as expected" &&
-				err.Error() != "unbounded redis message" &&
+				err.Error() != "unbounded valkey message" &&
 				!strings.HasPrefix(err.Error(), unexpectedNoCRLF) &&
 				!strings.HasPrefix(err.Error(), unexpectedNumByte) &&
 				!strings.HasPrefix(err.Error(), unknownMessageType) {
@@ -659,7 +659,7 @@ func TestRand(t *testing.T) {
 func TestChunkedStringRand(t *testing.T) {
 	chunkedPrefix := "$?\n;"
 
-	read := func(in *bufio.Reader) (m RedisMessage, err error) {
+	read := func(in *bufio.Reader) (m ValkeyMessage, err error) {
 		m, err = readNextMessage(in)
 		return
 	}

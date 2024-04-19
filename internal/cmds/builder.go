@@ -69,10 +69,10 @@ func PutCacheable(c Cacheable) {
 	}
 }
 
-// Arbitrary allows user to build an arbitrary redis command with Builder.Arbitrary
+// Arbitrary allows user to build an arbitrary valkey command with Builder.Arbitrary
 type Arbitrary Completed
 
-// Arbitrary allows user to build an arbitrary redis command by following Arbitrary.Keys and Arbitrary.Args
+// Arbitrary allows user to build an arbitrary valkey command by following Arbitrary.Keys and Arbitrary.Args
 func (b Builder) Arbitrary(token ...string) (c Arbitrary) {
 	c = Arbitrary{cs: get(), ks: b.ks}
 	c.cs.s = append(c.cs.s, token...)
@@ -81,7 +81,7 @@ func (b Builder) Arbitrary(token ...string) (c Arbitrary) {
 
 // Keys calculate which key slot the command belongs to.
 // Users must use Keys to construct the key part of the command, otherwise
-// the command will not be sent to correct redis node.
+// the command will not be sent to correct valkey node.
 func (c Arbitrary) Keys(keys ...string) Arbitrary {
 	if c.ks&NoSlot == NoSlot {
 		for _, k := range keys {
@@ -147,7 +147,7 @@ func (c Arbitrary) IsZero() bool {
 }
 
 var (
-	arbitraryNoCommand = "Arbitrary should be provided with redis command"
+	arbitraryNoCommand = "Arbitrary should be provided with valkey command"
 	arbitrarySubscribe = "Arbitrary does not support SUBSCRIBE/UNSUBSCRIBE"
 	arbitraryMultiGet  = "Arbitrary.MultiGet is only valid for MGET and JSON.MGET"
 )

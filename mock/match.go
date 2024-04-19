@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/redis/rueidis"
+	"github.com/rueian/valkey-go"
 	"go.uber.org/mock/gomock"
 )
 
@@ -26,7 +26,7 @@ func (c *cmdMatcher) Matches(x any) bool {
 }
 
 func (c *cmdMatcher) String() string {
-	return fmt.Sprintf("redis command %v", c.expect)
+	return fmt.Sprintf("valkey command %v", c.expect)
 }
 
 func MatchFn(fn func(cmd []string) bool, description ...string) gomock.Matcher {
@@ -61,19 +61,19 @@ func format(v any) string {
 	sb := &strings.Builder{}
 	sb.WriteString("\n")
 	for i, c := range v.([]any) {
-		fmt.Fprintf(sb, "index %d redis command %v\n", i+1, commands(c))
+		fmt.Fprintf(sb, "index %d valkey command %v\n", i+1, commands(c))
 	}
 	return sb.String()
 }
 
 func commands(x any) any {
-	if cmd, ok := x.(rueidis.Completed); ok {
+	if cmd, ok := x.(valkey.Completed); ok {
 		return cmd.Commands()
 	}
-	if cmd, ok := x.(rueidis.Cacheable); ok {
+	if cmd, ok := x.(valkey.Cacheable); ok {
 		return cmd.Commands()
 	}
-	if cmd, ok := x.(rueidis.CacheableTTL); ok {
+	if cmd, ok := x.(valkey.CacheableTTL); ok {
 		return cmd.Cmd.Commands()
 	}
 	return x

@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"unsafe"
 
-	"github.com/redis/rueidis"
+	"github.com/rueian/valkey-go"
 )
 
 func newHashConvFactory(t reflect.Type, schema schema) *hashConvFactory {
@@ -53,7 +53,7 @@ func (r hashConv) ToHash() (fields map[string]string) {
 		ref := r.entity.Field(f.idx)
 		if f.conv.ValueToString == nil {
 			if bs, err := json.Marshal(ref.Interface()); err == nil {
-				fields[k] = rueidis.BinaryString(bs)
+				fields[k] = valkey.BinaryString(bs)
 			}
 		} else if v, ok := f.conv.ValueToString(ref); ok {
 			fields[k] = v
@@ -181,7 +181,7 @@ var converters = struct {
 	slice: map[reflect.Kind]converter{
 		reflect.Uint8: {
 			ValueToString: func(value reflect.Value) (string, bool) {
-				return rueidis.BinaryString(value.Bytes()), true
+				return valkey.BinaryString(value.Bytes()), true
 			},
 			StringToValue: func(value string) (reflect.Value, error) {
 				buf := unsafe.Slice(unsafe.StringData(value), len(value))
@@ -191,19 +191,19 @@ var converters = struct {
 		reflect.Float32: {
 			ValueToString: func(value reflect.Value) (string, bool) {
 				vs, ok := value.Interface().([]float32)
-				return rueidis.VectorString32(vs), ok
+				return valkey.VectorString32(vs), ok
 			},
 			StringToValue: func(value string) (reflect.Value, error) {
-				return reflect.ValueOf(rueidis.ToVector32(value)), nil
+				return reflect.ValueOf(valkey.ToVector32(value)), nil
 			},
 		},
 		reflect.Float64: {
 			ValueToString: func(value reflect.Value) (string, bool) {
 				vs, ok := value.Interface().([]float64)
-				return rueidis.VectorString64(vs), ok
+				return valkey.VectorString64(vs), ok
 			},
 			StringToValue: func(value string) (reflect.Value, error) {
-				return reflect.ValueOf(rueidis.ToVector64(value)), nil
+				return reflect.ValueOf(valkey.ToVector64(value)), nil
 			},
 		},
 		reflect.Struct: {

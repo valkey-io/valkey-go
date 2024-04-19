@@ -9,7 +9,7 @@ const (
 	noRetTag = uint16(1<<12) | readonly // make noRetTag can also be retried
 	mtGetTag = uint16(1<<11) | readonly // make mtGetTag can also be retried
 	scrRoTag = uint16(1<<10) | readonly // make scrRoTag can also be retried
-	// InitSlot indicates that the command be sent to any redis node in cluster
+	// InitSlot indicates that the command be sent to any valkey node in cluster
 	// When SendToReplicas is set, InitSlot command will be sent to primary node
 	InitSlot = uint16(1 << 14)
 	// NoSlot indicates that the command has no key slot specified
@@ -83,14 +83,14 @@ func ToBlock(c *Completed) {
 	c.cf |= blockTag
 }
 
-// Incomplete represents an incomplete Redis command. It should then be completed by calling the Build().
+// Incomplete represents an incomplete Valkey command. It should then be completed by calling the Build().
 type Incomplete struct {
 	cs *CommandSlice
 	cf int16 // use int16 instead of uint16 to make a difference with Completed
 	ks uint16
 }
 
-// Completed represents a completed Redis command, should be created by the Build() of command builder.
+// Completed represents a completed Valkey command, should be created by the Build() of command builder.
 type Completed struct {
 	cs *CommandSlice
 	cf uint16 // cmd flag
@@ -155,7 +155,7 @@ func (c Completed) SetSlot(key string) Completed {
 	return c
 }
 
-// Cacheable represents a completed Redis command which supports server-assisted client side caching,
+// Cacheable represents a completed Valkey command which supports server-assisted client side caching,
 // and it should be created by the Cache() of command builder.
 type Cacheable Completed
 

@@ -1,4 +1,4 @@
-package rueidis
+package valkey
 
 import (
 	"context"
@@ -13,12 +13,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/redis/rueidis/internal/cmds"
-	"github.com/redis/rueidis/internal/util"
+	"github.com/rueian/valkey-go/internal/cmds"
+	"github.com/rueian/valkey-go/internal/util"
 )
 
-// ErrNoSlot indicates that there is no redis node owns the key slot.
-var ErrNoSlot = errors.New("the slot has no redis node")
+// ErrNoSlot indicates that there is no valkey node owns the key slot.
+var ErrNoSlot = errors.New("the slot has no valkey node")
 var ErrReplicaOnlyConflict = errors.New("ReplicaOnly conflicts with SendToReplicas option")
 
 type retry struct {
@@ -176,7 +176,7 @@ func (c *clusterClient) lazyRefresh() {
 
 type clusterslots struct {
 	addr  string
-	reply RedisResult
+	reply ValkeyResult
 	ver   int
 }
 
@@ -351,9 +351,9 @@ func parseEndpoint(fallback, endpoint string, port int64) string {
 	return net.JoinHostPort(endpoint, strconv.FormatInt(port, 10))
 }
 
-// parseSlots - map redis slots for each redis nodes/addresses
+// parseSlots - map valkey slots for each valkey nodes/addresses
 // defaultAddr is needed in case the node does not know its own IP
-func parseSlots(slots RedisMessage, defaultAddr string) map[string]group {
+func parseSlots(slots ValkeyMessage, defaultAddr string) map[string]group {
 	groups := make(map[string]group, len(slots.values))
 	for _, v := range slots.values {
 		master := parseEndpoint(defaultAddr, v.values[2].values[0].string, v.values[2].values[1].integer)
@@ -376,9 +376,9 @@ func parseSlots(slots RedisMessage, defaultAddr string) map[string]group {
 	return groups
 }
 
-// parseShards - map redis shards for each redis nodes/addresses
+// parseShards - map valkey shards for each valkey nodes/addresses
 // defaultAddr is needed in case the node does not know its own IP
-func parseShards(shards RedisMessage, defaultAddr string, tls bool) map[string]group {
+func parseShards(shards ValkeyMessage, defaultAddr string, tls bool) map[string]group {
 	groups := make(map[string]group, len(shards.values))
 	for _, v := range shards.values {
 		m := -1
@@ -476,14 +476,14 @@ func (c *clusterClient) B() Builder {
 	return c.cmd
 }
 
-func (c *clusterClient) Do(ctx context.Context, cmd Completed) (resp RedisResult) {
-	if resp = c.do(ctx, cmd); resp.NonRedisError() == nil { // not recycle cmds if error, since cmds may be used later in pipe. consider recycle them by pipe
+func (c *clusterClient) Do(ctx context.Context, cmd Completed) (resp ValkeyResult) {
+	if resp = c.do(ctx, cmd); resp.NonValkeyError() == nil { // not recycle cmds if error, since cmds may be used later in pipe. consider recycle them by pipe
 		cmds.PutCompleted(cmd)
 	}
 	return resp
 }
 
-func (c *clusterClient) do(ctx context.Context, cmd Completed) (resp RedisResult) {
+func (c *clusterClient) do(ctx context.Context, cmd Completed) (resp ValkeyResult) {
 retry:
 	cc, err := c.pick(ctx, cmd.Slot(), c.toReplica(cmd))
 	if err != nil {
@@ -616,7 +616,7 @@ func (c *clusterClient) pickMulti(ctx context.Context, multi []Completed) (*conn
 	return conns, slot, toReplica, nil
 }
 
-func (c *clusterClient) doresultfn(ctx context.Context, results *redisresults, retries *connretry, mu *sync.Mutex, cc conn, cIndexes []int, commands []Completed, resps []RedisResult) {
+func (c *clusterClient) doresultfn(ctx context.Context, results *valkeyresults, retries *connretry, mu *sync.Mutex, cc conn, cIndexes []int, commands []Completed, resps []ValkeyResult) {
 	for i, resp := range resps {
 		ii := cIndexes[i]
 		cm := commands[i]
@@ -649,7 +649,7 @@ func (c *clusterClient) doresultfn(ctx context.Context, results *redisresults, r
 	}
 }
 
-func (c *clusterClient) doretry(ctx context.Context, cc conn, results *redisresults, retries *connretry, re *retry, mu *sync.Mutex, wg *sync.WaitGroup) {
+func (c *clusterClient) doretry(ctx context.Context, cc conn, results *valkeyresults, retries *connretry, re *retry, mu *sync.Mutex, wg *sync.WaitGroup) {
 	if len(re.commands) != 0 {
 		resps := cc.DoMulti(ctx, re.commands...)
 		c.doresultfn(ctx, results, retries, mu, cc, re.cIndexes, re.commands, resps.s)
@@ -666,7 +666,7 @@ func (c *clusterClient) doretry(ctx context.Context, cc conn, results *redisresu
 	wg.Done()
 }
 
-func (c *clusterClient) DoMulti(ctx context.Context, multi ...Completed) []RedisResult {
+func (c *clusterClient) DoMulti(ctx context.Context, multi ...Completed) []ValkeyResult {
 	if len(multi) == 0 {
 		return nil
 	}
@@ -704,14 +704,14 @@ retry:
 	}
 
 	for i, cmd := range multi {
-		if results.s[i].NonRedisError() == nil {
+		if results.s[i].NonValkeyError() == nil {
 			cmds.PutCompleted(cmd)
 		}
 	}
 	return results.s
 }
 
-func fillErrs(n int, err error) (results []RedisResult) {
+func fillErrs(n int, err error) (results []ValkeyResult) {
 	results = resultsp.Get(n, n).s
 	for i := range results {
 		results[i] = newErrResult(err)
@@ -719,7 +719,7 @@ func fillErrs(n int, err error) (results []RedisResult) {
 	return results
 }
 
-func (c *clusterClient) doMulti(ctx context.Context, slot uint16, multi []Completed, toReplica bool) []RedisResult {
+func (c *clusterClient) doMulti(ctx context.Context, slot uint16, multi []Completed, toReplica bool) []ValkeyResult {
 retry:
 	cc, err := c.pick(ctx, slot, toReplica)
 	if err != nil {
@@ -752,7 +752,7 @@ process:
 	return resps.s
 }
 
-func (c *clusterClient) doCache(ctx context.Context, cmd Cacheable, ttl time.Duration) (resp RedisResult) {
+func (c *clusterClient) doCache(ctx context.Context, cmd Cacheable, ttl time.Duration) (resp ValkeyResult) {
 retry:
 	cc, err := c.pick(ctx, cmd.Slot(), c.toReplica(Completed(cmd)))
 	if err != nil {
@@ -778,15 +778,15 @@ process:
 	return resp
 }
 
-func (c *clusterClient) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) (resp RedisResult) {
+func (c *clusterClient) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) (resp ValkeyResult) {
 	resp = c.doCache(ctx, cmd, ttl)
-	if err := resp.NonRedisError(); err == nil || err == ErrDoCacheAborted {
+	if err := resp.NonValkeyError(); err == nil || err == ErrDoCacheAborted {
 		cmds.PutCacheable(cmd)
 	}
 	return resp
 }
 
-func askingMulti(cc conn, ctx context.Context, multi []Completed) *redisresults {
+func askingMulti(cc conn, ctx context.Context, multi []Completed) *valkeyresults {
 	commands := make([]Completed, 0, len(multi)*2)
 	for _, cmd := range multi {
 		commands = append(commands, cmds.AskingCmd, cmd)
@@ -800,7 +800,7 @@ func askingMulti(cc conn, ctx context.Context, multi []Completed) *redisresults 
 	return results
 }
 
-func askingMultiCache(cc conn, ctx context.Context, multi []CacheableTTL) *redisresults {
+func askingMultiCache(cc conn, ctx context.Context, multi []CacheableTTL) *valkeyresults {
 	commands := make([]Completed, 0, len(multi)*6)
 	for _, cmd := range multi {
 		ck, _ := cmds.CacheKey(cmd.Cmd)
@@ -896,7 +896,7 @@ func (c *clusterClient) pickMultiCache(ctx context.Context, multi []CacheableTTL
 	return conns, nil
 }
 
-func (c *clusterClient) resultcachefn(ctx context.Context, results *redisresults, retries *connretrycache, mu *sync.Mutex, cc conn, cIndexes []int, commands []CacheableTTL, resps []RedisResult) {
+func (c *clusterClient) resultcachefn(ctx context.Context, results *valkeyresults, retries *connretrycache, mu *sync.Mutex, cc conn, cIndexes []int, commands []CacheableTTL, resps []ValkeyResult) {
 	for i, resp := range resps {
 		ii := cIndexes[i]
 		cm := commands[i]
@@ -929,7 +929,7 @@ func (c *clusterClient) resultcachefn(ctx context.Context, results *redisresults
 	}
 }
 
-func (c *clusterClient) doretrycache(ctx context.Context, cc conn, results *redisresults, retries *connretrycache, re *retrycache, mu *sync.Mutex, wg *sync.WaitGroup) {
+func (c *clusterClient) doretrycache(ctx context.Context, cc conn, results *valkeyresults, retries *connretrycache, re *retrycache, mu *sync.Mutex, wg *sync.WaitGroup) {
 	if len(re.commands) != 0 {
 		resps := cc.DoMultiCache(ctx, re.commands...)
 		c.resultcachefn(ctx, results, retries, mu, cc, re.cIndexes, re.commands, resps.s)
@@ -946,7 +946,7 @@ func (c *clusterClient) doretrycache(ctx context.Context, cc conn, results *redi
 	wg.Done()
 }
 
-func (c *clusterClient) DoMultiCache(ctx context.Context, multi ...CacheableTTL) []RedisResult {
+func (c *clusterClient) DoMultiCache(ctx context.Context, multi ...CacheableTTL) []ValkeyResult {
 	if len(multi) == 0 {
 		return nil
 	}
@@ -977,7 +977,7 @@ retry:
 	}
 
 	for i, cmd := range multi {
-		if err := results.s[i].NonRedisError(); err == nil || err == ErrDoCacheAborted {
+		if err := results.s[i].NonValkeyError(); err == nil || err == ErrDoCacheAborted {
 			cmds.PutCacheable(cmd.Cmd)
 		}
 	}
@@ -1002,19 +1002,19 @@ ret:
 	return err
 }
 
-func (c *clusterClient) DoStream(ctx context.Context, cmd Completed) RedisResultStream {
+func (c *clusterClient) DoStream(ctx context.Context, cmd Completed) ValkeyResultStream {
 	cc, err := c.pick(ctx, cmd.Slot(), c.toReplica(cmd))
 	if err != nil {
-		return RedisResultStream{e: err}
+		return ValkeyResultStream{e: err}
 	}
 	ret := cc.DoStream(ctx, cmd)
 	cmds.PutCompleted(cmd)
 	return ret
 }
 
-func (c *clusterClient) DoMultiStream(ctx context.Context, multi ...Completed) MultiRedisResultStream {
+func (c *clusterClient) DoMultiStream(ctx context.Context, multi ...Completed) MultiValkeyResultStream {
 	if len(multi) == 0 {
-		return RedisResultStream{e: io.EOF}
+		return ValkeyResultStream{e: io.EOF}
 	}
 	slot := multi[0].Slot()
 	repl := c.toReplica(multi[0])
@@ -1030,7 +1030,7 @@ func (c *clusterClient) DoMultiStream(ctx context.Context, multi ...Completed) M
 	}
 	cc, err := c.pick(ctx, slot, repl)
 	if err != nil {
-		return RedisResultStream{e: err}
+		return ValkeyResultStream{e: err}
 	}
 	ret := cc.DoMultiStream(ctx, multi...)
 	for _, cmd := range multi {
@@ -1072,7 +1072,7 @@ func (c *clusterClient) Close() {
 
 func (c *clusterClient) shouldRefreshRetry(err error, ctx context.Context) (addr string, mode RedirectMode) {
 	if err != nil && atomic.LoadUint32(&c.stop) == 0 {
-		if err, ok := err.(*RedisError); ok {
+		if err, ok := err.(*ValkeyError); ok {
 			if addr, ok = err.IsMoved(); ok {
 				mode = RedirectMove
 			} else if addr, ok = err.IsAsk(); ok {
@@ -1158,7 +1158,7 @@ func (c *dedicatedClusterClient) B() Builder {
 	return c.cmd
 }
 
-func (c *dedicatedClusterClient) Do(ctx context.Context, cmd Completed) (resp RedisResult) {
+func (c *dedicatedClusterClient) Do(ctx context.Context, cmd Completed) (resp ValkeyResult) {
 retry:
 	if w, err := c.acquire(ctx, cmd.Slot()); err != nil {
 		resp = newErrResult(err)
@@ -1172,13 +1172,13 @@ retry:
 			}
 		}
 	}
-	if resp.NonRedisError() == nil {
+	if resp.NonValkeyError() == nil {
 		cmds.PutCompleted(cmd)
 	}
 	return resp
 }
 
-func (c *dedicatedClusterClient) DoMulti(ctx context.Context, multi ...Completed) (resp []RedisResult) {
+func (c *dedicatedClusterClient) DoMulti(ctx context.Context, multi ...Completed) (resp []ValkeyResult) {
 	if len(multi) == 0 {
 		return nil
 	}
@@ -1210,7 +1210,7 @@ retry:
 		}
 	}
 	for i, cmd := range multi {
-		if resp[i].NonRedisError() == nil {
+		if resp[i].NonValkeyError() == nil {
 			cmds.PutCompleted(cmd)
 		}
 	}

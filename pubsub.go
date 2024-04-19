@@ -1,11 +1,11 @@
-package rueidis
+package valkey
 
 import (
 	"sync"
 	"sync/atomic"
 )
 
-// PubSubMessage represent a pubsub message from redis
+// PubSubMessage represent a pubsub message from valkey
 type PubSubMessage struct {
 	// Pattern is only available with pmessage.
 	Pattern string

@@ -46,29 +46,29 @@ func newSchema(t reflect.Type) schema {
 
 		if f.isKey {
 			if sf.Type.Kind() != reflect.String {
-				panic(fmt.Sprintf("field with tag `redis:\",key\"` in schema %q should be a string", t))
+				panic(fmt.Sprintf("field with tag `valkey:\",key\"` in schema %q should be a string", t))
 			}
 			s.key = &f
 		}
 		if f.isVer {
 			if sf.Type.Kind() != reflect.Int64 {
-				panic(fmt.Sprintf("field with tag `redis:\",ver\"` in schema %q should be a int64", t))
+				panic(fmt.Sprintf("field with tag `valkey:\",ver\"` in schema %q should be a int64", t))
 			}
 			s.ver = &f
 		}
 		if f.isExt {
 			if sf.Type != reflect.TypeOf(time.Time{}) {
-				panic(fmt.Sprintf("field with tag `redis:\",exat\"` in schema %q should be a time.Time", t))
+				panic(fmt.Sprintf("field with tag `valkey:\",exat\"` in schema %q should be a time.Time", t))
 			}
 			s.ext = &f
 		}
 	}
 
 	if s.key == nil {
-		panic(fmt.Sprintf("schema %q should have one field with `redis:\",key\"` tag", t))
+		panic(fmt.Sprintf("schema %q should have one field with `valkey:\",key\"` tag", t))
 	}
 	if s.ver == nil {
-		panic(fmt.Sprintf("schema %q should have one field with `redis:\",ver\"` tag", t))
+		panic(fmt.Sprintf("schema %q should have one field with `valkey:\",ver\"` tag", t))
 	}
 
 	return s
@@ -83,7 +83,7 @@ func parse(f reflect.StructField) (field field) {
 		field.name = vs[0]
 	}
 
-	v, _ = f.Tag.Lookup("redis")
+	v, _ = f.Tag.Lookup("valkey")
 	field.isKey = strings.Contains(v, ",key")
 	field.isVer = strings.Contains(v, ",ver")
 	field.isExt = strings.Contains(v, ",exat")

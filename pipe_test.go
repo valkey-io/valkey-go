@@ -1,4 +1,4 @@
-package rueidis
+package valkey
 
 import (
 	"bufio"
@@ -16,84 +16,84 @@ import (
 	"testing"
 	"time"
 
-	"github.com/redis/rueidis/internal/cmds"
+	"github.com/rueian/valkey-go/internal/cmds"
 )
 
-type redisExpect struct {
-	*redisMock
+type valkeyExpect struct {
+	*valkeyMock
 	err error
 }
 
-type redisMock struct {
+type valkeyMock struct {
 	t    *testing.T
 	buf  *bufio.Reader
 	conn net.Conn
 }
 
-func (r *redisMock) ReadMessage() (RedisMessage, error) {
+func (r *valkeyMock) ReadMessage() (ValkeyMessage, error) {
 	m, err := readNextMessage(r.buf)
 	if err != nil {
-		return RedisMessage{}, err
+		return ValkeyMessage{}, err
 	}
 	return m, nil
 }
 
-func (r *redisMock) Expect(expected ...string) *redisExpect {
+func (r *valkeyMock) Expect(expected ...string) *valkeyExpect {
 	if len(expected) == 0 {
-		return &redisExpect{redisMock: r}
+		return &valkeyExpect{valkeyMock: r}
 	}
 	m, err := r.ReadMessage()
 	if err != nil {
-		return &redisExpect{redisMock: r, err: err}
+		return &valkeyExpect{valkeyMock: r, err: err}
 	}
 	if len(expected) != len(m.values) {
-		r.t.Fatalf("redismock receive unexpected command length: expected %v, got : %v", len(expected), m.values)
+		r.t.Fatalf("valkeymock receive unexpected command length: expected %v, got : %v", len(expected), m.values)
 	}
 	for i, expected := range expected {
 		if m.values[i].string != expected {
-			r.t.Fatalf("redismock receive unexpected command: expected %v, got : %v", expected, m.values[i])
+			r.t.Fatalf("valkeymock receive unexpected command: expected %v, got : %v", expected, m.values[i])
 		}
 	}
-	return &redisExpect{redisMock: r}
+	return &valkeyExpect{valkeyMock: r}
 }
 
-func (r *redisExpect) ReplyString(replies ...string) *redisExpect {
+func (r *valkeyExpect) ReplyString(replies ...string) *valkeyExpect {
 	for _, reply := range replies {
 		if r.err == nil {
-			r.Reply(RedisMessage{typ: '+', string: reply})
+			r.Reply(ValkeyMessage{typ: '+', string: reply})
 		}
 	}
 	return r
 }
 
-func (r *redisExpect) ReplyBlobString(replies ...string) *redisExpect {
+func (r *valkeyExpect) ReplyBlobString(replies ...string) *valkeyExpect {
 	for _, reply := range replies {
 		if r.err == nil {
-			r.Reply(RedisMessage{typ: '$', string: reply})
+			r.Reply(ValkeyMessage{typ: '$', string: reply})
 		}
 	}
 	return r
 }
 
-func (r *redisExpect) ReplyError(replies ...string) *redisExpect {
+func (r *valkeyExpect) ReplyError(replies ...string) *valkeyExpect {
 	for _, reply := range replies {
 		if r.err == nil {
-			r.Reply(RedisMessage{typ: '-', string: reply})
+			r.Reply(ValkeyMessage{typ: '-', string: reply})
 		}
 	}
 	return r
 }
 
-func (r *redisExpect) ReplyInteger(replies ...int64) *redisExpect {
+func (r *valkeyExpect) ReplyInteger(replies ...int64) *valkeyExpect {
 	for _, reply := range replies {
 		if r.err == nil {
-			r.Reply(RedisMessage{typ: ':', integer: reply})
+			r.Reply(ValkeyMessage{typ: ':', integer: reply})
 		}
 	}
 	return r
 }
 
-func (r *redisExpect) Reply(replies ...RedisMessage) *redisExpect {
+func (r *valkeyExpect) Reply(replies ...ValkeyMessage) *valkeyExpect {
 	for _, reply := range replies {
 		if r.err == nil {
 			r.err = write(r.conn, reply)
@@ -102,11 +102,11 @@ func (r *redisExpect) Reply(replies ...RedisMessage) *redisExpect {
 	return r
 }
 
-func (r *redisMock) Close() {
+func (r *valkeyMock) Close() {
 	r.conn.Close()
 }
 
-func write(o io.Writer, m RedisMessage) (err error) {
+func write(o io.Writer, m ValkeyMessage) (err error) {
 	_, err = o.Write([]byte{m.typ})
 	switch m.typ {
 	case '$':
@@ -134,21 +134,21 @@ func write(o io.Writer, m RedisMessage) (err error) {
 	return err
 }
 
-func setup(t *testing.T, option ClientOption) (*pipe, *redisMock, func(), func()) {
+func setup(t *testing.T, option ClientOption) (*pipe, *valkeyMock, func(), func()) {
 	if option.CacheSizeEachConn <= 0 {
 		option.CacheSizeEachConn = DefaultCacheBytes
 	}
 	n1, n2 := net.Pipe()
-	mock := &redisMock{
+	mock := &valkeyMock{
 		t:    t,
 		buf:  bufio.NewReader(n2),
 		conn: n2,
 	}
 	go func() {
 		mock.Expect("HELLO", "3").
-			Reply(RedisMessage{
+			Reply(ValkeyMessage{
 				typ: '%',
-				values: []RedisMessage{
+				values: []ValkeyMessage{
 					{typ: '+', string: "version"},
 					{typ: '+', string: "6.0.0"},
 					{typ: '+', string: "proto"},
@@ -188,7 +188,7 @@ func setup(t *testing.T, option ClientOption) (*pipe, *redisMock, func(), func()
 		}
 }
 
-func ExpectOK(t *testing.T, result RedisResult) {
+func ExpectOK(t *testing.T, result ValkeyResult) {
 	val, err := result.ToMessage()
 	if err != nil {
 		t.Errorf("unexpected error result: %v", err)
@@ -202,12 +202,12 @@ func TestNewPipe(t *testing.T) {
 	defer ShouldNotLeaked(SetupLeakDetection())
 	t.Run("Auth without Username", func(t *testing.T) {
 		n1, n2 := net.Pipe()
-		mock := &redisMock{buf: bufio.NewReader(n2), conn: n2, t: t}
+		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("HELLO", "3", "AUTH", "default", "pa", "SETNAME", "cn").
-				Reply(RedisMessage{
+				Reply(ValkeyMessage{
 					typ: '%',
-					values: []RedisMessage{
+					values: []ValkeyMessage{
 						{typ: '+', string: "proto"},
 						{typ: ':', integer: 3},
 					},
@@ -244,7 +244,7 @@ func TestNewPipe(t *testing.T) {
 	})
 	t.Run("AlwaysRESP2", func(t *testing.T) {
 		n1, n2 := net.Pipe()
-		mock := &redisMock{buf: bufio.NewReader(n2), conn: n2, t: t}
+		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("AUTH", "pa").
 				ReplyString("OK")
@@ -282,12 +282,12 @@ func TestNewPipe(t *testing.T) {
 	})
 	t.Run("Auth with Username", func(t *testing.T) {
 		n1, n2 := net.Pipe()
-		mock := &redisMock{buf: bufio.NewReader(n2), conn: n2, t: t}
+		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("HELLO", "3", "AUTH", "ua", "pa", "SETNAME", "cn").
-				Reply(RedisMessage{
+				Reply(ValkeyMessage{
 					typ: '%',
-					values: []RedisMessage{
+					values: []ValkeyMessage{
 						{typ: '+', string: "proto"},
 						{typ: ':', integer: 3},
 					},
@@ -318,12 +318,12 @@ func TestNewPipe(t *testing.T) {
 	})
 	t.Run("Auth with Credentials Function", func(t *testing.T) {
 		n1, n2 := net.Pipe()
-		mock := &redisMock{buf: bufio.NewReader(n2), conn: n2, t: t}
+		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("HELLO", "3", "AUTH", "ua", "pa", "SETNAME", "cn").
-				Reply(RedisMessage{
+				Reply(ValkeyMessage{
 					typ: '%',
-					values: []RedisMessage{
+					values: []ValkeyMessage{
 						{typ: '+', string: "proto"},
 						{typ: ':', integer: 3},
 					},
@@ -358,12 +358,12 @@ func TestNewPipe(t *testing.T) {
 	})
 	t.Run("With ClientSideTrackingOptions", func(t *testing.T) {
 		n1, n2 := net.Pipe()
-		mock := &redisMock{buf: bufio.NewReader(n2), conn: n2, t: t}
+		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("HELLO", "3").
-				Reply(RedisMessage{
+				Reply(ValkeyMessage{
 					typ: '%',
-					values: []RedisMessage{
+					values: []ValkeyMessage{
 						{typ: '+', string: "proto"},
 						{typ: ':', integer: 3},
 					},
@@ -389,12 +389,12 @@ func TestNewPipe(t *testing.T) {
 	})
 	t.Run("Init with ReplicaOnly", func(t *testing.T) {
 		n1, n2 := net.Pipe()
-		mock := &redisMock{buf: bufio.NewReader(n2), conn: n2, t: t}
+		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("HELLO", "3", "AUTH", "ua", "pa", "SETNAME", "cn").
-				Reply(RedisMessage{
+				Reply(ValkeyMessage{
 					typ: '%',
-					values: []RedisMessage{
+					values: []ValkeyMessage{
 						{typ: '+', string: "proto"},
 						{typ: ':', integer: 3},
 					},
@@ -428,12 +428,12 @@ func TestNewPipe(t *testing.T) {
 	})
 	t.Run("Init with ReplicaOnly ignores READONLY Error", func(t *testing.T) {
 		n1, n2 := net.Pipe()
-		mock := &redisMock{buf: bufio.NewReader(n2), conn: n2, t: t}
+		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("HELLO", "3", "AUTH", "ua", "pa", "SETNAME", "cn").
-				Reply(RedisMessage{
+				Reply(ValkeyMessage{
 					typ: '%',
-					values: []RedisMessage{
+					values: []ValkeyMessage{
 						{typ: '+', string: "proto"},
 						{typ: ':', integer: 3},
 					},
@@ -475,7 +475,7 @@ func TestNewPipe(t *testing.T) {
 	})
 	t.Run("Auth Credentials Function Error", func(t *testing.T) {
 		n1, n2 := net.Pipe()
-		mock := &redisMock{buf: bufio.NewReader(n2), conn: n2, t: t}
+		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() { mock.Expect("PING").ReplyString("OK") }()
 		_, err := newPipe(func() (net.Conn, error) { return n1, nil }, &ClientOption{
 			SelectDB: 1,
@@ -497,7 +497,7 @@ func TestNewRESP2Pipe(t *testing.T) {
 	defer ShouldNotLeaked(SetupLeakDetection())
 	t.Run("Without DisableCache", func(t *testing.T) {
 		n1, n2 := net.Pipe()
-		mock := &redisMock{buf: bufio.NewReader(n2), conn: n2, t: t}
+		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("HELLO", "3").
 				ReplyError("ERR unknown command `HELLO`")
@@ -518,7 +518,7 @@ func TestNewRESP2Pipe(t *testing.T) {
 	})
 	t.Run("Without DisableCache 2", func(t *testing.T) {
 		n1, n2 := net.Pipe()
-		mock := &redisMock{buf: bufio.NewReader(n2), conn: n2, t: t}
+		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("HELLO", "3").
 				ReplyError("ERR unknown command `HELLO`")
@@ -539,12 +539,12 @@ func TestNewRESP2Pipe(t *testing.T) {
 	})
 	t.Run("With Hello Proto 2", func(t *testing.T) { // kvrocks version 2.2.0
 		n1, n2 := net.Pipe()
-		mock := &redisMock{buf: bufio.NewReader(n2), conn: n2, t: t}
+		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("HELLO", "3").
-				Reply(RedisMessage{typ: '*', values: []RedisMessage{
+				Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 					{typ: '+', string: "server"},
-					{typ: '+', string: "redis"},
+					{typ: '+', string: "valkey"},
 					{typ: '+', string: "proto"},
 					{typ: ':', integer: 2},
 				}})
@@ -570,7 +570,7 @@ func TestNewRESP2Pipe(t *testing.T) {
 	})
 	t.Run("Auth without Username", func(t *testing.T) {
 		n1, n2 := net.Pipe()
-		mock := &redisMock{buf: bufio.NewReader(n2), conn: n2, t: t}
+		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("HELLO", "3", "AUTH", "default", "pa", "SETNAME", "cn").
 				ReplyError("ERR unknown command `HELLO`")
@@ -611,7 +611,7 @@ func TestNewRESP2Pipe(t *testing.T) {
 	})
 	t.Run("Auth with Username", func(t *testing.T) {
 		n1, n2 := net.Pipe()
-		mock := &redisMock{buf: bufio.NewReader(n2), conn: n2, t: t}
+		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("HELLO", "3", "AUTH", "ua", "pa", "SETNAME", "cn").
 				ReplyError("ERR unknown command `HELLO`")
@@ -653,7 +653,7 @@ func TestNewRESP2Pipe(t *testing.T) {
 	})
 	t.Run("Init with ReplicaOnly", func(t *testing.T) {
 		n1, n2 := net.Pipe()
-		mock := &redisMock{buf: bufio.NewReader(n2), conn: n2, t: t}
+		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("HELLO", "3", "AUTH", "default", "pa", "SETNAME", "cn").
 				ReplyError("ERR unknown command `HELLO`")
@@ -699,7 +699,7 @@ func TestNewRESP2Pipe(t *testing.T) {
 	})
 	t.Run("Init with ReplicaOnly ignores READONLY error", func(t *testing.T) {
 		n1, n2 := net.Pipe()
-		mock := &redisMock{buf: bufio.NewReader(n2), conn: n2, t: t}
+		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("HELLO", "3", "AUTH", "default", "pa", "SETNAME", "cn").
 				ReplyError("ERR unknown command `HELLO`")
@@ -745,7 +745,7 @@ func TestNewRESP2Pipe(t *testing.T) {
 	})
 	t.Run("Network Error", func(t *testing.T) {
 		n1, n2 := net.Pipe()
-		mock := &redisMock{buf: bufio.NewReader(n2), conn: n2, t: t}
+		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("HELLO", "3", "AUTH", "ua", "pa", "SETNAME", "cn").
 				ReplyError("ERR unknown command `HELLO`")
@@ -784,7 +784,7 @@ func TestIgnoreOutOfBandDataDuringSyncMode(t *testing.T) {
 	p, mock, cancel, _ := setup(t, ClientOption{})
 	defer cancel()
 	go func() {
-		mock.Expect("PING").Reply(RedisMessage{typ: '>', string: "This should be ignore"}).ReplyString("OK")
+		mock.Expect("PING").Reply(ValkeyMessage{typ: '>', string: "This should be ignore"}).ReplyString("OK")
 	}()
 	ExpectOK(t, p.Do(context.Background(), cmds.NewCompleted([]string{"PING"})))
 }
@@ -1113,7 +1113,7 @@ func TestNoReplyExceedRingSize(t *testing.T) {
 	}()
 
 	for i := 0; i < times; i++ {
-		mock.Expect("UNSUBSCRIBE").Reply(RedisMessage{typ: '>', values: []RedisMessage{
+		mock.Expect("UNSUBSCRIBE").Reply(ValkeyMessage{typ: '>', values: []ValkeyMessage{
 			{typ: '+', string: "unsubscribe"},
 			{typ: '+', string: "1"},
 			{typ: ':', integer: 0},
@@ -1159,7 +1159,7 @@ func TestResponseSequenceWithPushMessageInjected(t *testing.T) {
 	for i := 0; i < times; i++ {
 		m, _ := mock.ReadMessage()
 		mock.Expect().ReplyString(m.values[1].string).
-			Reply(RedisMessage{typ: '>', values: []RedisMessage{{typ: '+', string: "should be ignore"}}})
+			Reply(ValkeyMessage{typ: '>', values: []ValkeyMessage{{typ: '+', string: "should be ignore"}}})
 	}
 	wg.Wait()
 }
@@ -1179,15 +1179,15 @@ func TestClientSideCaching(t *testing.T) {
 			ReplyString("OK").
 			ReplyString("OK").
 			ReplyString("OK").
-			Reply(RedisMessage{typ: '*', values: []RedisMessage{
+			Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 				{typ: ':', integer: ttl},
 				{typ: '+', string: resp},
 			}})
 	}
-	invalidateCSC := func(keys RedisMessage) {
-		mock.Expect().Reply(RedisMessage{
+	invalidateCSC := func(keys ValkeyMessage) {
+		mock.Expect().Reply(ValkeyMessage{
 			typ: '>',
-			values: []RedisMessage{
+			values: []ValkeyMessage{
 				{typ: '+', string: "invalidate"},
 				keys,
 			},
@@ -1228,7 +1228,7 @@ func TestClientSideCaching(t *testing.T) {
 	}
 
 	// cache invalidation
-	invalidateCSC(RedisMessage{typ: '*', values: []RedisMessage{{typ: '+', string: "a"}}})
+	invalidateCSC(ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}}})
 	go func() {
 		expectCSC(-1, "2")
 	}()
@@ -1241,7 +1241,7 @@ func TestClientSideCaching(t *testing.T) {
 	}
 
 	// cache flush invalidation
-	invalidateCSC(RedisMessage{typ: '_'})
+	invalidateCSC(ValkeyMessage{typ: '_'})
 	go func() {
 		expectCSC(-1, "3")
 	}()
@@ -1269,7 +1269,7 @@ func TestClientSideCachingExecAbort(t *testing.T) {
 			ReplyString("OK").
 			ReplyString("OK").
 			ReplyString("OK").
-			Reply(RedisMessage{typ: '_'})
+			Reply(ValkeyMessage{typ: '_'})
 	}()
 
 	v, err := p.DoCache(context.Background(), Cacheable(cmds.NewCompleted([]string{"GET", "a"})), 10*time.Second).ToMessage()
@@ -1284,7 +1284,7 @@ func TestClientSideCachingExecAbort(t *testing.T) {
 	}
 }
 
-func TestClientSideCachingWithNonRedisError(t *testing.T) {
+func TestClientSideCachingWithNonValkeyError(t *testing.T) {
 	defer ShouldNotLeaked(SetupLeakDetection())
 	p, _, _, closeConn := setup(t, ClientOption{})
 	closeConn()
@@ -1305,10 +1305,10 @@ func TestClientSideCachingMGet(t *testing.T) {
 	p, mock, cancel, _ := setup(t, ClientOption{})
 	defer cancel()
 
-	invalidateCSC := func(keys RedisMessage) {
-		mock.Expect().Reply(RedisMessage{
+	invalidateCSC := func(keys ValkeyMessage) {
+		mock.Expect().Reply(ValkeyMessage{
 			typ: '>',
-			values: []RedisMessage{
+			values: []ValkeyMessage{
 				{typ: '+', string: "invalidate"},
 				keys,
 			},
@@ -1329,11 +1329,11 @@ func TestClientSideCachingMGet(t *testing.T) {
 			ReplyString("OK").
 			ReplyString("OK").
 			ReplyString("OK").
-			Reply(RedisMessage{typ: '*', values: []RedisMessage{
+			Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 				{typ: ':', integer: 1000},
 				{typ: ':', integer: 2000},
 				{typ: ':', integer: 3000},
-				{typ: '*', values: []RedisMessage{
+				{typ: '*', values: []ValkeyMessage{
 					{typ: ':', integer: 1},
 					{typ: ':', integer: 2},
 					{typ: ':', integer: 3},
@@ -1379,7 +1379,7 @@ func TestClientSideCachingMGet(t *testing.T) {
 	}
 
 	// partial cache invalidation
-	invalidateCSC(RedisMessage{typ: '*', values: []RedisMessage{{typ: '+', string: "a1"}, {typ: '+', string: "a3"}}})
+	invalidateCSC(ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a1"}, {typ: '+', string: "a3"}}})
 	go func() {
 		mock.Expect("CLIENT", "CACHING", "YES").
 			Expect("MULTI").
@@ -1392,10 +1392,10 @@ func TestClientSideCachingMGet(t *testing.T) {
 			ReplyString("OK").
 			ReplyString("OK").
 			ReplyString("OK").
-			Reply(RedisMessage{typ: '*', values: []RedisMessage{
+			Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 				{typ: ':', integer: 10000},
 				{typ: ':', integer: 30000},
-				{typ: '*', values: []RedisMessage{
+				{typ: '*', values: []ValkeyMessage{
 					{typ: ':', integer: 10},
 					{typ: ':', integer: 30},
 				}},
@@ -1438,10 +1438,10 @@ func TestClientSideCachingJSONMGet(t *testing.T) {
 	p, mock, cancel, _ := setup(t, ClientOption{})
 	defer cancel()
 
-	invalidateCSC := func(keys RedisMessage) {
-		mock.Expect().Reply(RedisMessage{
+	invalidateCSC := func(keys ValkeyMessage) {
+		mock.Expect().Reply(ValkeyMessage{
 			typ: '>',
-			values: []RedisMessage{
+			values: []ValkeyMessage{
 				{typ: '+', string: "invalidate"},
 				keys,
 			},
@@ -1462,11 +1462,11 @@ func TestClientSideCachingJSONMGet(t *testing.T) {
 			ReplyString("OK").
 			ReplyString("OK").
 			ReplyString("OK").
-			Reply(RedisMessage{typ: '*', values: []RedisMessage{
+			Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 				{typ: ':', integer: 1000},
 				{typ: ':', integer: 2000},
 				{typ: ':', integer: 3000},
-				{typ: '*', values: []RedisMessage{
+				{typ: '*', values: []ValkeyMessage{
 					{typ: ':', integer: 1},
 					{typ: ':', integer: 2},
 					{typ: ':', integer: 3},
@@ -1512,7 +1512,7 @@ func TestClientSideCachingJSONMGet(t *testing.T) {
 	}
 
 	// partial cache invalidation
-	invalidateCSC(RedisMessage{typ: '*', values: []RedisMessage{{typ: '+', string: "a1"}, {typ: '+', string: "a3"}}})
+	invalidateCSC(ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a1"}, {typ: '+', string: "a3"}}})
 	go func() {
 		mock.Expect("CLIENT", "CACHING", "YES").
 			Expect("MULTI").
@@ -1525,10 +1525,10 @@ func TestClientSideCachingJSONMGet(t *testing.T) {
 			ReplyString("OK").
 			ReplyString("OK").
 			ReplyString("OK").
-			Reply(RedisMessage{typ: '*', values: []RedisMessage{
+			Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 				{typ: ':', integer: 10000},
 				{typ: ':', integer: 30000},
-				{typ: '*', values: []RedisMessage{
+				{typ: '*', values: []ValkeyMessage{
 					{typ: ':', integer: 10},
 					{typ: ':', integer: 30},
 				}},
@@ -1583,7 +1583,7 @@ func TestClientSideCachingExecAbortMGet(t *testing.T) {
 			ReplyString("OK").
 			ReplyString("OK").
 			ReplyString("OK").
-			Reply(RedisMessage{typ: '_'})
+			Reply(ValkeyMessage{typ: '_'})
 	}()
 
 	v, err := p.DoCache(context.Background(), Cacheable(cmds.NewMGetCompleted([]string{"MGET", "a1", "a2"})), 10*time.Second).ToMessage()
@@ -1601,7 +1601,7 @@ func TestClientSideCachingExecAbortMGet(t *testing.T) {
 	}
 }
 
-func TestClientSideCachingWithNonRedisErrorMGet(t *testing.T) {
+func TestClientSideCachingWithNonValkeyErrorMGet(t *testing.T) {
 	p, _, _, closeConn := setup(t, ClientOption{})
 	closeConn()
 
@@ -1627,7 +1627,7 @@ func TestClientSideCachingWithSideChannelMGet(t *testing.T) {
 	p.cache.Flight("a1", "GET", 10*time.Second, time.Now())
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		m := RedisMessage{typ: '+', string: "OK"}
+		m := ValkeyMessage{typ: '+', string: "OK"}
 		m.setExpireAt(time.Now().Add(10 * time.Millisecond).UnixMilli())
 		p.cache.Update("a1", "GET", m)
 	}()
@@ -1673,10 +1673,10 @@ func TestClientSideCachingDoMultiCache(t *testing.T) {
 		p, mock, cancel, _ := setup(t, option)
 		defer cancel()
 
-		invalidateCSC := func(keys RedisMessage) {
-			mock.Expect().Reply(RedisMessage{
+		invalidateCSC := func(keys ValkeyMessage) {
+			mock.Expect().Reply(ValkeyMessage{
 				typ: '>',
-				values: []RedisMessage{
+				values: []ValkeyMessage{
 					{typ: '+', string: "invalidate"},
 					keys,
 				},
@@ -1703,7 +1703,7 @@ func TestClientSideCachingDoMultiCache(t *testing.T) {
 				ReplyString("OK").
 				ReplyString("OK").
 				ReplyString("OK").
-				Reply(RedisMessage{typ: '*', values: []RedisMessage{
+				Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 					{typ: ':', integer: 1000},
 					{typ: ':', integer: 1},
 				}}).
@@ -1711,7 +1711,7 @@ func TestClientSideCachingDoMultiCache(t *testing.T) {
 				ReplyString("OK").
 				ReplyString("OK").
 				ReplyString("OK").
-				Reply(RedisMessage{typ: '*', values: []RedisMessage{
+				Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 					{typ: ':', integer: 2000},
 					{typ: ':', integer: 2},
 				}}).
@@ -1719,7 +1719,7 @@ func TestClientSideCachingDoMultiCache(t *testing.T) {
 				ReplyString("OK").
 				ReplyString("OK").
 				ReplyString("OK").
-				Reply(RedisMessage{typ: '*', values: []RedisMessage{
+				Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 					{typ: ':', integer: 3000},
 					{typ: ':', integer: 3},
 				}})
@@ -1766,7 +1766,7 @@ func TestClientSideCachingDoMultiCache(t *testing.T) {
 		}
 
 		// partial cache invalidation
-		invalidateCSC(RedisMessage{typ: '*', values: []RedisMessage{{typ: '+', string: "a1"}, {typ: '+', string: "a3"}}})
+		invalidateCSC(ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a1"}, {typ: '+', string: "a3"}}})
 		go func() {
 			mock.Expect("CLIENT", "CACHING", "YES").
 				Expect("MULTI").
@@ -1782,7 +1782,7 @@ func TestClientSideCachingDoMultiCache(t *testing.T) {
 				ReplyString("OK").
 				ReplyString("OK").
 				ReplyString("OK").
-				Reply(RedisMessage{typ: '*', values: []RedisMessage{
+				Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 					{typ: ':', integer: 10000},
 					{typ: ':', integer: 10},
 				}}).
@@ -1790,7 +1790,7 @@ func TestClientSideCachingDoMultiCache(t *testing.T) {
 				ReplyString("OK").
 				ReplyString("OK").
 				ReplyString("OK").
-				Reply(RedisMessage{typ: '*', values: []RedisMessage{
+				Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 					{typ: ':', integer: 30000},
 					{typ: ':', integer: 30},
 				}})
@@ -1840,7 +1840,7 @@ func TestClientSideCachingDoMultiCache(t *testing.T) {
 	t.Run("Simple", func(t *testing.T) {
 		testfn(t, ClientOption{
 			NewCacheStoreFn: func(option CacheStoreOption) CacheStore {
-				return NewSimpleCacheAdapter(&simple{store: map[string]RedisMessage{}})
+				return NewSimpleCacheAdapter(&simple{store: map[string]ValkeyMessage{}})
 			},
 		})
 	})
@@ -1866,7 +1866,7 @@ func TestClientSideCachingExecAbortDoMultiCache(t *testing.T) {
 				ReplyString("OK").
 				ReplyString("OK").
 				ReplyString("OK").
-				Reply(RedisMessage{typ: '*', values: []RedisMessage{
+				Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 					{typ: ':', integer: 1000},
 					{typ: ':', integer: 1},
 				}}).
@@ -1874,7 +1874,7 @@ func TestClientSideCachingExecAbortDoMultiCache(t *testing.T) {
 				ReplyString("OK").
 				ReplyString("OK").
 				ReplyString("OK").
-				Reply(RedisMessage{typ: '_'})
+				Reply(ValkeyMessage{typ: '_'})
 		}()
 
 		arr := p.DoMultiCache(context.Background(), []CacheableTTL{
@@ -1912,13 +1912,13 @@ func TestClientSideCachingExecAbortDoMultiCache(t *testing.T) {
 	t.Run("Simple", func(t *testing.T) {
 		testfn(t, ClientOption{
 			NewCacheStoreFn: func(option CacheStoreOption) CacheStore {
-				return NewSimpleCacheAdapter(&simple{store: map[string]RedisMessage{}})
+				return NewSimpleCacheAdapter(&simple{store: map[string]ValkeyMessage{}})
 			},
 		})
 	})
 }
 
-func TestClientSideCachingWithNonRedisErrorDoMultiCache(t *testing.T) {
+func TestClientSideCachingWithNonValkeyErrorDoMultiCache(t *testing.T) {
 	testfn := func(t *testing.T, option ClientOption) {
 		p, _, _, closeConn := setup(t, option)
 		closeConn()
@@ -1949,7 +1949,7 @@ func TestClientSideCachingWithNonRedisErrorDoMultiCache(t *testing.T) {
 	t.Run("Simple", func(t *testing.T) {
 		testfn(t, ClientOption{
 			NewCacheStoreFn: func(option CacheStoreOption) CacheStore {
-				return NewSimpleCacheAdapter(&simple{store: map[string]RedisMessage{}})
+				return NewSimpleCacheAdapter(&simple{store: map[string]ValkeyMessage{}})
 			},
 		})
 	})
@@ -1963,7 +1963,7 @@ func TestClientSideCachingWithSideChannelDoMultiCache(t *testing.T) {
 		p.cache.Flight("a1", "GET", 10*time.Second, time.Now())
 		go func() {
 			time.Sleep(100 * time.Millisecond)
-			m := RedisMessage{typ: '+', string: "OK"}
+			m := ValkeyMessage{typ: '+', string: "OK"}
 			m.setExpireAt(time.Now().Add(10 * time.Millisecond).UnixMilli())
 			p.cache.Update("a1", "GET", m)
 		}()
@@ -1981,7 +1981,7 @@ func TestClientSideCachingWithSideChannelDoMultiCache(t *testing.T) {
 	t.Run("Simple", func(t *testing.T) {
 		testfn(t, ClientOption{
 			NewCacheStoreFn: func(option CacheStoreOption) CacheStore {
-				return NewSimpleCacheAdapter(&simple{store: map[string]RedisMessage{}})
+				return NewSimpleCacheAdapter(&simple{store: map[string]ValkeyMessage{}})
 			},
 		})
 	})
@@ -2010,7 +2010,7 @@ func TestClientSideCachingWithSideChannelErrorDoMultiCache(t *testing.T) {
 	t.Run("Simple", func(t *testing.T) {
 		testfn(t, ClientOption{
 			NewCacheStoreFn: func(option CacheStoreOption) CacheStore {
-				return NewSimpleCacheAdapter(&simple{store: map[string]RedisMessage{}})
+				return NewSimpleCacheAdapter(&simple{store: map[string]ValkeyMessage{}})
 			},
 		})
 	})
@@ -2031,7 +2031,7 @@ func TestClientSideCachingMissCacheTTL(t *testing.T) {
 					ReplyString("OK").
 					ReplyString("OK").
 					ReplyString("OK").
-					Reply(RedisMessage{typ: '*', values: []RedisMessage{
+					Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 						{typ: ':', integer: pttl},
 						{typ: '+', string: key},
 					}})
@@ -2071,11 +2071,11 @@ func TestClientSideCachingMissCacheTTL(t *testing.T) {
 					ReplyString("OK").
 					ReplyString("OK").
 					ReplyString("OK").
-					Reply(RedisMessage{typ: '*', values: []RedisMessage{
+					Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 						{typ: ':', integer: -1},
 						{typ: ':', integer: 1000},
 						{typ: ':', integer: 20000},
-						{typ: '*', values: []RedisMessage{
+						{typ: '*', values: []ValkeyMessage{
 							{typ: '+', string: "a"},
 							{typ: '+', string: "b"},
 							{typ: '+', string: "c"},
@@ -2116,7 +2116,7 @@ func TestClientSideCachingMissCacheTTL(t *testing.T) {
 					ReplyString("OK").
 					ReplyString("OK").
 					ReplyString("OK").
-					Reply(RedisMessage{typ: '*', values: []RedisMessage{
+					Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 						{typ: ':', integer: -1},
 						{typ: ':', integer: 1},
 					}}).
@@ -2124,7 +2124,7 @@ func TestClientSideCachingMissCacheTTL(t *testing.T) {
 					ReplyString("OK").
 					ReplyString("OK").
 					ReplyString("OK").
-					Reply(RedisMessage{typ: '*', values: []RedisMessage{
+					Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 						{typ: ':', integer: 1000},
 						{typ: ':', integer: 2},
 					}}).
@@ -2132,7 +2132,7 @@ func TestClientSideCachingMissCacheTTL(t *testing.T) {
 					ReplyString("OK").
 					ReplyString("OK").
 					ReplyString("OK").
-					Reply(RedisMessage{typ: '*', values: []RedisMessage{
+					Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 						{typ: ':', integer: 20000},
 						{typ: ':', integer: 3},
 					}})
@@ -2159,14 +2159,14 @@ func TestClientSideCachingMissCacheTTL(t *testing.T) {
 	t.Run("Simple", func(t *testing.T) {
 		testfn(t, ClientOption{
 			NewCacheStoreFn: func(option CacheStoreOption) CacheStore {
-				return NewSimpleCacheAdapter(&simple{store: map[string]RedisMessage{}})
+				return NewSimpleCacheAdapter(&simple{store: map[string]ValkeyMessage{}})
 			},
 		})
 	})
 }
 
 // https://github.com/redis/redis/issues/8935
-func TestClientSideCachingRedis6InvalidationBug1(t *testing.T) {
+func TestClientSideCachingValkey6InvalidationBug1(t *testing.T) {
 	p, mock, cancel, _ := setup(t, ClientOption{})
 	defer cancel()
 
@@ -2180,16 +2180,16 @@ func TestClientSideCachingRedis6InvalidationBug1(t *testing.T) {
 			ReplyString("OK").
 			ReplyString("OK").
 			ReplyString("OK").
-			Reply(RedisMessage{typ: '*', values: []RedisMessage{
+			Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 				{
 					typ: '>',
-					values: []RedisMessage{
+					values: []ValkeyMessage{
 						{typ: '+', string: "invalidate"},
-						{typ: '*', values: []RedisMessage{{typ: '+', string: "a"}}},
+						{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}}},
 					},
 				},
 				{typ: ':', integer: -2},
-			}}).Reply(RedisMessage{typ: '_'})
+			}}).Reply(ValkeyMessage{typ: '_'})
 	}
 
 	go func() {
@@ -2227,7 +2227,7 @@ func TestClientSideCachingRedis6InvalidationBug1(t *testing.T) {
 }
 
 // https://github.com/redis/redis/issues/8935
-func TestClientSideCachingRedis6InvalidationBug2(t *testing.T) {
+func TestClientSideCachingValkey6InvalidationBug2(t *testing.T) {
 	p, mock, cancel, _ := setup(t, ClientOption{})
 	defer cancel()
 
@@ -2241,16 +2241,16 @@ func TestClientSideCachingRedis6InvalidationBug2(t *testing.T) {
 			ReplyString("OK").
 			ReplyString("OK").
 			ReplyString("OK").
-			Reply(RedisMessage{typ: '*', values: []RedisMessage{
+			Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 				{typ: ':', integer: -2},
 				{
 					typ: '>',
-					values: []RedisMessage{
+					values: []ValkeyMessage{
 						{typ: '+', string: "invalidate"},
-						{typ: '*', values: []RedisMessage{{typ: '+', string: "a"}}},
+						{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}}},
 					},
 				},
-			}}).Reply(RedisMessage{typ: '_'})
+			}}).Reply(ValkeyMessage{typ: '_'})
 	}
 
 	go func() {
@@ -2288,7 +2288,7 @@ func TestClientSideCachingRedis6InvalidationBug2(t *testing.T) {
 }
 
 // https://github.com/redis/redis/issues/8935
-func TestClientSideCachingRedis6InvalidationBugErr(t *testing.T) {
+func TestClientSideCachingValkey6InvalidationBugErr(t *testing.T) {
 	p, mock, _, closeConn := setup(t, ClientOption{})
 
 	expectCSC := func() {
@@ -2301,13 +2301,13 @@ func TestClientSideCachingRedis6InvalidationBugErr(t *testing.T) {
 			ReplyString("OK").
 			ReplyString("OK").
 			ReplyString("OK").
-			Reply(RedisMessage{typ: '*', values: []RedisMessage{
+			Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 				{typ: ':', integer: -2},
 				{
 					typ: '>',
-					values: []RedisMessage{
+					values: []ValkeyMessage{
 						{typ: '+', string: "invalidate"},
-						{typ: '*', values: []RedisMessage{{typ: '+', string: "a"}}},
+						{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}}},
 					},
 				},
 			}})
@@ -2330,11 +2330,11 @@ func TestDisableClientSideCaching(t *testing.T) {
 	p.background()
 
 	go func() {
-		mock.Expect().Reply(RedisMessage{
+		mock.Expect().Reply(ValkeyMessage{
 			typ: '>',
-			values: []RedisMessage{
+			values: []ValkeyMessage{
 				{typ: '+', string: "invalidate"},
-				{typ: '*', values: []RedisMessage{{typ: '+', string: "a"}}},
+				{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}}},
 			},
 		})
 		mock.Expect("GET", "a").ReplyString("1").
@@ -2361,19 +2361,19 @@ func TestDisableClientSideCaching(t *testing.T) {
 }
 
 func TestOnInvalidations(t *testing.T) {
-	ch := make(chan []RedisMessage)
+	ch := make(chan []ValkeyMessage)
 	_, mock, cancel, _ := setup(t, ClientOption{
-		OnInvalidations: func(messages []RedisMessage) {
+		OnInvalidations: func(messages []ValkeyMessage) {
 			ch <- messages
 		},
 	})
 
 	go func() {
-		mock.Expect().Reply(RedisMessage{
+		mock.Expect().Reply(ValkeyMessage{
 			typ: '>',
-			values: []RedisMessage{
+			values: []ValkeyMessage{
 				{typ: '+', string: "invalidate"},
-				{typ: '*', values: []RedisMessage{{typ: '+', string: "a"}}},
+				{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}}},
 			},
 		})
 	}()
@@ -2383,9 +2383,9 @@ func TestOnInvalidations(t *testing.T) {
 	}
 
 	go func() {
-		mock.Expect().Reply(RedisMessage{
+		mock.Expect().Reply(ValkeyMessage{
 			typ: '>',
-			values: []RedisMessage{
+			values: []ValkeyMessage{
 				{typ: '+', string: "invalidate"},
 				{typ: '_'},
 			},
@@ -2445,7 +2445,7 @@ func TestPubSub(t *testing.T) {
 
 		go func() {
 			for _, c := range commands {
-				mock.Expect(c.Commands()...).Reply(RedisMessage{typ: '>', values: []RedisMessage{
+				mock.Expect(c.Commands()...).Reply(ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: strings.ToLower(c.Commands()[0])},
 					{typ: '+', string: strings.ToLower(c.Commands()[1])},
 				}})
@@ -2474,7 +2474,7 @@ func TestPubSub(t *testing.T) {
 
 		go func() {
 			for _, c := range commands {
-				mock.Expect(c.Commands()...).Reply(RedisMessage{typ: '>', values: []RedisMessage{
+				mock.Expect(c.Commands()...).Reply(ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: strings.ToLower(c.Commands()[0])},
 					{typ: '+', string: strings.ToLower(c.Commands()[1])},
 				}})
@@ -2488,7 +2488,7 @@ func TestPubSub(t *testing.T) {
 		}
 	})
 
-	t.Run("PubSub Subscribe RedisMessage", func(t *testing.T) {
+	t.Run("PubSub Subscribe ValkeyMessage", func(t *testing.T) {
 		ctx := context.Background()
 		p, mock, cancel, _ := setup(t, ClientOption{})
 
@@ -2496,19 +2496,19 @@ func TestPubSub(t *testing.T) {
 		deactivate := builder.Unsubscribe().Channel("1").Build()
 		go func() {
 			mock.Expect(activate.Commands()...).Reply(
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "subscribe"},
 					{typ: '+', string: "1"},
 					{typ: ':', integer: 1},
 				}},
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "message"},
 					{typ: '+', string: "1"},
 					{typ: '+', string: "2"},
 				}},
 			)
 			mock.Expect(deactivate.Commands()...).Reply(
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "unsubscribe"},
 					{typ: '+', string: "1"},
 					{typ: ':', integer: 0},
@@ -2529,7 +2529,7 @@ func TestPubSub(t *testing.T) {
 		cancel()
 	})
 
-	t.Run("PubSub SSubscribe RedisMessage", func(t *testing.T) {
+	t.Run("PubSub SSubscribe ValkeyMessage", func(t *testing.T) {
 		ctx := context.Background()
 		p, mock, cancel, _ := setup(t, ClientOption{})
 
@@ -2537,19 +2537,19 @@ func TestPubSub(t *testing.T) {
 		deactivate := builder.Sunsubscribe().Channel("1").Build()
 		go func() {
 			mock.Expect(activate.Commands()...).Reply(
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "ssubscribe"},
 					{typ: '+', string: "1"},
 					{typ: ':', integer: 1},
 				}},
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "smessage"},
 					{typ: '+', string: "1"},
 					{typ: '+', string: "2"},
 				}},
 			)
 			mock.Expect(deactivate.Commands()...).Reply(
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "sunsubscribe"},
 					{typ: '+', string: "1"},
 					{typ: ':', integer: 0},
@@ -2570,7 +2570,7 @@ func TestPubSub(t *testing.T) {
 		cancel()
 	})
 
-	t.Run("PubSub PSubscribe RedisMessage", func(t *testing.T) {
+	t.Run("PubSub PSubscribe ValkeyMessage", func(t *testing.T) {
 		ctx := context.Background()
 		p, mock, cancel, _ := setup(t, ClientOption{})
 
@@ -2578,12 +2578,12 @@ func TestPubSub(t *testing.T) {
 		deactivate := builder.Punsubscribe().Pattern("1").Build()
 		go func() {
 			mock.Expect(activate.Commands()...).Reply(
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "psubscribe"},
 					{typ: '+', string: "1"},
 					{typ: ':', integer: 1},
 				}},
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "pmessage"},
 					{typ: '+', string: "1"},
 					{typ: '+', string: "2"},
@@ -2591,7 +2591,7 @@ func TestPubSub(t *testing.T) {
 				}},
 			)
 			mock.Expect(deactivate.Commands()...).Reply(
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "punsubscribe"},
 					{typ: '+', string: "1"},
 					{typ: ':', integer: 0},
@@ -2612,7 +2612,7 @@ func TestPubSub(t *testing.T) {
 		cancel()
 	})
 
-	t.Run("PubSub Wrong Command RedisMessage", func(t *testing.T) {
+	t.Run("PubSub Wrong Command ValkeyMessage", func(t *testing.T) {
 		p, _, cancel, _ := setup(t, ClientOption{})
 		defer cancel()
 
@@ -2642,12 +2642,12 @@ func TestPubSub(t *testing.T) {
 		activate := builder.Subscribe().Channel("1").Build()
 		go func() {
 			mock.Expect(activate.Commands()...).Reply(
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "subscribe"},
 					{typ: '+', string: "1"},
 					{typ: ':', integer: 1},
 				}},
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "message"},
 					{typ: '+', string: "1"},
 					{typ: '+', string: "2"},
@@ -2666,7 +2666,7 @@ func TestPubSub(t *testing.T) {
 		cancel()
 	})
 
-	t.Run("PubSub Subscribe Redis Error", func(t *testing.T) {
+	t.Run("PubSub Subscribe Valkey Error", func(t *testing.T) {
 		ctx := context.Background()
 		p, mock, cancel, _ := setup(t, ClientOption{})
 
@@ -2680,7 +2680,7 @@ func TestPubSub(t *testing.T) {
 		}
 		go func() {
 			for _, cmd := range commands {
-				mock.Expect(cmd.Commands()...).Reply(RedisMessage{typ: '-', string: cmd.Commands()[0]})
+				mock.Expect(cmd.Commands()...).Reply(ValkeyMessage{typ: '-', string: cmd.Commands()[0]})
 			}
 		}()
 		for _, cmd := range commands {
@@ -2709,17 +2709,17 @@ func TestPubSub(t *testing.T) {
 			cmd2 := builder.Get().Key(strconv.Itoa(i)).Build()
 			go func() {
 				mock.Expect(cmd1.Commands()...).Reply(
-					RedisMessage{typ: '>', values: []RedisMessage{
+					ValkeyMessage{typ: '>', values: []ValkeyMessage{
 						{typ: '+', string: "subscribe"},
 						{typ: '+', string: "a"},
 						{typ: ':', integer: 1},
 					}},
-					RedisMessage{typ: '>', values: []RedisMessage{ // skip
+					ValkeyMessage{typ: '>', values: []ValkeyMessage{ // skip
 						{typ: '+', string: "subscribe"},
 						{typ: '+', string: "b"},
 						{typ: ':', integer: 1},
 					}},
-					RedisMessage{typ: '>', values: []RedisMessage{ // skip
+					ValkeyMessage{typ: '>', values: []ValkeyMessage{ // skip
 						{typ: '+', string: "subscribe"},
 						{typ: '+', string: "c"},
 						{typ: ':', integer: 1},
@@ -2747,10 +2747,10 @@ func TestPubSub(t *testing.T) {
 			builder.Sunsubscribe().Build(),
 		}
 
-		replies := [][]RedisMessage{{
+		replies := [][]ValkeyMessage{{
 			{
 				typ: '>',
-				values: []RedisMessage{
+				values: []ValkeyMessage{
 					{typ: '+', string: "unsubscribe"},
 					{typ: '_'},
 					{typ: ':', integer: 0},
@@ -2759,7 +2759,7 @@ func TestPubSub(t *testing.T) {
 		}, {
 			{
 				typ: '>',
-				values: []RedisMessage{
+				values: []ValkeyMessage{
 					{typ: '+', string: "punsubscribe"},
 					{typ: '+', string: "1"},
 					{typ: ':', integer: 0},
@@ -2768,7 +2768,7 @@ func TestPubSub(t *testing.T) {
 		}, {
 			{
 				typ: '>',
-				values: []RedisMessage{
+				values: []ValkeyMessage{
 					{typ: '+', string: "sunsubscribe"},
 					{typ: '+', string: "2"},
 					{typ: ':', integer: 0},
@@ -2776,7 +2776,7 @@ func TestPubSub(t *testing.T) {
 			},
 			{
 				typ: '>',
-				values: []RedisMessage{
+				values: []ValkeyMessage{
 					{typ: '+', string: "sunsubscribe"},
 					{typ: '+', string: "3"},
 					{typ: ':', integer: 0},
@@ -2816,11 +2816,11 @@ func TestPubSub(t *testing.T) {
 					builder.Ssubscribe().Channel("3").Build(),
 				}
 
-				replies := [][]RedisMessage{
+				replies := [][]ValkeyMessage{
 					{
 						{ // proactive unsubscribe before user unsubscribe
 							typ: '>',
-							values: []RedisMessage{
+							values: []ValkeyMessage{
 								{typ: '+', string: command},
 								{typ: '+', string: "1"},
 								{typ: ':', integer: 0},
@@ -2828,7 +2828,7 @@ func TestPubSub(t *testing.T) {
 						},
 						{ // proactive unsubscribe before user unsubscribe
 							typ: '>',
-							values: []RedisMessage{
+							values: []ValkeyMessage{
 								{typ: '+', string: command},
 								{typ: '+', string: "2"},
 								{typ: ':', integer: 0},
@@ -2836,7 +2836,7 @@ func TestPubSub(t *testing.T) {
 						},
 						{ // user unsubscribe
 							typ: '>',
-							values: []RedisMessage{
+							values: []ValkeyMessage{
 								{typ: '+', string: command},
 								{typ: '_'},
 								{typ: ':', integer: 0},
@@ -2844,7 +2844,7 @@ func TestPubSub(t *testing.T) {
 						},
 						{ // proactive unsubscribe after user unsubscribe
 							typ: '>',
-							values: []RedisMessage{
+							values: []ValkeyMessage{
 								{typ: '+', string: command},
 								{typ: '_'},
 								{typ: ':', integer: 0},
@@ -2854,7 +2854,7 @@ func TestPubSub(t *testing.T) {
 					{
 						{ // user ssubscribe
 							typ: '>',
-							values: []RedisMessage{
+							values: []ValkeyMessage{
 								{typ: '+', string: "ssubscribe"},
 								{typ: '+', string: "3"},
 								{typ: ':', integer: 0},
@@ -2862,7 +2862,7 @@ func TestPubSub(t *testing.T) {
 						},
 						{ // proactive unsubscribe after user ssubscribe
 							typ: '>',
-							values: []RedisMessage{
+							values: []ValkeyMessage{
 								{typ: '+', string: command},
 								{typ: '+', string: "3"},
 								{typ: ':', integer: 0},
@@ -2874,9 +2874,9 @@ func TestPubSub(t *testing.T) {
 				p.background()
 
 				// proactive unsubscribe before other commands
-				mock.Expect().Reply(RedisMessage{ // proactive unsubscribe before user unsubscribe
+				mock.Expect().Reply(ValkeyMessage{ // proactive unsubscribe before user unsubscribe
 					typ: '>',
-					values: []RedisMessage{
+					values: []ValkeyMessage{
 						{typ: '+', string: command},
 						{typ: '+', string: "0"},
 						{typ: ':', integer: 0},
@@ -2911,8 +2911,8 @@ func TestPubSub(t *testing.T) {
 			p.queue.PutOne(builder.Get().Key("a").Build())
 			p.queue.NextWriteCmd()
 			go func() {
-				mock.Expect().Reply(RedisMessage{
-					typ: '>', values: []RedisMessage{
+				mock.Expect().Reply(ValkeyMessage{
+					typ: '>', values: []ValkeyMessage{
 						{typ: '+', string: push},
 						{typ: '+', string: ""},
 					},
@@ -2941,7 +2941,7 @@ func TestPubSub(t *testing.T) {
 			p.queue.PutOne(cmd)
 			p.queue.NextWriteCmd()
 			go func() {
-				mock.Expect().Reply(RedisMessage{typ: '+', string: "QUEUED"})
+				mock.Expect().Reply(ValkeyMessage{typ: '+', string: "QUEUED"})
 			}()
 			p._backgroundRead()
 			return
@@ -3074,22 +3074,22 @@ func TestPubSubHooks(t *testing.T) {
 		deactivate2 := builder.Punsubscribe().Pattern("2").Build()
 		go func() {
 			mock.Expect(activate1.Commands()...).Expect(activate2.Commands()...).Reply(
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "subscribe"},
 					{typ: '+', string: "1"},
 					{typ: ':', integer: 1},
 				}},
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "psubscribe"},
 					{typ: '+', string: "2"},
 					{typ: ':', integer: 2},
 				}},
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "message"},
 					{typ: '+', string: "1"},
 					{typ: '+', string: "11"},
 				}},
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "pmessage"},
 					{typ: '+', string: "2"},
 					{typ: '+', string: "22"},
@@ -3097,12 +3097,12 @@ func TestPubSubHooks(t *testing.T) {
 				}},
 			)
 			mock.Expect(deactivate1.Commands()...).Expect(deactivate2.Commands()...).Reply(
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "unsubscribe"},
 					{typ: '+', string: "1"},
 					{typ: ':', integer: 1},
 				}},
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "punsubscribe"},
 					{typ: '+', string: "2"},
 					{typ: ':', integer: 2},
@@ -3161,22 +3161,22 @@ func TestPubSubHooks(t *testing.T) {
 		deactivate2 := builder.Punsubscribe().Pattern("2").Build()
 		go func() {
 			mock.Expect(activate1.Commands()...).Expect(activate2.Commands()...).Reply(
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "subscribe"},
 					{typ: '+', string: "1"},
 					{typ: ':', integer: 1},
 				}},
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "psubscribe"},
 					{typ: '+', string: "2"},
 					{typ: ':', integer: 2},
 				}},
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "message"},
 					{typ: '+', string: "1"},
 					{typ: '+', string: "11"},
 				}},
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "pmessage"},
 					{typ: '+', string: "2"},
 					{typ: '+', string: "22"},
@@ -3184,12 +3184,12 @@ func TestPubSubHooks(t *testing.T) {
 				}},
 			)
 			mock.Expect(deactivate1.Commands()...).Expect(deactivate2.Commands()...).Reply(
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "unsubscribe"},
 					{typ: '+', string: "1"},
 					{typ: ':', integer: 1},
 				}},
-				RedisMessage{typ: '>', values: []RedisMessage{
+				ValkeyMessage{typ: '>', values: []ValkeyMessage{
 					{typ: '+', string: "punsubscribe"},
 					{typ: '+', string: "2"},
 					{typ: ':', integer: 2},
@@ -3226,7 +3226,7 @@ func TestExitOnWriteError(t *testing.T) {
 	closeConn()
 
 	for i := 0; i < 2; i++ {
-		if err := p.Do(context.Background(), cmds.NewCompleted([]string{"GET", "a"})).NonRedisError(); err != io.EOF && !strings.HasPrefix(err.Error(), "io:") {
+		if err := p.Do(context.Background(), cmds.NewCompleted([]string{"GET", "a"})).NonValkeyError(); err != io.EOF && !strings.HasPrefix(err.Error(), "io:") {
 			t.Errorf("unexpected cached result, expected io err, got %v", err)
 		}
 	}
@@ -3245,7 +3245,7 @@ func TestExitOnPubSubSubscribeWriteError(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			atomic.AddInt64(&count, 1)
-			if err := p.Do(context.Background(), activate).NonRedisError(); err != io.EOF && !strings.HasPrefix(err.Error(), "io:") {
+			if err := p.Do(context.Background(), activate).NonValkeyError(); err != io.EOF && !strings.HasPrefix(err.Error(), "io:") {
 				t.Errorf("unexpected result, expected io err, got %v", err)
 			}
 		}()
@@ -3263,7 +3263,7 @@ func TestExitOnWriteMultiError(t *testing.T) {
 	closeConn()
 
 	for i := 0; i < 2; i++ {
-		if err := p.DoMulti(context.Background(), cmds.NewCompleted([]string{"GET", "a"})).s[0].NonRedisError(); err != io.EOF && !strings.HasPrefix(err.Error(), "io:") {
+		if err := p.DoMulti(context.Background(), cmds.NewCompleted([]string{"GET", "a"})).s[0].NonValkeyError(); err != io.EOF && !strings.HasPrefix(err.Error(), "io:") {
 			t.Errorf("unexpected result, expected io err, got %v", err)
 		}
 	}
@@ -3337,10 +3337,10 @@ func TestExitAllGoroutineOnWriteError(t *testing.T) {
 	for i := 0; i < times; i++ {
 		go func() {
 			defer wg.Done()
-			if err := conn.Do(context.Background(), cmds.NewCompleted([]string{"GET", "a"})).NonRedisError(); err != io.EOF && !strings.HasPrefix(err.Error(), "io:") {
+			if err := conn.Do(context.Background(), cmds.NewCompleted([]string{"GET", "a"})).NonValkeyError(); err != io.EOF && !strings.HasPrefix(err.Error(), "io:") {
 				t.Errorf("unexpected result, expected io err, got %v", err)
 			}
-			if err := conn.DoMulti(context.Background(), cmds.NewCompleted([]string{"GET", "a"})).s[0].NonRedisError(); err != io.EOF && !strings.HasPrefix(err.Error(), "io:") {
+			if err := conn.DoMulti(context.Background(), cmds.NewCompleted([]string{"GET", "a"})).s[0].NonValkeyError(); err != io.EOF && !strings.HasPrefix(err.Error(), "io:") {
 				t.Errorf("unexpected result, expected io err, got %v", err)
 			}
 		}()
@@ -3357,7 +3357,7 @@ func TestExitOnReadError(t *testing.T) {
 	}()
 
 	for i := 0; i < 2; i++ {
-		if err := p.Do(context.Background(), cmds.NewCompleted([]string{"GET", "a"})).NonRedisError(); err != io.EOF && !strings.HasPrefix(err.Error(), "io:") {
+		if err := p.Do(context.Background(), cmds.NewCompleted([]string{"GET", "a"})).NonValkeyError(); err != io.EOF && !strings.HasPrefix(err.Error(), "io:") {
 			t.Errorf("unexpected result, expected io err, got %v", err)
 		}
 	}
@@ -3372,7 +3372,7 @@ func TestExitOnReadMultiError(t *testing.T) {
 	}()
 
 	for i := 0; i < 2; i++ {
-		if err := p.DoMulti(context.Background(), cmds.NewCompleted([]string{"GET", "a"})).s[0].NonRedisError(); err != io.EOF && !strings.HasPrefix(err.Error(), "io:") {
+		if err := p.DoMulti(context.Background(), cmds.NewCompleted([]string{"GET", "a"})).s[0].NonValkeyError(); err != io.EOF && !strings.HasPrefix(err.Error(), "io:") {
 			t.Errorf("unexpected result, expected io err, got %v", err)
 		}
 	}
@@ -3392,10 +3392,10 @@ func TestExitAllGoroutineOnReadError(t *testing.T) {
 	for i := 0; i < times; i++ {
 		go func() {
 			defer wg.Done()
-			if err := p.Do(context.Background(), cmds.NewCompleted([]string{"GET", "a"})).NonRedisError(); err != io.EOF && !strings.HasPrefix(err.Error(), "io:") {
+			if err := p.Do(context.Background(), cmds.NewCompleted([]string{"GET", "a"})).NonValkeyError(); err != io.EOF && !strings.HasPrefix(err.Error(), "io:") {
 				t.Errorf("unexpected result, expected io err, got %v", err)
 			}
-			if err := p.DoMulti(context.Background(), cmds.NewCompleted([]string{"GET", "a"})).s[0].NonRedisError(); err != io.EOF && !strings.HasPrefix(err.Error(), "io:") {
+			if err := p.DoMulti(context.Background(), cmds.NewCompleted([]string{"GET", "a"})).s[0].NonValkeyError(); err != io.EOF && !strings.HasPrefix(err.Error(), "io:") {
 				t.Errorf("unexpected result, expected io err, got %v", err)
 			}
 		}()
@@ -3441,10 +3441,10 @@ func TestAlreadyCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if err := p.Do(ctx, cmds.NewCompleted([]string{"GET", "a"})).NonRedisError(); !errors.Is(err, context.Canceled) {
+	if err := p.Do(ctx, cmds.NewCompleted([]string{"GET", "a"})).NonValkeyError(); !errors.Is(err, context.Canceled) {
 		t.Fatalf("unexpected err %v", err)
 	}
-	if err := p.DoMulti(ctx, cmds.NewCompleted([]string{"GET", "a"})).s[0].NonRedisError(); !errors.Is(err, context.Canceled) {
+	if err := p.DoMulti(ctx, cmds.NewCompleted([]string{"GET", "a"})).s[0].NonValkeyError(); !errors.Is(err, context.Canceled) {
 		t.Fatalf("unexpected err %v", err)
 	}
 
@@ -3459,10 +3459,10 @@ func TestAlreadyCanceledContext(t *testing.T) {
 	ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(-1*time.Second))
 	cancel()
 
-	if err := p.Do(ctx, cmds.NewCompleted([]string{"GET", "a"})).NonRedisError(); !errors.Is(err, context.DeadlineExceeded) {
+	if err := p.Do(ctx, cmds.NewCompleted([]string{"GET", "a"})).NonValkeyError(); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("unexpected err %v", err)
 	}
-	if err := p.DoMulti(ctx, cmds.NewCompleted([]string{"GET", "a"})).s[0].NonRedisError(); !errors.Is(err, context.DeadlineExceeded) {
+	if err := p.DoMulti(ctx, cmds.NewCompleted([]string{"GET", "a"})).s[0].NonValkeyError(); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("unexpected err %v", err)
 	}
 	close()
@@ -3479,7 +3479,7 @@ func TestCancelContext_Do(t *testing.T) {
 		mock.Expect().ReplyString("OK")
 	}()
 
-	if err := p.Do(ctx, cmds.NewCompleted([]string{"GET", "a"})).NonRedisError(); !errors.Is(err, context.Canceled) {
+	if err := p.Do(ctx, cmds.NewCompleted([]string{"GET", "a"})).NonValkeyError(); !errors.Is(err, context.Canceled) {
 		t.Fatalf("unexpected err %v", err)
 	}
 	shutdown()
@@ -3534,7 +3534,7 @@ func TestCancelContext_Do_Block(t *testing.T) {
 		mock.Expect().ReplyString("OK")
 	}()
 
-	if err := p.Do(ctx, cmds.NewBlockingCompleted([]string{"GET", "a"})).NonRedisError(); !errors.Is(err, context.Canceled) {
+	if err := p.Do(ctx, cmds.NewBlockingCompleted([]string{"GET", "a"})).NonValkeyError(); !errors.Is(err, context.Canceled) {
 		t.Fatalf("unexpected err %v", err)
 	}
 	shutdown()
@@ -3551,7 +3551,7 @@ func TestCancelContext_DoMulti(t *testing.T) {
 		mock.Expect().ReplyString("OK")
 	}()
 
-	if err := p.DoMulti(ctx, cmds.NewCompleted([]string{"GET", "a"})).s[0].NonRedisError(); !errors.Is(err, context.Canceled) {
+	if err := p.DoMulti(ctx, cmds.NewCompleted([]string{"GET", "a"})).s[0].NonValkeyError(); !errors.Is(err, context.Canceled) {
 		t.Fatalf("unexpected err %v", err)
 	}
 	shutdown()
@@ -3568,7 +3568,7 @@ func TestCancelContext_DoMulti_Block(t *testing.T) {
 		mock.Expect().ReplyString("OK")
 	}()
 
-	if err := p.DoMulti(ctx, cmds.NewBlockingCompleted([]string{"GET", "a"})).s[0].NonRedisError(); !errors.Is(err, context.Canceled) {
+	if err := p.DoMulti(ctx, cmds.NewBlockingCompleted([]string{"GET", "a"})).s[0].NonValkeyError(); !errors.Is(err, context.Canceled) {
 		t.Fatalf("unexpected err %v", err)
 	}
 	shutdown()
@@ -3620,7 +3620,7 @@ func TestForceClose_Do_Block(t *testing.T) {
 		p.Close()
 	}()
 
-	if err := p.Do(context.Background(), cmds.NewBlockingCompleted([]string{"GET", "a"})).NonRedisError(); err != io.EOF && !strings.HasPrefix(err.Error(), "io:") {
+	if err := p.Do(context.Background(), cmds.NewBlockingCompleted([]string{"GET", "a"})).NonValkeyError(); err != io.EOF && !strings.HasPrefix(err.Error(), "io:") {
 		t.Fatalf("unexpected err %v", err)
 	}
 }
@@ -3681,7 +3681,7 @@ func TestForceClose_Do_Canceled_Block(t *testing.T) {
 		mock.Expect().ReplyString("OK")
 	}()
 
-	if err := p.Do(ctx, cmds.NewBlockingCompleted([]string{"GET", "a"})).NonRedisError(); !errors.Is(err, context.Canceled) {
+	if err := p.Do(ctx, cmds.NewBlockingCompleted([]string{"GET", "a"})).NonValkeyError(); !errors.Is(err, context.Canceled) {
 		t.Fatalf("unexpected err %v", err)
 	}
 	p.Close()
@@ -3695,7 +3695,7 @@ func TestForceClose_DoMulti_Block(t *testing.T) {
 		p.Close()
 	}()
 
-	if err := p.DoMulti(context.Background(), cmds.NewBlockingCompleted([]string{"GET", "a"})).s[0].NonRedisError(); err != io.EOF && !strings.HasPrefix(err.Error(), "io:") {
+	if err := p.DoMulti(context.Background(), cmds.NewBlockingCompleted([]string{"GET", "a"})).s[0].NonValkeyError(); err != io.EOF && !strings.HasPrefix(err.Error(), "io:") {
 		t.Fatalf("unexpected err %v", err)
 	}
 }
@@ -3756,7 +3756,7 @@ func TestForceClose_DoMulti_Canceled_Block(t *testing.T) {
 		mock.Expect().ReplyString("OK")
 	}()
 
-	if err := p.DoMulti(ctx, cmds.NewBlockingCompleted([]string{"GET", "a"})).s[0].NonRedisError(); !errors.Is(err, context.Canceled) {
+	if err := p.DoMulti(ctx, cmds.NewBlockingCompleted([]string{"GET", "a"})).s[0].NonValkeyError(); !errors.Is(err, context.Canceled) {
 		t.Fatalf("unexpected err %v", err)
 	}
 	p.Close()
@@ -3773,7 +3773,7 @@ func TestSyncModeSwitchingWithDeadlineExceed_Do(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func() {
-			if err := p.Do(ctx, cmds.NewCompleted([]string{"GET", "a"})).NonRedisError(); !errors.Is(err, context.DeadlineExceeded) {
+			if err := p.Do(ctx, cmds.NewCompleted([]string{"GET", "a"})).NonValkeyError(); !errors.Is(err, context.DeadlineExceeded) {
 				t.Errorf("unexpected err %v", err)
 			}
 			wg.Done()
@@ -3798,7 +3798,7 @@ func TestSyncModeSwitchingWithDeadlineExceed_DoMulti(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func() {
-			if err := p.DoMulti(ctx, cmds.NewCompleted([]string{"GET", "a"})).s[0].NonRedisError(); !errors.Is(err, context.DeadlineExceeded) {
+			if err := p.DoMulti(ctx, cmds.NewCompleted([]string{"GET", "a"})).s[0].NonValkeyError(); !errors.Is(err, context.DeadlineExceeded) {
 				t.Errorf("unexpected err %v", err)
 			}
 			wg.Done()
@@ -3819,7 +3819,7 @@ func TestOngoingDeadlineContextInSyncMode_Do(t *testing.T) {
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(1*time.Second/2))
 	defer cancel()
 
-	if err := p.Do(ctx, cmds.NewCompleted([]string{"GET", "a"})).NonRedisError(); !errors.Is(err, context.DeadlineExceeded) {
+	if err := p.Do(ctx, cmds.NewCompleted([]string{"GET", "a"})).NonValkeyError(); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("unexpected err %v", err)
 	}
 	p.Close()
@@ -3829,7 +3829,7 @@ func TestWriteDeadlineInSyncMode_Do(t *testing.T) {
 	p, _, _, closeConn := setup(t, ClientOption{ConnWriteTimeout: 1 * time.Second / 2, Dialer: net.Dialer{KeepAlive: time.Second / 3}})
 	defer closeConn()
 
-	if err := p.Do(context.Background(), cmds.NewCompleted([]string{"GET", "a"})).NonRedisError(); !errors.Is(err, context.DeadlineExceeded) {
+	if err := p.Do(context.Background(), cmds.NewCompleted([]string{"GET", "a"})).NonValkeyError(); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("unexpected err %v", err)
 	}
 	p.Close()
@@ -3843,7 +3843,7 @@ func TestWriteDeadlineIsShorterThanContextDeadlineInSyncMode_Do(t *testing.T) {
 	defer cancel()
 
 	startTime := time.Now()
-	if err := p.Do(ctx, cmds.NewCompleted([]string{"GET", "a"})).NonRedisError(); !errors.Is(err, context.DeadlineExceeded) {
+	if err := p.Do(ctx, cmds.NewCompleted([]string{"GET", "a"})).NonValkeyError(); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("unexpected err %v", err)
 	}
 
@@ -3861,7 +3861,7 @@ func TestOngoingDeadlineContextInSyncMode_DoMulti(t *testing.T) {
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(1*time.Second/2))
 	defer cancel()
 
-	if err := p.DoMulti(ctx, cmds.NewCompleted([]string{"GET", "a"})).s[0].NonRedisError(); !errors.Is(err, context.DeadlineExceeded) {
+	if err := p.DoMulti(ctx, cmds.NewCompleted([]string{"GET", "a"})).s[0].NonValkeyError(); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("unexpected err %v", err)
 	}
 	p.Close()
@@ -3871,7 +3871,7 @@ func TestWriteDeadlineInSyncMode_DoMulti(t *testing.T) {
 	p, _, _, closeConn := setup(t, ClientOption{ConnWriteTimeout: time.Second / 2, Dialer: net.Dialer{KeepAlive: time.Second / 3}})
 	defer closeConn()
 
-	if err := p.DoMulti(context.Background(), cmds.NewCompleted([]string{"GET", "a"})).s[0].NonRedisError(); !errors.Is(err, context.DeadlineExceeded) {
+	if err := p.DoMulti(context.Background(), cmds.NewCompleted([]string{"GET", "a"})).s[0].NonValkeyError(); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("unexpected err %v", err)
 	}
 	p.Close()
@@ -3885,7 +3885,7 @@ func TestWriteDeadlineIsShorterThanContextDeadlineInSyncMode_DoMulti(t *testing.
 	defer cancel()
 
 	startTime := time.Now()
-	if err := p.DoMulti(ctx, cmds.NewCompleted([]string{"GET", "a"})).s[0].NonRedisError(); !errors.Is(err, context.DeadlineExceeded) {
+	if err := p.DoMulti(ctx, cmds.NewCompleted([]string{"GET", "a"})).s[0].NonValkeyError(); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("unexpected err %v", err)
 	}
 
@@ -4048,12 +4048,12 @@ func TestPipe_CleanSubscriptions_6(t *testing.T) {
 		p.CleanSubscriptions()
 	}()
 	mock.Expect("UNSUBSCRIBE").Expect("PUNSUBSCRIBE").Reply(
-		RedisMessage{typ: '>', values: []RedisMessage{
+		ValkeyMessage{typ: '>', values: []ValkeyMessage{
 			{typ: '+', string: "unsubscribe"},
 			{typ: '_'},
 			{typ: ':', integer: 1},
 		}},
-		RedisMessage{typ: '>', values: []RedisMessage{
+		ValkeyMessage{typ: '>', values: []ValkeyMessage{
 			{typ: '+', string: "punsubscribe"},
 			{typ: '_'},
 			{typ: ':', integer: 2},
@@ -4069,17 +4069,17 @@ func TestPipe_CleanSubscriptions_7(t *testing.T) {
 		p.CleanSubscriptions()
 	}()
 	mock.Expect("UNSUBSCRIBE").Expect("PUNSUBSCRIBE").Expect("SUNSUBSCRIBE").Reply(
-		RedisMessage{typ: '>', values: []RedisMessage{
+		ValkeyMessage{typ: '>', values: []ValkeyMessage{
 			{typ: '+', string: "unsubscribe"},
 			{typ: '_'},
 			{typ: ':', integer: 1},
 		}},
-		RedisMessage{typ: '>', values: []RedisMessage{
+		ValkeyMessage{typ: '>', values: []ValkeyMessage{
 			{typ: '+', string: "punsubscribe"},
 			{typ: '_'},
 			{typ: ':', integer: 2},
 		}},
-		RedisMessage{typ: '>', values: []RedisMessage{
+		ValkeyMessage{typ: '>', values: []ValkeyMessage{
 			{typ: '+', string: "sunsubscribe"},
 			{typ: '_'},
 			{typ: ':', integer: 2},

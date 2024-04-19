@@ -1,4 +1,4 @@
-package rueidis
+package valkey
 
 import (
 	"bufio"
@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/redis/rueidis/internal/cmds"
+	"github.com/rueian/valkey-go/internal/cmds"
 )
 
 func setupMux(wires []*mockWire) (conn *mux, checkClean func(t *testing.T)) {
@@ -67,12 +67,12 @@ func TestNewMuxDailErr(t *testing.T) {
 func TestNewMux(t *testing.T) {
 	defer ShouldNotLeaked(SetupLeakDetection())
 	n1, n2 := net.Pipe()
-	mock := &redisMock{t: t, buf: bufio.NewReader(n2), conn: n2}
+	mock := &valkeyMock{t: t, buf: bufio.NewReader(n2), conn: n2}
 	go func() {
 		mock.Expect("HELLO", "3").
-			Reply(RedisMessage{
+			Reply(ValkeyMessage{
 				typ: '%',
-				values: []RedisMessage{
+				values: []ValkeyMessage{
 					{typ: '+', string: "proto"},
 					{typ: ':', integer: 3},
 				},
@@ -159,8 +159,8 @@ func TestMuxReuseWire(t *testing.T) {
 	t.Run("reuse wire if no error", func(t *testing.T) {
 		m, checkClean := setupMux([]*mockWire{
 			{
-				DoFn: func(cmd Completed) RedisResult {
-					return newResult(RedisMessage{typ: '+', string: "PONG"}, nil)
+				DoFn: func(cmd Completed) ValkeyResult {
+					return newResult(ValkeyMessage{typ: '+', string: "PONG"}, nil)
 				},
 			},
 		})
@@ -176,18 +176,18 @@ func TestMuxReuseWire(t *testing.T) {
 
 	t.Run("reuse blocking pool", func(t *testing.T) {
 		blocking := make(chan struct{})
-		response := make(chan RedisResult)
+		response := make(chan ValkeyResult)
 		m, checkClean := setupMux([]*mockWire{
 			{
 				// leave first wire for pipeline calls
 			},
 			{
-				DoFn: func(cmd Completed) RedisResult {
-					return newResult(RedisMessage{typ: '+', string: "ACQUIRED"}, nil)
+				DoFn: func(cmd Completed) ValkeyResult {
+					return newResult(ValkeyMessage{typ: '+', string: "ACQUIRED"}, nil)
 				},
 			},
 			{
-				DoFn: func(cmd Completed) RedisResult {
+				DoFn: func(cmd Completed) ValkeyResult {
 					blocking <- struct{}{}
 					return <-response
 				},
@@ -220,7 +220,7 @@ func TestMuxReuseWire(t *testing.T) {
 			t.Fatalf("unexpected response %v", val)
 		}
 
-		response <- newResult(RedisMessage{typ: '+', string: "BLOCK_RESPONSE"}, nil)
+		response <- newResult(ValkeyMessage{typ: '+', string: "BLOCK_RESPONSE"}, nil)
 		<-blocking
 	})
 
@@ -258,8 +258,8 @@ func TestMuxDelegation(t *testing.T) {
 	t.Run("wire info", func(t *testing.T) {
 		m, checkClean := setupMux([]*mockWire{
 			{
-				InfoFn: func() map[string]RedisMessage {
-					return map[string]RedisMessage{"key": {typ: '+', string: "value"}}
+				InfoFn: func() map[string]ValkeyMessage {
+					return map[string]ValkeyMessage{"key": {typ: '+', string: "value"}}
 				},
 			},
 		})
@@ -304,7 +304,7 @@ func TestMuxDelegation(t *testing.T) {
 	t.Run("wire do", func(t *testing.T) {
 		m, checkClean := setupMux([]*mockWire{
 			{
-				DoFn: func(cmd Completed) RedisResult {
+				DoFn: func(cmd Completed) ValkeyResult {
 					return newErrResult(context.DeadlineExceeded)
 				},
 				ErrorFn: func() error {
@@ -312,11 +312,11 @@ func TestMuxDelegation(t *testing.T) {
 				},
 			},
 			{
-				DoFn: func(cmd Completed) RedisResult {
+				DoFn: func(cmd Completed) ValkeyResult {
 					if cmd.Commands()[0] != "READONLY_COMMAND" {
 						t.Fatalf("command should be READONLY_COMMAND")
 					}
-					return newResult(RedisMessage{typ: '+', string: "READONLY_COMMAND_RESPONSE"}, nil)
+					return newResult(ValkeyMessage{typ: '+', string: "READONLY_COMMAND_RESPONSE"}, nil)
 				},
 			},
 		})
@@ -335,8 +335,8 @@ func TestMuxDelegation(t *testing.T) {
 	t.Run("wire do stream", func(t *testing.T) {
 		m, checkClean := setupMux([]*mockWire{
 			{
-				DoStreamFn: func(pool *pool, cmd Completed) RedisResultStream {
-					return RedisResultStream{e: errors.New(cmd.Commands()[0])}
+				DoStreamFn: func(pool *pool, cmd Completed) ValkeyResultStream {
+					return ValkeyResultStream{e: errors.New(cmd.Commands()[0])}
 				},
 			},
 		})
@@ -350,16 +350,16 @@ func TestMuxDelegation(t *testing.T) {
 	t.Run("wire do multi", func(t *testing.T) {
 		m, checkClean := setupMux([]*mockWire{
 			{
-				DoMultiFn: func(multi ...Completed) *redisresults {
-					return &redisresults{s: []RedisResult{newErrResult(context.DeadlineExceeded)}}
+				DoMultiFn: func(multi ...Completed) *valkeyresults {
+					return &valkeyresults{s: []ValkeyResult{newErrResult(context.DeadlineExceeded)}}
 				},
 				ErrorFn: func() error {
 					return context.DeadlineExceeded
 				},
 			},
 			{
-				DoMultiFn: func(multi ...Completed) *redisresults {
-					return &redisresults{s: []RedisResult{newResult(RedisMessage{typ: '+', string: "MULTI_COMMANDS_RESPONSE"}, nil)}}
+				DoMultiFn: func(multi ...Completed) *valkeyresults {
+					return &valkeyresults{s: []ValkeyResult{newResult(ValkeyMessage{typ: '+', string: "MULTI_COMMANDS_RESPONSE"}, nil)}}
 				},
 			},
 		})
@@ -378,8 +378,8 @@ func TestMuxDelegation(t *testing.T) {
 	t.Run("wire do multi stream", func(t *testing.T) {
 		m, checkClean := setupMux([]*mockWire{
 			{
-				DoMultiStreamFn: func(pool *pool, cmd ...Completed) MultiRedisResultStream {
-					return MultiRedisResultStream{e: errors.New(cmd[0].Commands()[0])}
+				DoMultiStreamFn: func(pool *pool, cmd ...Completed) MultiValkeyResultStream {
+					return MultiValkeyResultStream{e: errors.New(cmd[0].Commands()[0])}
 				},
 			},
 		})
@@ -393,7 +393,7 @@ func TestMuxDelegation(t *testing.T) {
 	t.Run("wire do cache", func(t *testing.T) {
 		m, checkClean := setupMux([]*mockWire{
 			{
-				DoCacheFn: func(cmd Cacheable, ttl time.Duration) RedisResult {
+				DoCacheFn: func(cmd Cacheable, ttl time.Duration) ValkeyResult {
 					return newErrResult(context.DeadlineExceeded)
 				},
 				ErrorFn: func() error {
@@ -401,8 +401,8 @@ func TestMuxDelegation(t *testing.T) {
 				},
 			},
 			{
-				DoCacheFn: func(cmd Cacheable, ttl time.Duration) RedisResult {
-					return newResult(RedisMessage{typ: '+', string: "READONLY_COMMAND_RESPONSE"}, nil)
+				DoCacheFn: func(cmd Cacheable, ttl time.Duration) ValkeyResult {
+					return newResult(ValkeyMessage{typ: '+', string: "READONLY_COMMAND_RESPONSE"}, nil)
 				},
 			},
 		})
@@ -421,16 +421,16 @@ func TestMuxDelegation(t *testing.T) {
 	t.Run("wire do multi cache", func(t *testing.T) {
 		m, checkClean := setupMux([]*mockWire{
 			{
-				DoMultiCacheFn: func(multi ...CacheableTTL) *redisresults {
-					return &redisresults{s: []RedisResult{newErrResult(context.DeadlineExceeded)}}
+				DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
+					return &valkeyresults{s: []ValkeyResult{newErrResult(context.DeadlineExceeded)}}
 				},
 				ErrorFn: func() error {
 					return context.DeadlineExceeded
 				},
 			},
 			{
-				DoMultiCacheFn: func(multi ...CacheableTTL) *redisresults {
-					return &redisresults{s: []RedisResult{newResult(RedisMessage{typ: '+', string: "MULTI_COMMANDS_RESPONSE"}, nil)}}
+				DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
+					return &valkeyresults{s: []ValkeyResult{newResult(ValkeyMessage{typ: '+', string: "MULTI_COMMANDS_RESPONSE"}, nil)}}
 				},
 			},
 		})
@@ -452,16 +452,16 @@ func TestMuxDelegation(t *testing.T) {
 		for i := range wires {
 			idx := uint16(i)
 			wires[i] = &mockWire{
-				DoMultiCacheFn: func(multi ...CacheableTTL) *redisresults {
-					result := make([]RedisResult, len(multi))
+				DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
+					result := make([]ValkeyResult, len(multi))
 					for j, cmd := range multi {
 						if s := cmd.Cmd.Slot() & uint16(len(wires)-1); s != idx {
 							result[j] = newErrResult(errors.New(fmt.Sprintf("wrong slot %v %v", s, idx)))
 						} else {
-							result[j] = newResult(RedisMessage{typ: '+', string: cmd.Cmd.Commands()[1]}, nil)
+							result[j] = newResult(ValkeyMessage{typ: '+', string: cmd.Cmd.Commands()[1]}, nil)
 						}
 					}
-					return &redisresults{s: result}
+					return &valkeyresults{s: result}
 				},
 			}
 		}
@@ -494,13 +494,13 @@ func TestMuxDelegation(t *testing.T) {
 		for i := range wires {
 			idx := uint16(i)
 			wires[i] = &mockWire{
-				DoMultiCacheFn: func(multi ...CacheableTTL) *redisresults {
+				DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
 					for _, cmd := range multi {
 						if s := cmd.Cmd.Slot() & uint16(len(wires)-1); s != idx {
-							return &redisresults{s: []RedisResult{newErrResult(errors.New(fmt.Sprintf("wrong slot %v %v", s, idx)))}}
+							return &valkeyresults{s: []ValkeyResult{newErrResult(errors.New(fmt.Sprintf("wrong slot %v %v", s, idx)))}}
 						}
 					}
-					return &redisresults{s: []RedisResult{newErrResult(context.DeadlineExceeded)}}
+					return &valkeyresults{s: []ValkeyResult{newErrResult(context.DeadlineExceeded)}}
 				},
 				ErrorFn: func() error {
 					return context.DeadlineExceeded
@@ -556,20 +556,20 @@ func TestMuxDelegation(t *testing.T) {
 
 	t.Run("single blocking", func(t *testing.T) {
 		blocked := make(chan struct{})
-		responses := make(chan RedisResult)
+		responses := make(chan ValkeyResult)
 
 		m, checkClean := setupMux([]*mockWire{
 			{
 				// leave first wire for pipeline calls
 			},
 			{
-				DoFn: func(cmd Completed) RedisResult {
+				DoFn: func(cmd Completed) ValkeyResult {
 					blocked <- struct{}{}
 					return <-responses
 				},
 			},
 			{
-				DoFn: func(cmd Completed) RedisResult {
+				DoFn: func(cmd Completed) ValkeyResult {
 					blocked <- struct{}{}
 					return <-responses
 				},
@@ -598,7 +598,7 @@ func TestMuxDelegation(t *testing.T) {
 			<-blocked
 		}
 		for i := 0; i < 2; i++ {
-			responses <- newResult(RedisMessage{typ: '+', string: "BLOCK_COMMANDS_RESPONSE"}, nil)
+			responses <- newResult(ValkeyMessage{typ: '+', string: "BLOCK_COMMANDS_RESPONSE"}, nil)
 		}
 		wg.Wait()
 	})
@@ -610,7 +610,7 @@ func TestMuxDelegation(t *testing.T) {
 				// leave first wire for pipeline calls
 			},
 			{
-				DoFn: func(cmd Completed) RedisResult {
+				DoFn: func(cmd Completed) ValkeyResult {
 					return newErrResult(context.DeadlineExceeded)
 				},
 				ErrorFn: func() error {
@@ -621,8 +621,8 @@ func TestMuxDelegation(t *testing.T) {
 				},
 			},
 			{
-				DoFn: func(cmd Completed) RedisResult {
-					return newResult(RedisMessage{typ: '+', string: "OK"}, nil)
+				DoFn: func(cmd Completed) ValkeyResult {
+					return newResult(ValkeyMessage{typ: '+', string: "OK"}, nil)
 				},
 			},
 		})
@@ -644,22 +644,22 @@ func TestMuxDelegation(t *testing.T) {
 
 	t.Run("multiple blocking", func(t *testing.T) {
 		blocked := make(chan struct{})
-		responses := make(chan RedisResult)
+		responses := make(chan ValkeyResult)
 
 		m, checkClean := setupMux([]*mockWire{
 			{
 				// leave first wire for pipeline calls
 			},
 			{
-				DoMultiFn: func(cmd ...Completed) *redisresults {
+				DoMultiFn: func(cmd ...Completed) *valkeyresults {
 					blocked <- struct{}{}
-					return &redisresults{s: []RedisResult{<-responses}}
+					return &valkeyresults{s: []ValkeyResult{<-responses}}
 				},
 			},
 			{
-				DoMultiFn: func(cmd ...Completed) *redisresults {
+				DoMultiFn: func(cmd ...Completed) *valkeyresults {
 					blocked <- struct{}{}
-					return &redisresults{s: []RedisResult{<-responses}}
+					return &valkeyresults{s: []ValkeyResult{<-responses}}
 				},
 			},
 		})
@@ -690,7 +690,7 @@ func TestMuxDelegation(t *testing.T) {
 			<-blocked
 		}
 		for i := 0; i < 2; i++ {
-			responses <- newResult(RedisMessage{typ: '+', string: "BLOCK_COMMANDS_RESPONSE"}, nil)
+			responses <- newResult(ValkeyMessage{typ: '+', string: "BLOCK_COMMANDS_RESPONSE"}, nil)
 		}
 		wg.Wait()
 	})
@@ -702,8 +702,8 @@ func TestMuxDelegation(t *testing.T) {
 				// leave first wire for pipeline calls
 			},
 			{
-				DoMultiFn: func(cmd ...Completed) *redisresults {
-					return &redisresults{s: []RedisResult{newErrResult(context.DeadlineExceeded)}}
+				DoMultiFn: func(cmd ...Completed) *valkeyresults {
+					return &valkeyresults{s: []ValkeyResult{newErrResult(context.DeadlineExceeded)}}
 				},
 				ErrorFn: func() error {
 					return context.DeadlineExceeded
@@ -713,8 +713,8 @@ func TestMuxDelegation(t *testing.T) {
 				},
 			},
 			{
-				DoFn: func(cmd Completed) RedisResult {
-					return newResult(RedisMessage{typ: '+', string: "OK"}, nil)
+				DoFn: func(cmd Completed) ValkeyResult {
+					return newResult(ValkeyMessage{typ: '+', string: "OK"}, nil)
 				},
 			},
 		})
@@ -746,16 +746,16 @@ func TestMuxRegisterCloseHook(t *testing.T) {
 		var hook atomic.Value
 		m, checkClean := setupMux([]*mockWire{
 			{
-				DoFn: func(cmd Completed) RedisResult {
-					return newResult(RedisMessage{typ: '+', string: "PONG1"}, nil)
+				DoFn: func(cmd Completed) ValkeyResult {
+					return newResult(ValkeyMessage{typ: '+', string: "PONG1"}, nil)
 				},
 				SetOnCloseHookFn: func(fn func(error)) {
 					hook.Store(fn)
 				},
 			},
 			{
-				DoFn: func(cmd Completed) RedisResult {
-					return newResult(RedisMessage{typ: '+', string: "PONG2"}, nil)
+				DoFn: func(cmd Completed) ValkeyResult {
+					return newResult(ValkeyMessage{typ: '+', string: "PONG2"}, nil)
 				},
 			},
 		})
@@ -773,8 +773,8 @@ func TestMuxRegisterCloseHook(t *testing.T) {
 		var hook atomic.Value
 		m, checkClean := setupMux([]*mockWire{
 			{
-				DoFn: func(cmd Completed) RedisResult {
-					return newResult(RedisMessage{typ: '+', string: "PONG1"}, nil)
+				DoFn: func(cmd Completed) ValkeyResult {
+					return newResult(ValkeyMessage{typ: '+', string: "PONG1"}, nil)
 				},
 				SetOnCloseHookFn: func(fn func(error)) {
 					hook.Store(fn)
@@ -826,14 +826,14 @@ func BenchmarkClientSideCaching(b *testing.B) {
 }
 
 type mockWire struct {
-	DoFn            func(cmd Completed) RedisResult
-	DoCacheFn       func(cmd Cacheable, ttl time.Duration) RedisResult
-	DoMultiFn       func(multi ...Completed) *redisresults
-	DoMultiCacheFn  func(multi ...CacheableTTL) *redisresults
+	DoFn            func(cmd Completed) ValkeyResult
+	DoCacheFn       func(cmd Cacheable, ttl time.Duration) ValkeyResult
+	DoMultiFn       func(multi ...Completed) *valkeyresults
+	DoMultiCacheFn  func(multi ...CacheableTTL) *valkeyresults
 	ReceiveFn       func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error
-	DoStreamFn      func(pool *pool, cmd Completed) RedisResultStream
-	DoMultiStreamFn func(pool *pool, cmd ...Completed) MultiRedisResultStream
-	InfoFn          func() map[string]RedisMessage
+	DoStreamFn      func(pool *pool, cmd Completed) ValkeyResultStream
+	DoMultiStreamFn func(pool *pool, cmd ...Completed) MultiValkeyResultStream
+	InfoFn          func() map[string]ValkeyMessage
 	VersionFn       func() int
 	ErrorFn         func() error
 	CloseFn         func()
@@ -843,28 +843,28 @@ type mockWire struct {
 	SetOnCloseHookFn     func(fn func(error))
 }
 
-func (m *mockWire) Do(ctx context.Context, cmd Completed) RedisResult {
+func (m *mockWire) Do(ctx context.Context, cmd Completed) ValkeyResult {
 	if m.DoFn != nil {
 		return m.DoFn(cmd)
 	}
-	return RedisResult{}
+	return ValkeyResult{}
 }
 
-func (m *mockWire) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) RedisResult {
+func (m *mockWire) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) ValkeyResult {
 	if m.DoCacheFn != nil {
 		return m.DoCacheFn(cmd, ttl)
 	}
-	return RedisResult{}
+	return ValkeyResult{}
 }
 
-func (m *mockWire) DoMultiCache(ctx context.Context, multi ...CacheableTTL) *redisresults {
+func (m *mockWire) DoMultiCache(ctx context.Context, multi ...CacheableTTL) *valkeyresults {
 	if m.DoMultiCacheFn != nil {
 		return m.DoMultiCacheFn(multi...)
 	}
 	return nil
 }
 
-func (m *mockWire) DoMulti(ctx context.Context, multi ...Completed) *redisresults {
+func (m *mockWire) DoMulti(ctx context.Context, multi ...Completed) *valkeyresults {
 	if m.DoMultiFn != nil {
 		return m.DoMultiFn(multi...)
 	}
@@ -878,18 +878,18 @@ func (m *mockWire) Receive(ctx context.Context, subscribe Completed, fn func(mes
 	return nil
 }
 
-func (m *mockWire) DoStream(ctx context.Context, pool *pool, cmd Completed) RedisResultStream {
+func (m *mockWire) DoStream(ctx context.Context, pool *pool, cmd Completed) ValkeyResultStream {
 	if m.DoStreamFn != nil {
 		return m.DoStreamFn(pool, cmd)
 	}
-	return RedisResultStream{}
+	return ValkeyResultStream{}
 }
 
-func (m *mockWire) DoMultiStream(ctx context.Context, pool *pool, cmd ...Completed) MultiRedisResultStream {
+func (m *mockWire) DoMultiStream(ctx context.Context, pool *pool, cmd ...Completed) MultiValkeyResultStream {
 	if m.DoMultiStreamFn != nil {
 		return m.DoMultiStreamFn(pool, cmd...)
 	}
-	return MultiRedisResultStream{}
+	return MultiValkeyResultStream{}
 }
 
 func (m *mockWire) CleanSubscriptions() {
@@ -913,7 +913,7 @@ func (m *mockWire) SetOnCloseHook(fn func(error)) {
 	return
 }
 
-func (m *mockWire) Info() map[string]RedisMessage {
+func (m *mockWire) Info() map[string]ValkeyMessage {
 	if m.InfoFn != nil {
 		return m.InfoFn()
 	}

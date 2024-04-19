@@ -1,4 +1,4 @@
-package rueidis
+package valkey
 
 import (
 	"container/list"
@@ -8,7 +8,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/redis/rueidis/internal/cmds"
+	"github.com/rueian/valkey-go/internal/cmds"
 )
 
 const (
@@ -28,17 +28,17 @@ type cacheEntry struct {
 	ch   chan struct{}
 	kc   *keyCache
 	cmd  string
-	val  RedisMessage
+	val  ValkeyMessage
 	size int
 }
 
-func (e *cacheEntry) Wait(ctx context.Context) (RedisMessage, error) {
+func (e *cacheEntry) Wait(ctx context.Context) (ValkeyMessage, error) {
 	if ch := ctx.Done(); ch == nil {
 		<-e.ch
 	} else {
 		select {
 		case <-ch:
-			return RedisMessage{}, ctx.Err()
+			return ValkeyMessage{}, ctx.Err()
 		case <-e.ch:
 		}
 	}
@@ -70,7 +70,7 @@ func newLRU(opt CacheStoreOption) CacheStore {
 	}
 }
 
-func (c *lru) Flight(key, cmd string, ttl time.Duration, now time.Time) (v RedisMessage, ce CacheEntry) {
+func (c *lru) Flight(key, cmd string, ttl time.Duration, now time.Time) (v ValkeyMessage, ce CacheEntry) {
 	var ok bool
 	var kc *keyCache
 	var ele, back *list.Element
@@ -98,7 +98,7 @@ func (c *lru) Flight(key, cmd string, ttl time.Duration, now time.Time) (v Redis
 		return v, e
 	}
 
-	v = RedisMessage{}
+	v = ValkeyMessage{}
 	e = nil
 
 	c.mu.Lock()
@@ -129,7 +129,7 @@ ret:
 	return v, ce
 }
 
-func (c *lru) Flights(now time.Time, multi []CacheableTTL, results []RedisResult, entries map[int]CacheEntry) (missed []int) {
+func (c *lru) Flights(now time.Time, multi []CacheableTTL, results []ValkeyResult, entries map[int]CacheEntry) (missed []int) {
 	var moves []*list.Element
 
 	c.mu.RLock()
@@ -208,7 +208,7 @@ func (c *lru) Flights(now time.Time, multi []CacheableTTL, results []RedisResult
 		}
 	miss2:
 		atomic.AddUint32(&kc.miss, 1)
-		v := RedisMessage{}
+		v := ValkeyMessage{}
 		v.setExpireAt(now.Add(multi[i].TTL).UnixMilli())
 		kc.cache[cmd] = c.list.PushBack(&cacheEntry{cmd: cmd, kc: kc, val: v, ch: make(chan struct{})})
 		missed[j] = i
@@ -218,7 +218,7 @@ func (c *lru) Flights(now time.Time, multi []CacheableTTL, results []RedisResult
 	return missed[:j]
 }
 
-func (c *lru) Update(key, cmd string, value RedisMessage) (pxat int64) {
+func (c *lru) Update(key, cmd string, value ValkeyMessage) (pxat int64) {
 	var ch chan struct{}
 	c.mu.Lock()
 	if kc, ok := c.store[key]; ok {
@@ -309,7 +309,7 @@ func (c *lru) purge(key string, kc *keyCache) {
 	}
 }
 
-func (c *lru) Delete(keys []RedisMessage) {
+func (c *lru) Delete(keys []ValkeyMessage) {
 	c.mu.Lock()
 	if keys == nil {
 		for key, kc := range c.store {

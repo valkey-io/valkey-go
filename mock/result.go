@@ -11,70 +11,70 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/redis/rueidis"
+	"github.com/rueian/valkey-go"
 )
 
-func Result(val rueidis.RedisMessage) rueidis.RedisResult {
+func Result(val valkey.ValkeyMessage) valkey.ValkeyResult {
 	r := result{val: val}
-	return *(*rueidis.RedisResult)(unsafe.Pointer(&r))
+	return *(*valkey.ValkeyResult)(unsafe.Pointer(&r))
 }
 
-func ErrorResult(err error) rueidis.RedisResult {
+func ErrorResult(err error) valkey.ValkeyResult {
 	r := result{err: err}
-	return *(*rueidis.RedisResult)(unsafe.Pointer(&r))
+	return *(*valkey.ValkeyResult)(unsafe.Pointer(&r))
 }
 
-func RedisString(v string) rueidis.RedisMessage {
+func ValkeyString(v string) valkey.ValkeyMessage {
 	m := message{typ: '+', string: v}
-	return *(*rueidis.RedisMessage)(unsafe.Pointer(&m))
+	return *(*valkey.ValkeyMessage)(unsafe.Pointer(&m))
 }
 
-func RedisBlobString(v string) rueidis.RedisMessage {
+func ValkeyBlobString(v string) valkey.ValkeyMessage {
 	m := message{typ: '$', string: v}
-	return *(*rueidis.RedisMessage)(unsafe.Pointer(&m))
+	return *(*valkey.ValkeyMessage)(unsafe.Pointer(&m))
 }
 
-func RedisError(v string) rueidis.RedisMessage {
+func ValkeyError(v string) valkey.ValkeyMessage {
 	m := message{typ: '-', string: v}
-	return *(*rueidis.RedisMessage)(unsafe.Pointer(&m))
+	return *(*valkey.ValkeyMessage)(unsafe.Pointer(&m))
 }
 
-func RedisInt64(v int64) rueidis.RedisMessage {
+func ValkeyInt64(v int64) valkey.ValkeyMessage {
 	m := message{typ: ':', integer: v}
-	return *(*rueidis.RedisMessage)(unsafe.Pointer(&m))
+	return *(*valkey.ValkeyMessage)(unsafe.Pointer(&m))
 }
 
-func RedisFloat64(v float64) rueidis.RedisMessage {
+func ValkeyFloat64(v float64) valkey.ValkeyMessage {
 	m := message{typ: ',', string: strconv.FormatFloat(v, 'f', -1, 64)}
-	return *(*rueidis.RedisMessage)(unsafe.Pointer(&m))
+	return *(*valkey.ValkeyMessage)(unsafe.Pointer(&m))
 }
 
-func RedisBool(v bool) rueidis.RedisMessage {
+func ValkeyBool(v bool) valkey.ValkeyMessage {
 	m := message{typ: '#'}
 	if v {
 		m.integer = 1
 	}
-	return *(*rueidis.RedisMessage)(unsafe.Pointer(&m))
+	return *(*valkey.ValkeyMessage)(unsafe.Pointer(&m))
 }
 
-func RedisNil() rueidis.RedisMessage {
+func ValkeyNil() valkey.ValkeyMessage {
 	m := message{typ: '_'}
-	return *(*rueidis.RedisMessage)(unsafe.Pointer(&m))
+	return *(*valkey.ValkeyMessage)(unsafe.Pointer(&m))
 }
 
-func RedisArray(values ...rueidis.RedisMessage) rueidis.RedisMessage {
+func ValkeyArray(values ...valkey.ValkeyMessage) valkey.ValkeyMessage {
 	m := message{typ: '*', values: values}
-	return *(*rueidis.RedisMessage)(unsafe.Pointer(&m))
+	return *(*valkey.ValkeyMessage)(unsafe.Pointer(&m))
 }
 
-func RedisMap(kv map[string]rueidis.RedisMessage) rueidis.RedisMessage {
-	values := make([]rueidis.RedisMessage, 0, 2*len(kv))
+func ValkeyMap(kv map[string]valkey.ValkeyMessage) valkey.ValkeyMessage {
+	values := make([]valkey.ValkeyMessage, 0, 2*len(kv))
 	for k, v := range kv {
-		values = append(values, RedisString(k))
+		values = append(values, ValkeyString(k))
 		values = append(values, v)
 	}
 	m := message{typ: '%', values: values}
-	return *(*rueidis.RedisMessage)(unsafe.Pointer(&m))
+	return *(*valkey.ValkeyMessage)(unsafe.Pointer(&m))
 }
 
 func serialize(m message, buf *bytes.Buffer) {
@@ -102,33 +102,33 @@ func serialize(m message, buf *bytes.Buffer) {
 	}
 }
 
-func RedisResultStreamError(err error) rueidis.RedisResultStream {
+func ValkeyResultStreamError(err error) valkey.ValkeyResultStream {
 	s := stream{e: err}
-	return *(*rueidis.RedisResultStream)(unsafe.Pointer(&s))
+	return *(*valkey.ValkeyResultStream)(unsafe.Pointer(&s))
 }
 
-func RedisResultStream(ms ...rueidis.RedisMessage) rueidis.RedisResultStream {
+func ValkeyResultStream(ms ...valkey.ValkeyMessage) valkey.ValkeyResultStream {
 	buf := bytes.NewBuffer(nil)
 	for _, m := range ms {
 		pm := *(*message)(unsafe.Pointer(&m))
 		serialize(pm, buf)
 	}
 	s := stream{n: len(ms), p: &pool{size: 1, cond: sync.NewCond(&sync.Mutex{})}, w: &pipe{r: bufio.NewReader(buf)}}
-	return *(*rueidis.RedisResultStream)(unsafe.Pointer(&s))
+	return *(*valkey.ValkeyResultStream)(unsafe.Pointer(&s))
 }
 
-func MultiRedisResultStream(ms ...rueidis.RedisMessage) rueidis.MultiRedisResultStream {
-	return RedisResultStream(ms...)
+func MultiValkeyResultStream(ms ...valkey.ValkeyMessage) valkey.MultiValkeyResultStream {
+	return ValkeyResultStream(ms...)
 }
 
-func MultiRedisResultStreamError(err error) rueidis.RedisResultStream {
-	return RedisResultStreamError(err)
+func MultiValkeyResultStreamError(err error) valkey.ValkeyResultStream {
+	return ValkeyResultStreamError(err)
 }
 
 type message struct {
-	attrs   *rueidis.RedisMessage
+	attrs   *valkey.ValkeyMessage
 	string  string
-	values  []rueidis.RedisMessage
+	values  []valkey.ValkeyMessage
 	integer int64
 	typ     byte
 	ttl     [7]byte
@@ -136,7 +136,7 @@ type message struct {
 
 type result struct {
 	err error
-	val rueidis.RedisMessage
+	val valkey.ValkeyMessage
 }
 
 type pool struct {
@@ -154,17 +154,17 @@ type pipe struct {
 	clhks           atomic.Value // closed hook, invoked after the conn is closed
 	pshks           atomic.Value // pubsub hook, registered by the SetPubSubHooks
 	queue           any
-	cache           rueidis.CacheStore
+	cache           valkey.CacheStore
 	r               *bufio.Reader
 	w               *bufio.Writer
 	close           chan struct{}
-	onInvalidations func([]rueidis.RedisMessage)
+	onInvalidations func([]valkey.ValkeyMessage)
 	r2psFn          func() (p *pipe, err error) // func to build pipe for resp2 pubsub
 	r2pipe          *pipe                       // internal pipe for resp2 pubsub only
 	ssubs           *any                        // pubsub smessage subscriptions
 	nsubs           *any                        // pubsub  message subscriptions
 	psubs           *any                        // pubsub pmessage subscriptions
-	info            map[string]rueidis.RedisMessage
+	info            map[string]valkey.ValkeyMessage
 	timeout         time.Duration
 	pinggap         time.Duration
 	maxFlushDelay   time.Duration

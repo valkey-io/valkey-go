@@ -1,12 +1,12 @@
-module github.com/redis/rueidis/om
+module github.com/rueian/valkey-go/om
 
 go 1.20
 
-replace github.com/redis/rueidis => ../
+replace github.com/rueian/valkey-go => ../
 
 require (
 	github.com/oklog/ulid/v2 v2.1.0
-	github.com/redis/rueidis v1.0.34
+	github.com/rueian/valkey-go v1.0.34
 )
 
-require golang.org/x/sys v0.17.0 // indirect
+require golang.org/x/sys v0.19.0 // indirect

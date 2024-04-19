@@ -1,4 +1,4 @@
-package rueidis
+package valkey
 
 import (
 	"context"
@@ -16,16 +16,16 @@ import (
 	"time"
 )
 
-var slotsResp = newResult(RedisMessage{typ: '*', values: []RedisMessage{
-	{typ: '*', values: []RedisMessage{
+var slotsResp = newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{
+	{typ: '*', values: []ValkeyMessage{
 		{typ: ':', integer: 0},
 		{typ: ':', integer: 16383},
-		{typ: '*', values: []RedisMessage{ // master
+		{typ: '*', values: []ValkeyMessage{ // master
 			{typ: '+', string: "127.0.0.1"},
 			{typ: ':', integer: 0},
 			{typ: '+', string: ""},
 		}},
-		{typ: '*', values: []RedisMessage{ // replica
+		{typ: '*', values: []ValkeyMessage{ // replica
 			{typ: '+', string: "127.0.1.1"},
 			{typ: ':', integer: 1},
 			{typ: '+', string: ""},
@@ -33,30 +33,30 @@ var slotsResp = newResult(RedisMessage{typ: '*', values: []RedisMessage{
 	}},
 }}, nil)
 
-var slotsMultiResp = newResult(RedisMessage{typ: '*', values: []RedisMessage{
-	{typ: '*', values: []RedisMessage{
+var slotsMultiResp = newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{
+	{typ: '*', values: []ValkeyMessage{
 		{typ: ':', integer: 0},
 		{typ: ':', integer: 8192},
-		{typ: '*', values: []RedisMessage{ // master
+		{typ: '*', values: []ValkeyMessage{ // master
 			{typ: '+', string: "127.0.0.1"},
 			{typ: ':', integer: 0},
 			{typ: '+', string: ""},
 		}},
-		{typ: '*', values: []RedisMessage{ // replica
+		{typ: '*', values: []ValkeyMessage{ // replica
 			{typ: '+', string: "127.0.1.1"},
 			{typ: ':', integer: 1},
 			{typ: '+', string: ""},
 		}},
 	}},
-	{typ: '*', values: []RedisMessage{
+	{typ: '*', values: []ValkeyMessage{
 		{typ: ':', integer: 8193},
 		{typ: ':', integer: 16383},
-		{typ: '*', values: []RedisMessage{ // master
+		{typ: '*', values: []ValkeyMessage{ // master
 			{typ: '+', string: "127.0.2.1"},
 			{typ: ':', integer: 0},
 			{typ: '+', string: ""},
 		}},
-		{typ: '*', values: []RedisMessage{ // replica
+		{typ: '*', values: []ValkeyMessage{ // replica
 			{typ: '+', string: "127.0.3.1"},
 			{typ: ':', integer: 1},
 			{typ: '+', string: ""},
@@ -64,20 +64,20 @@ var slotsMultiResp = newResult(RedisMessage{typ: '*', values: []RedisMessage{
 	}},
 }}, nil)
 
-var slotsMultiRespWithoutReplicas = newResult(RedisMessage{typ: '*', values: []RedisMessage{
-	{typ: '*', values: []RedisMessage{
+var slotsMultiRespWithoutReplicas = newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{
+	{typ: '*', values: []ValkeyMessage{
 		{typ: ':', integer: 0},
 		{typ: ':', integer: 8192},
-		{typ: '*', values: []RedisMessage{ // master
+		{typ: '*', values: []ValkeyMessage{ // master
 			{typ: '+', string: "127.0.0.1"},
 			{typ: ':', integer: 0},
 			{typ: '+', string: ""},
 		}},
 	}},
-	{typ: '*', values: []RedisMessage{
+	{typ: '*', values: []ValkeyMessage{
 		{typ: ':', integer: 8193},
 		{typ: ':', integer: 16383},
-		{typ: '*', values: []RedisMessage{ // master
+		{typ: '*', values: []ValkeyMessage{ // master
 			{typ: '+', string: "127.0.1.1"},
 			{typ: ':', integer: 0},
 			{typ: '+', string: ""},
@@ -85,50 +85,50 @@ var slotsMultiRespWithoutReplicas = newResult(RedisMessage{typ: '*', values: []R
 	}},
 }}, nil)
 
-var slotsMultiRespWithMultiReplicas = newResult(RedisMessage{typ: '*', values: []RedisMessage{
-	{typ: '*', values: []RedisMessage{
+var slotsMultiRespWithMultiReplicas = newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{
+	{typ: '*', values: []ValkeyMessage{
 		{typ: ':', integer: 0},
 		{typ: ':', integer: 8192},
-		{typ: '*', values: []RedisMessage{ // master
+		{typ: '*', values: []ValkeyMessage{ // master
 			{typ: '+', string: "127.0.0.1"},
 			{typ: ':', integer: 0},
 			{typ: '+', string: ""},
 		}},
-		{typ: '*', values: []RedisMessage{ // replica1
+		{typ: '*', values: []ValkeyMessage{ // replica1
 			{typ: '+', string: "127.0.0.2"},
 			{typ: ':', integer: 1},
 			{typ: '+', string: ""},
 		}},
-		{typ: '*', values: []RedisMessage{ // replica2
+		{typ: '*', values: []ValkeyMessage{ // replica2
 			{typ: '+', string: "127.0.0.3"},
 			{typ: ':', integer: 2},
 			{typ: '+', string: ""},
 		}},
-		{typ: '*', values: []RedisMessage{ // replica3
+		{typ: '*', values: []ValkeyMessage{ // replica3
 			{typ: '+', string: "127.0.0.4"},
 			{typ: ':', integer: 3},
 			{typ: '+', string: ""},
 		}},
 	}},
-	{typ: '*', values: []RedisMessage{
+	{typ: '*', values: []ValkeyMessage{
 		{typ: ':', integer: 8193},
 		{typ: ':', integer: 16383},
-		{typ: '*', values: []RedisMessage{ // master
+		{typ: '*', values: []ValkeyMessage{ // master
 			{typ: '+', string: "127.0.1.1"},
 			{typ: ':', integer: 0},
 			{typ: '+', string: ""},
 		}},
-		{typ: '*', values: []RedisMessage{ // replica1
+		{typ: '*', values: []ValkeyMessage{ // replica1
 			{typ: '+', string: "127.0.1.2"},
 			{typ: ':', integer: 1},
 			{typ: '+', string: ""},
 		}},
-		{typ: '*', values: []RedisMessage{ // replica2
+		{typ: '*', values: []ValkeyMessage{ // replica2
 			{typ: '+', string: "127.0.1.3"},
 			{typ: ':', integer: 2},
 			{typ: '+', string: ""},
 		}},
-		{typ: '*', values: []RedisMessage{ // replica3
+		{typ: '*', values: []ValkeyMessage{ // replica3
 			{typ: '+', string: "127.0.1.4"},
 			{typ: ':', integer: 3},
 			{typ: '+', string: ""},
@@ -136,11 +136,11 @@ var slotsMultiRespWithMultiReplicas = newResult(RedisMessage{typ: '*', values: [
 	}},
 }}, nil)
 
-var singleSlotResp = newResult(RedisMessage{typ: '*', values: []RedisMessage{
-	{typ: '*', values: []RedisMessage{
+var singleSlotResp = newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{
+	{typ: '*', values: []ValkeyMessage{
 		{typ: ':', integer: 0},
 		{typ: ':', integer: 0},
-		{typ: '*', values: []RedisMessage{ // master
+		{typ: '*', values: []ValkeyMessage{ // master
 			{typ: '+', string: "127.0.0.1"},
 			{typ: ':', integer: 0},
 			{typ: '+', string: ""},
@@ -148,11 +148,11 @@ var singleSlotResp = newResult(RedisMessage{typ: '*', values: []RedisMessage{
 	}},
 }}, nil)
 
-var singleSlotResp2 = newResult(RedisMessage{typ: '*', values: []RedisMessage{
-	{typ: '*', values: []RedisMessage{
+var singleSlotResp2 = newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{
+	{typ: '*', values: []ValkeyMessage{
 		{typ: ':', integer: 0},
 		{typ: ':', integer: 0},
-		{typ: '*', values: []RedisMessage{ // master
+		{typ: '*', values: []ValkeyMessage{ // master
 			{typ: '+', string: "127.0.3.1"},
 			{typ: ':', integer: 3},
 			{typ: '+', string: ""},
@@ -160,25 +160,25 @@ var singleSlotResp2 = newResult(RedisMessage{typ: '*', values: []RedisMessage{
 	}},
 }}, nil)
 
-var singleSlotWithoutIP = newResult(RedisMessage{typ: '*', values: []RedisMessage{
-	{typ: '*', values: []RedisMessage{
+var singleSlotWithoutIP = newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{
+	{typ: '*', values: []ValkeyMessage{
 		{typ: ':', integer: 0},
 		{typ: ':', integer: 0},
-		{typ: '*', values: []RedisMessage{ // master
+		{typ: '*', values: []ValkeyMessage{ // master
 			{typ: '+', string: ""},
 			{typ: ':', integer: 4},
 			{typ: '+', string: ""},
 		}},
-		{typ: '*', values: []RedisMessage{ // replica
+		{typ: '*', values: []ValkeyMessage{ // replica
 			{typ: '+', string: "?"},
 			{typ: ':', integer: 1},
 			{typ: '+', string: ""},
 		}},
 	}},
-	{typ: '*', values: []RedisMessage{
+	{typ: '*', values: []ValkeyMessage{
 		{typ: ':', integer: 0},
 		{typ: ':', integer: 0},
-		{typ: '*', values: []RedisMessage{ // master
+		{typ: '*', values: []ValkeyMessage{ // master
 			{typ: '+', string: "?"},
 			{typ: ':', integer: 4},
 			{typ: '+', string: ""},
@@ -186,16 +186,16 @@ var singleSlotWithoutIP = newResult(RedisMessage{typ: '*', values: []RedisMessag
 	}},
 }}, nil)
 
-var shardsResp = newResult(RedisMessage{typ: typeArray, values: []RedisMessage{
-	{typ: typeMap, values: []RedisMessage{
+var shardsResp = newResult(ValkeyMessage{typ: typeArray, values: []ValkeyMessage{
+	{typ: typeMap, values: []ValkeyMessage{
 		{typ: typeBlobString, string: "slots"},
-		{typ: typeArray, values: []RedisMessage{
+		{typ: typeArray, values: []ValkeyMessage{
 			{typ: typeBlobString, string: "0"},
 			{typ: typeBlobString, string: "16383"},
 		}},
 		{typ: typeBlobString, string: "nodes"},
-		{typ: typeArray, values: []RedisMessage{
-			{typ: typeMap, values: []RedisMessage{ // master
+		{typ: typeArray, values: []ValkeyMessage{
+			{typ: typeMap, values: []ValkeyMessage{ // master
 				{typ: typeBlobString, string: "id"},
 				{typ: typeBlobString, string: ""},
 
@@ -217,7 +217,7 @@ var shardsResp = newResult(RedisMessage{typ: typeArray, values: []RedisMessage{
 				{typ: typeBlobString, string: "health"},
 				{typ: typeBlobString, string: "online"},
 			}},
-			{typ: typeMap, values: []RedisMessage{ // replica
+			{typ: typeMap, values: []ValkeyMessage{ // replica
 				{typ: typeBlobString, string: "id"},
 				{typ: typeBlobString, string: ""},
 
@@ -243,16 +243,16 @@ var shardsResp = newResult(RedisMessage{typ: typeArray, values: []RedisMessage{
 	}},
 }}, nil)
 
-var shardsRespTls = newResult(RedisMessage{typ: typeArray, values: []RedisMessage{
-	{typ: typeMap, values: []RedisMessage{
+var shardsRespTls = newResult(ValkeyMessage{typ: typeArray, values: []ValkeyMessage{
+	{typ: typeMap, values: []ValkeyMessage{
 		{typ: typeBlobString, string: "slots"},
-		{typ: typeArray, values: []RedisMessage{
+		{typ: typeArray, values: []ValkeyMessage{
 			{typ: typeBlobString, string: "0"},
 			{typ: typeBlobString, string: "16383"},
 		}},
 		{typ: typeBlobString, string: "nodes"},
-		{typ: typeArray, values: []RedisMessage{
-			{typ: typeMap, values: []RedisMessage{ // replica, tls
+		{typ: typeArray, values: []ValkeyMessage{
+			{typ: typeMap, values: []ValkeyMessage{ // replica, tls
 				{typ: typeBlobString, string: "id"},
 				{typ: typeBlobString, string: ""},
 
@@ -274,7 +274,7 @@ var shardsRespTls = newResult(RedisMessage{typ: typeArray, values: []RedisMessag
 				{typ: typeBlobString, string: "health"},
 				{typ: typeBlobString, string: "online"},
 			}},
-			{typ: typeMap, values: []RedisMessage{ // master, tls + port
+			{typ: typeMap, values: []ValkeyMessage{ // master, tls + port
 				{typ: typeBlobString, string: "id"},
 				{typ: typeBlobString, string: ""},
 
@@ -299,7 +299,7 @@ var shardsRespTls = newResult(RedisMessage{typ: typeArray, values: []RedisMessag
 				{typ: typeBlobString, string: "health"},
 				{typ: typeBlobString, string: "online"},
 			}},
-			{typ: typeMap, values: []RedisMessage{ // replica, port
+			{typ: typeMap, values: []ValkeyMessage{ // replica, port
 				{typ: typeBlobString, string: "id"},
 				{typ: typeBlobString, string: ""},
 
@@ -325,16 +325,16 @@ var shardsRespTls = newResult(RedisMessage{typ: typeArray, values: []RedisMessag
 	}},
 }}, nil)
 
-var shardsMultiResp = newResult(RedisMessage{typ: '*', values: []RedisMessage{
-	{typ: typeMap, values: []RedisMessage{
+var shardsMultiResp = newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{
+	{typ: typeMap, values: []ValkeyMessage{
 		{typ: typeBlobString, string: "slots"},
-		{typ: typeArray, values: []RedisMessage{
+		{typ: typeArray, values: []ValkeyMessage{
 			{typ: typeBlobString, string: "0"},
 			{typ: typeBlobString, string: "8192"},
 		}},
 		{typ: typeBlobString, string: "nodes"},
-		{typ: typeArray, values: []RedisMessage{
-			{typ: typeMap, values: []RedisMessage{ // master
+		{typ: typeArray, values: []ValkeyMessage{
+			{typ: typeMap, values: []ValkeyMessage{ // master
 				{typ: typeBlobString, string: "id"},
 				{typ: typeBlobString, string: ""},
 
@@ -356,7 +356,7 @@ var shardsMultiResp = newResult(RedisMessage{typ: '*', values: []RedisMessage{
 				{typ: typeBlobString, string: "health"},
 				{typ: typeBlobString, string: "online"},
 			}},
-			{typ: typeMap, values: []RedisMessage{ // replica
+			{typ: typeMap, values: []ValkeyMessage{ // replica
 				{typ: typeBlobString, string: "id"},
 				{typ: typeBlobString, string: ""},
 
@@ -380,15 +380,15 @@ var shardsMultiResp = newResult(RedisMessage{typ: '*', values: []RedisMessage{
 			}},
 		}},
 	}},
-	{typ: typeMap, values: []RedisMessage{
+	{typ: typeMap, values: []ValkeyMessage{
 		{typ: typeBlobString, string: "slots"},
-		{typ: typeArray, values: []RedisMessage{
+		{typ: typeArray, values: []ValkeyMessage{
 			{typ: typeBlobString, string: "8193"},
 			{typ: typeBlobString, string: "16383"},
 		}},
 		{typ: typeBlobString, string: "nodes"},
-		{typ: typeArray, values: []RedisMessage{
-			{typ: typeMap, values: []RedisMessage{ // master
+		{typ: typeArray, values: []ValkeyMessage{
+			{typ: typeMap, values: []ValkeyMessage{ // master
 				{typ: typeBlobString, string: "id"},
 				{typ: typeBlobString, string: ""},
 
@@ -410,7 +410,7 @@ var shardsMultiResp = newResult(RedisMessage{typ: '*', values: []RedisMessage{
 				{typ: typeBlobString, string: "health"},
 				{typ: typeBlobString, string: "online"},
 			}},
-			{typ: typeMap, values: []RedisMessage{ // replica
+			{typ: typeMap, values: []ValkeyMessage{ // replica
 				{typ: typeBlobString, string: "id"},
 				{typ: typeBlobString, string: ""},
 
@@ -436,16 +436,16 @@ var shardsMultiResp = newResult(RedisMessage{typ: '*', values: []RedisMessage{
 	}},
 }}, nil)
 
-var singleShardResp2 = newResult(RedisMessage{typ: '*', values: []RedisMessage{
-	{typ: typeMap, values: []RedisMessage{
+var singleShardResp2 = newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{
+	{typ: typeMap, values: []ValkeyMessage{
 		{typ: typeBlobString, string: "slots"},
-		{typ: typeArray, values: []RedisMessage{
+		{typ: typeArray, values: []ValkeyMessage{
 			{typ: typeBlobString, string: "0"},
 			{typ: typeBlobString, string: "0"},
 		}},
 		{typ: typeBlobString, string: "nodes"},
-		{typ: typeArray, values: []RedisMessage{
-			{typ: typeMap, values: []RedisMessage{ // master
+		{typ: typeArray, values: []ValkeyMessage{
+			{typ: typeMap, values: []ValkeyMessage{ // master
 				{typ: typeBlobString, string: "id"},
 				{typ: typeBlobString, string: ""},
 
@@ -471,16 +471,16 @@ var singleShardResp2 = newResult(RedisMessage{typ: '*', values: []RedisMessage{
 	}},
 }}, nil)
 
-var singleShardWithoutIP = newResult(RedisMessage{typ: typeArray, values: []RedisMessage{
-	{typ: typeMap, values: []RedisMessage{
+var singleShardWithoutIP = newResult(ValkeyMessage{typ: typeArray, values: []ValkeyMessage{
+	{typ: typeMap, values: []ValkeyMessage{
 		{typ: typeBlobString, string: "slots"},
-		{typ: typeArray, values: []RedisMessage{
+		{typ: typeArray, values: []ValkeyMessage{
 			{typ: typeBlobString, string: "0"},
 			{typ: typeBlobString, string: "0"},
 		}},
 		{typ: typeBlobString, string: "nodes"},
-		{typ: typeArray, values: []RedisMessage{
-			{typ: typeMap, values: []RedisMessage{ // master
+		{typ: typeArray, values: []ValkeyMessage{
+			{typ: typeMap, values: []ValkeyMessage{ // master
 				{typ: typeBlobString, string: "id"},
 				{typ: typeBlobString, string: ""},
 
@@ -502,7 +502,7 @@ var singleShardWithoutIP = newResult(RedisMessage{typ: typeArray, values: []Redi
 				{typ: typeBlobString, string: "health"},
 				{typ: typeBlobString, string: "online"},
 			}},
-			{typ: typeMap, values: []RedisMessage{ // replica
+			{typ: typeMap, values: []ValkeyMessage{ // replica
 				{typ: typeBlobString, string: "id"},
 				{typ: typeBlobString, string: ""},
 
@@ -526,15 +526,15 @@ var singleShardWithoutIP = newResult(RedisMessage{typ: typeArray, values: []Redi
 			}},
 		}},
 	}},
-	{typ: typeMap, values: []RedisMessage{
+	{typ: typeMap, values: []ValkeyMessage{
 		{typ: typeBlobString, string: "slots"},
-		{typ: typeArray, values: []RedisMessage{
+		{typ: typeArray, values: []ValkeyMessage{
 			{typ: typeBlobString, string: "0"},
 			{typ: typeBlobString, string: "0"},
 		}},
 		{typ: typeBlobString, string: "nodes"},
-		{typ: typeArray, values: []RedisMessage{
-			{typ: typeMap, values: []RedisMessage{ // master
+		{typ: typeArray, values: []ValkeyMessage{
+			{typ: typeMap, values: []ValkeyMessage{ // master
 				{typ: typeBlobString, string: "id"},
 				{typ: typeBlobString, string: ""},
 
@@ -581,7 +581,7 @@ func TestClusterClientInit(t *testing.T) {
 	t.Run("Refresh err", func(t *testing.T) {
 		v := errors.New("refresh err")
 		if _, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
-			return &mockConn{DoFn: func(cmd Completed) RedisResult { return newErrResult(v) }}
+			return &mockConn{DoFn: func(cmd Completed) ValkeyResult { return newErrResult(v) }}
 		}); err != v {
 			t.Fatalf("unexpected err %v", err)
 		}
@@ -591,9 +591,9 @@ func TestClusterClientInit(t *testing.T) {
 		var first int64
 		if _, err := newClusterClient(&ClientOption{InitAddress: []string{"127.0.0.1:0", "127.0.1.1:1"}}, func(dst string, opt *ClientOption) conn {
 			return &mockConn{
-				DoFn: func(cmd Completed) RedisResult {
+				DoFn: func(cmd Completed) ValkeyResult {
 					if atomic.AddInt64(&first, 1) == 1 {
-						return newResult(RedisMessage{typ: '*', values: []RedisMessage{}}, nil)
+						return newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{}}, nil)
 					}
 					return slotsResp
 				},
@@ -607,9 +607,9 @@ func TestClusterClientInit(t *testing.T) {
 		var first int64
 		if _, err := newClusterClient(&ClientOption{InitAddress: []string{"127.0.0.1:0", "127.0.1.1:1"}}, func(dst string, opt *ClientOption) conn {
 			return &mockConn{
-				DoFn: func(cmd Completed) RedisResult {
+				DoFn: func(cmd Completed) ValkeyResult {
 					if atomic.AddInt64(&first, 1) == 1 {
-						return newResult(RedisMessage{typ: '*', values: []RedisMessage{}}, nil)
+						return newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{}}, nil)
 					}
 					return shardsResp
 				},
@@ -623,8 +623,8 @@ func TestClusterClientInit(t *testing.T) {
 	t.Run("Refresh no slots cluster", func(t *testing.T) {
 		if _, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
 			return &mockConn{
-				DoFn: func(cmd Completed) RedisResult {
-					return newResult(RedisMessage{typ: '*', values: []RedisMessage{}}, nil)
+				DoFn: func(cmd Completed) ValkeyResult {
+					return newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{}}, nil)
 				},
 			}
 		}); err != nil {
@@ -635,8 +635,8 @@ func TestClusterClientInit(t *testing.T) {
 	t.Run("Refresh no shards cluster", func(t *testing.T) {
 		if _, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
 			return &mockConn{
-				DoFn: func(cmd Completed) RedisResult {
-					return newResult(RedisMessage{typ: '*', values: []RedisMessage{}}, nil)
+				DoFn: func(cmd Completed) ValkeyResult {
+					return newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{}}, nil)
 				},
 				VersionFn: func() int { return 7 },
 			}
@@ -649,7 +649,7 @@ func TestClusterClientInit(t *testing.T) {
 		getClient := func(version int) (client *clusterClient, err error) {
 			return newClusterClient(&ClientOption{InitAddress: []string{"127.0.4.1:4"}}, func(dst string, opt *ClientOption) conn {
 				return &mockConn{
-					DoFn: func(cmd Completed) RedisResult {
+					DoFn: func(cmd Completed) ValkeyResult {
 						if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
 							return singleSlotWithoutIP
 						}
@@ -719,7 +719,7 @@ func TestClusterClientInit(t *testing.T) {
 			var first int64
 			client, err := newClusterClient(&ClientOption{InitAddress: []string{"127.0.1.1:1", "127.0.2.1:2"}}, func(dst string, opt *ClientOption) conn {
 				return &mockConn{
-					DoFn: func(cmd Completed) RedisResult {
+					DoFn: func(cmd Completed) ValkeyResult {
 						if atomic.LoadInt64(&first) == 1 {
 							return singleSlotResp2
 						}
@@ -737,7 +737,7 @@ func TestClusterClientInit(t *testing.T) {
 			var first int64
 			client, err := newClusterClient(&ClientOption{InitAddress: []string{"127.0.1.1:1", "127.0.2.1:2"}}, func(dst string, opt *ClientOption) conn {
 				return &mockConn{
-					DoFn: func(cmd Completed) RedisResult {
+					DoFn: func(cmd Completed) ValkeyResult {
 						if atomic.LoadInt64(&first) == 1 {
 							return singleShardResp2
 						}
@@ -756,7 +756,7 @@ func TestClusterClientInit(t *testing.T) {
 	t.Run("Shards tls", func(t *testing.T) {
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{"127.0.0.1:0"}, TLSConfig: &tls.Config{}}, func(dst string, opt *ClientOption) conn {
 			return &mockConn{
-				DoFn: func(cmd Completed) RedisResult {
+				DoFn: func(cmd Completed) ValkeyResult {
 					return shardsRespTls
 				},
 				VersionFn: func() int { return 7 },
@@ -780,7 +780,7 @@ func TestClusterClientInit(t *testing.T) {
 		getClient := func(version int) (client *clusterClient, err error) {
 			return newClusterClient(&ClientOption{InitAddress: []string{"xxxxx.amazonaws.com:1"}}, func(dst string, opt *ClientOption) conn {
 				return &mockConn{
-					DoFn: func(cmd Completed) RedisResult {
+					DoFn: func(cmd Completed) ValkeyResult {
 						if dst == "xxxxx.amazonaws.com:1" && strings.Join(cmd.Commands(), " ") == "CLUSTER SHARDS" {
 							return shardsResp
 						}
@@ -811,11 +811,11 @@ func TestClusterClientInit(t *testing.T) {
 
 	t.Run("Refresh cluster which has only primary node per shard with SendToReplica option", func(t *testing.T) {
 		m := &mockConn{
-			DoFn: func(cmd Completed) RedisResult {
+			DoFn: func(cmd Completed) ValkeyResult {
 				if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
 					return slotsMultiRespWithoutReplicas
 				}
-				return RedisResult{}
+				return ValkeyResult{}
 			},
 		}
 
@@ -863,18 +863,18 @@ func TestClusterClientInit(t *testing.T) {
 
 	t.Run("Refresh cluster which has multi nodes per shard with SendToReplica option", func(t *testing.T) {
 		primaryNodeConn := &mockConn{
-			DoFn: func(cmd Completed) RedisResult {
+			DoFn: func(cmd Completed) ValkeyResult {
 				if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
 					return slotsMultiResp
 				}
-				return RedisResult{
+				return ValkeyResult{
 					err: errors.New("unexpected call"),
 				}
 			},
 		}
 		replicaNodeConn := &mockConn{
-			DoFn: func(cmd Completed) RedisResult {
-				return RedisResult{
+			DoFn: func(cmd Completed) ValkeyResult {
+				return ValkeyResult{
 					err: errors.New("unexpected call"),
 				}
 			},
@@ -936,43 +936,43 @@ func TestClusterClientInit(t *testing.T) {
 func TestClusterClient(t *testing.T) {
 	defer ShouldNotLeaked(SetupLeakDetection())
 	m := &mockConn{
-		DoFn: func(cmd Completed) RedisResult {
+		DoFn: func(cmd Completed) ValkeyResult {
 			if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
 				return slotsMultiResp
 			}
-			return RedisResult{}
+			return ValkeyResult{}
 		},
-		DoStreamFn: func(cmd Completed) RedisResultStream {
-			return RedisResultStream{e: errors.New(cmd.Commands()[1])}
+		DoStreamFn: func(cmd Completed) ValkeyResultStream {
+			return ValkeyResultStream{e: errors.New(cmd.Commands()[1])}
 		},
-		DoMultiFn: func(multi ...Completed) *redisresults {
-			resps := make([]RedisResult, len(multi))
+		DoMultiFn: func(multi ...Completed) *valkeyresults {
+			resps := make([]ValkeyResult, len(multi))
 			for i, cmd := range multi {
-				resps[i] = newResult(RedisMessage{typ: '+', string: strings.Join(cmd.Commands(), " ")}, nil)
+				resps[i] = newResult(ValkeyMessage{typ: '+', string: strings.Join(cmd.Commands(), " ")}, nil)
 			}
-			return &redisresults{s: resps}
+			return &valkeyresults{s: resps}
 		},
-		DoMultiStreamFn: func(cmd ...Completed) MultiRedisResultStream {
-			return MultiRedisResultStream{e: errors.New(cmd[0].Commands()[1])}
+		DoMultiStreamFn: func(cmd ...Completed) MultiValkeyResultStream {
+			return MultiValkeyResultStream{e: errors.New(cmd[0].Commands()[1])}
 		},
-		DoMultiCacheFn: func(multi ...CacheableTTL) *redisresults {
-			resps := make([]RedisResult, len(multi))
+		DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
+			resps := make([]ValkeyResult, len(multi))
 			for i, cmd := range multi {
-				resps[i] = newResult(RedisMessage{typ: '+', string: strings.Join(cmd.Cmd.Commands(), " ")}, nil)
+				resps[i] = newResult(ValkeyMessage{typ: '+', string: strings.Join(cmd.Cmd.Commands(), " ")}, nil)
 			}
-			return &redisresults{s: resps}
+			return &valkeyresults{s: resps}
 		},
-		DoOverride: map[string]func(cmd Completed) RedisResult{
-			"GET Do": func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "Do"}, nil)
+		DoOverride: map[string]func(cmd Completed) ValkeyResult{
+			"GET Do": func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "Do"}, nil)
 			},
-			"INFO": func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "Info"}, nil)
+			"INFO": func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "Info"}, nil)
 			},
 		},
-		DoCacheOverride: map[string]func(cmd Cacheable, ttl time.Duration) RedisResult{
-			"GET DoCache": func(cmd Cacheable, ttl time.Duration) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "DoCache"}, nil)
+		DoCacheOverride: map[string]func(cmd Cacheable, ttl time.Duration) ValkeyResult{
+			"GET DoCache": func(cmd Cacheable, ttl time.Duration) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "DoCache"}, nil)
 			},
 		},
 	}
@@ -1167,9 +1167,9 @@ func TestClusterClient(t *testing.T) {
 		}
 	})
 
-	t.Run("Delegate Receive Redis Err", func(t *testing.T) {
+	t.Run("Delegate Receive Valkey Err", func(t *testing.T) {
 		c := client.B().Subscribe().Channel("ch").Build()
-		e := &RedisError{}
+		e := &ValkeyError{}
 		m.ReceiveFn = func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 			return e
 		}
@@ -1218,11 +1218,11 @@ func TestClusterClient(t *testing.T) {
 		}()
 		m.AcquireFn = func() wire {
 			return &mockWire{
-				DoMultiFn: func(multi ...Completed) *redisresults {
-					return &redisresults{s: []RedisResult{
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '*', values: []RedisMessage{{typ: '+', string: "a"}}}, nil),
+				DoMultiFn: func(multi ...Completed) *valkeyresults {
+					return &valkeyresults{s: []ValkeyResult{
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}}}, nil),
 					}}
 				},
 			}
@@ -1262,8 +1262,8 @@ func TestClusterClient(t *testing.T) {
 		}
 	})
 
-	t.Run("Dedicated Delegate Receive Redis Err", func(t *testing.T) {
-		e := &RedisError{}
+	t.Run("Dedicated Delegate Receive Valkey Err", func(t *testing.T) {
+		e := &ValkeyError{}
 		w := &mockWire{
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 				return e
@@ -1282,24 +1282,24 @@ func TestClusterClient(t *testing.T) {
 	t.Run("Dedicated Delegate", func(t *testing.T) {
 		closed := false
 		w := &mockWire{
-			DoFn: func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "Delegate"}, nil)
+			DoFn: func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "Delegate"}, nil)
 			},
-			DoMultiFn: func(cmd ...Completed) *redisresults {
+			DoMultiFn: func(cmd ...Completed) *valkeyresults {
 				if len(cmd) == 4 {
-					return &redisresults{s: []RedisResult{
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '*', values: []RedisMessage{
+					return &valkeyresults{s: []ValkeyResult{
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 							{typ: '+', string: "Delegate0"},
 							{typ: '+', string: "Delegate1"},
 						}}, nil),
 					}}
 				}
-				return &redisresults{s: []RedisResult{
-					newResult(RedisMessage{typ: '+', string: "Delegate0"}, nil),
-					newResult(RedisMessage{typ: '+', string: "Delegate1"}, nil),
+				return &valkeyresults{s: []ValkeyResult{
+					newResult(ValkeyMessage{typ: '+', string: "Delegate0"}, nil),
+					newResult(ValkeyMessage{typ: '+', string: "Delegate1"}, nil),
 				}}
 			},
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
@@ -1390,24 +1390,24 @@ func TestClusterClient(t *testing.T) {
 	t.Run("Dedicated Delegate", func(t *testing.T) {
 		closed := false
 		w := &mockWire{
-			DoFn: func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "Delegate"}, nil)
+			DoFn: func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "Delegate"}, nil)
 			},
-			DoMultiFn: func(cmd ...Completed) *redisresults {
+			DoMultiFn: func(cmd ...Completed) *valkeyresults {
 				if len(cmd) == 4 {
-					return &redisresults{s: []RedisResult{
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '*', values: []RedisMessage{
+					return &valkeyresults{s: []ValkeyResult{
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 							{typ: '+', string: "Delegate0"},
 							{typ: '+', string: "Delegate1"},
 						}}, nil),
 					}}
 				}
-				return &redisresults{s: []RedisResult{
-					newResult(RedisMessage{typ: '+', string: "Delegate0"}, nil),
-					newResult(RedisMessage{typ: '+', string: "Delegate1"}, nil),
+				return &valkeyresults{s: []ValkeyResult{
+					newResult(ValkeyMessage{typ: '+', string: "Delegate0"}, nil),
+					newResult(ValkeyMessage{typ: '+', string: "Delegate1"}, nil),
 				}}
 			},
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
@@ -1598,47 +1598,47 @@ func TestClusterClient_SendToOnlyPrimaryNodes(t *testing.T) {
 	defer ShouldNotLeaked(SetupLeakDetection())
 
 	primaryNodeConn := &mockConn{
-		DoOverride: map[string]func(cmd Completed) RedisResult{
-			"CLUSTER SLOTS": func(cmd Completed) RedisResult {
+		DoOverride: map[string]func(cmd Completed) ValkeyResult{
+			"CLUSTER SLOTS": func(cmd Completed) ValkeyResult {
 				return slotsMultiResp
 			},
-			"GET Do": func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "GET Do"}, nil)
+			"GET Do": func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "GET Do"}, nil)
 			},
-			"GET K1{a}": func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "GET K1{a}"}, nil)
+			"GET K1{a}": func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "GET K1{a}"}, nil)
 			},
-			"GET K2{a}": func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "GET K2{a}"}, nil)
+			"GET K2{a}": func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "GET K2{a}"}, nil)
 			},
-			"INFO": func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "INFO"}, nil)
+			"INFO": func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "INFO"}, nil)
 			},
 		},
-		DoMultiFn: func(multi ...Completed) *redisresults {
-			resps := make([]RedisResult, len(multi))
+		DoMultiFn: func(multi ...Completed) *valkeyresults {
+			resps := make([]ValkeyResult, len(multi))
 			for i, cmd := range multi {
-				resps[i] = newResult(RedisMessage{typ: '+', string: strings.Join(cmd.Commands(), " ")}, nil)
+				resps[i] = newResult(ValkeyMessage{typ: '+', string: strings.Join(cmd.Commands(), " ")}, nil)
 			}
-			return &redisresults{s: resps}
+			return &valkeyresults{s: resps}
 		},
-		DoCacheOverride: map[string]func(cmd Cacheable, ttl time.Duration) RedisResult{
-			"GET DoCache": func(cmd Cacheable, ttl time.Duration) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "GET DoCache"}, nil)
+		DoCacheOverride: map[string]func(cmd Cacheable, ttl time.Duration) ValkeyResult{
+			"GET DoCache": func(cmd Cacheable, ttl time.Duration) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "GET DoCache"}, nil)
 			},
-			"GET K1{a}": func(cmd Cacheable, ttl time.Duration) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "GET K1{a}"}, nil)
+			"GET K1{a}": func(cmd Cacheable, ttl time.Duration) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "GET K1{a}"}, nil)
 			},
-			"GET K2{a}": func(cmd Cacheable, ttl time.Duration) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "GET K2{a}"}, nil)
+			"GET K2{a}": func(cmd Cacheable, ttl time.Duration) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "GET K2{a}"}, nil)
 			},
 		},
-		DoMultiCacheFn: func(multi ...CacheableTTL) *redisresults {
-			resps := make([]RedisResult, len(multi))
+		DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
+			resps := make([]ValkeyResult, len(multi))
 			for i, cmd := range multi {
-				resps[i] = newResult(RedisMessage{typ: '+', string: strings.Join(cmd.Cmd.Commands(), " ")}, nil)
+				resps[i] = newResult(ValkeyMessage{typ: '+', string: strings.Join(cmd.Cmd.Commands(), " ")}, nil)
 			}
-			return &redisresults{s: resps}
+			return &valkeyresults{s: resps}
 		},
 	}
 	replicaNodeConn := &mockConn{}
@@ -1778,9 +1778,9 @@ func TestClusterClient_SendToOnlyPrimaryNodes(t *testing.T) {
 		}
 	})
 
-	t.Run("Receive Redis Err", func(t *testing.T) {
+	t.Run("Receive Valkey Err", func(t *testing.T) {
 		c := client.B().Subscribe().Channel("ch").Build()
-		e := &RedisError{}
+		e := &ValkeyError{}
 		primaryNodeConn.ReceiveFn = func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 			return e
 		}
@@ -1822,11 +1822,11 @@ func TestClusterClient_SendToOnlyPrimaryNodes(t *testing.T) {
 		}()
 		primaryNodeConn.AcquireFn = func() wire {
 			return &mockWire{
-				DoMultiFn: func(multi ...Completed) *redisresults {
-					return &redisresults{s: []RedisResult{
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '*', values: []RedisMessage{{typ: '+', string: "a"}}}, nil),
+				DoMultiFn: func(multi ...Completed) *valkeyresults {
+					return &valkeyresults{s: []ValkeyResult{
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}}}, nil),
 					}}
 				},
 			}
@@ -1866,8 +1866,8 @@ func TestClusterClient_SendToOnlyPrimaryNodes(t *testing.T) {
 		}
 	})
 
-	t.Run("Dedicated Receive Redis Err", func(t *testing.T) {
-		e := &RedisError{}
+	t.Run("Dedicated Receive Valkey Err", func(t *testing.T) {
+		e := &ValkeyError{}
 		w := &mockWire{
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 				return e
@@ -1886,24 +1886,24 @@ func TestClusterClient_SendToOnlyPrimaryNodes(t *testing.T) {
 	t.Run("Dedicated", func(t *testing.T) {
 		closed := false
 		w := &mockWire{
-			DoFn: func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "Delegate"}, nil)
+			DoFn: func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "Delegate"}, nil)
 			},
-			DoMultiFn: func(cmd ...Completed) *redisresults {
+			DoMultiFn: func(cmd ...Completed) *valkeyresults {
 				if len(cmd) == 4 {
-					return &redisresults{s: []RedisResult{
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '*', values: []RedisMessage{
+					return &valkeyresults{s: []ValkeyResult{
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 							{typ: '+', string: "Delegate0"},
 							{typ: '+', string: "Delegate1"},
 						}}, nil),
 					}}
 				}
-				return &redisresults{s: []RedisResult{
-					newResult(RedisMessage{typ: '+', string: "Delegate0"}, nil),
-					newResult(RedisMessage{typ: '+', string: "Delegate1"}, nil),
+				return &valkeyresults{s: []ValkeyResult{
+					newResult(ValkeyMessage{typ: '+', string: "Delegate0"}, nil),
+					newResult(ValkeyMessage{typ: '+', string: "Delegate1"}, nil),
 				}}
 			},
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
@@ -1994,24 +1994,24 @@ func TestClusterClient_SendToOnlyPrimaryNodes(t *testing.T) {
 	t.Run("Dedicate", func(t *testing.T) {
 		closed := false
 		w := &mockWire{
-			DoFn: func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "Delegate"}, nil)
+			DoFn: func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "Delegate"}, nil)
 			},
-			DoMultiFn: func(cmd ...Completed) *redisresults {
+			DoMultiFn: func(cmd ...Completed) *valkeyresults {
 				if len(cmd) == 4 {
-					return &redisresults{s: []RedisResult{
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '*', values: []RedisMessage{
+					return &valkeyresults{s: []ValkeyResult{
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 							{typ: '+', string: "Delegate0"},
 							{typ: '+', string: "Delegate1"},
 						}}, nil),
 					}}
 				}
-				return &redisresults{s: []RedisResult{
-					newResult(RedisMessage{typ: '+', string: "Delegate0"}, nil),
-					newResult(RedisMessage{typ: '+', string: "Delegate1"}, nil),
+				return &valkeyresults{s: []ValkeyResult{
+					newResult(ValkeyMessage{typ: '+', string: "Delegate0"}, nil),
+					newResult(ValkeyMessage{typ: '+', string: "Delegate1"}, nil),
 				}}
 			},
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
@@ -2103,47 +2103,47 @@ func TestClusterClient_SendToOnlyReplicaNodes(t *testing.T) {
 	defer ShouldNotLeaked(SetupLeakDetection())
 
 	primaryNodeConn := &mockConn{
-		DoOverride: map[string]func(cmd Completed) RedisResult{
-			"CLUSTER SLOTS": func(cmd Completed) RedisResult {
+		DoOverride: map[string]func(cmd Completed) ValkeyResult{
+			"CLUSTER SLOTS": func(cmd Completed) ValkeyResult {
 				return slotsMultiResp
 			},
-			"INFO": func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "INFO"}, nil)
+			"INFO": func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "INFO"}, nil)
 			},
-			"GET K1{a}": func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "GET K1{a}"}, nil)
+			"GET K1{a}": func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "GET K1{a}"}, nil)
 			},
 		},
 	}
 	replicaNodeConn := &mockConn{
-		DoMultiFn: func(multi ...Completed) *redisresults {
-			resps := make([]RedisResult, len(multi))
+		DoMultiFn: func(multi ...Completed) *valkeyresults {
+			resps := make([]ValkeyResult, len(multi))
 			for i, cmd := range multi {
-				resps[i] = newResult(RedisMessage{typ: '+', string: strings.Join(cmd.Commands(), " ")}, nil)
+				resps[i] = newResult(ValkeyMessage{typ: '+', string: strings.Join(cmd.Commands(), " ")}, nil)
 			}
-			return &redisresults{s: resps}
+			return &valkeyresults{s: resps}
 		},
-		DoMultiCacheFn: func(multi ...CacheableTTL) *redisresults {
-			resps := make([]RedisResult, len(multi))
+		DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
+			resps := make([]ValkeyResult, len(multi))
 			for i, cmd := range multi {
-				resps[i] = newResult(RedisMessage{typ: '+', string: strings.Join(cmd.Cmd.Commands(), " ")}, nil)
+				resps[i] = newResult(ValkeyMessage{typ: '+', string: strings.Join(cmd.Cmd.Commands(), " ")}, nil)
 			}
-			return &redisresults{s: resps}
+			return &valkeyresults{s: resps}
 		},
-		DoOverride: map[string]func(cmd Completed) RedisResult{
-			"GET Do": func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "GET Do"}, nil)
+		DoOverride: map[string]func(cmd Completed) ValkeyResult{
+			"GET Do": func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "GET Do"}, nil)
 			},
-			"GET K1{a}": func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "GET K1{a}"}, nil)
+			"GET K1{a}": func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "GET K1{a}"}, nil)
 			},
-			"GET K2{a}": func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "GET K2{a}"}, nil)
+			"GET K2{a}": func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "GET K2{a}"}, nil)
 			},
 		},
-		DoCacheOverride: map[string]func(cmd Cacheable, ttl time.Duration) RedisResult{
-			"GET DoCache": func(cmd Cacheable, ttl time.Duration) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "GET DoCache"}, nil)
+		DoCacheOverride: map[string]func(cmd Cacheable, ttl time.Duration) ValkeyResult{
+			"GET DoCache": func(cmd Cacheable, ttl time.Duration) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "GET DoCache"}, nil)
 			},
 		},
 	}
@@ -2282,9 +2282,9 @@ func TestClusterClient_SendToOnlyReplicaNodes(t *testing.T) {
 		}
 	})
 
-	t.Run("Receive Redis Err", func(t *testing.T) {
+	t.Run("Receive Valkey Err", func(t *testing.T) {
 		c := client.B().Ssubscribe().Channel("ch").Build()
-		e := &RedisError{}
+		e := &ValkeyError{}
 		primaryNodeConn.ReceiveFn = func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 			return e
 		}
@@ -2317,11 +2317,11 @@ func TestClusterClient_SendToOnlyReplicaNodes(t *testing.T) {
 		}()
 		primaryNodeConn.AcquireFn = func() wire {
 			return &mockWire{
-				DoMultiFn: func(multi ...Completed) *redisresults {
-					return &redisresults{s: []RedisResult{
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '*', values: []RedisMessage{{typ: '+', string: "a"}}}, nil),
+				DoMultiFn: func(multi ...Completed) *valkeyresults {
+					return &valkeyresults{s: []ValkeyResult{
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}}}, nil),
 					}}
 				},
 			}
@@ -2361,8 +2361,8 @@ func TestClusterClient_SendToOnlyReplicaNodes(t *testing.T) {
 		}
 	})
 
-	t.Run("Dedicated Receive Redis Err", func(t *testing.T) {
-		e := &RedisError{}
+	t.Run("Dedicated Receive Valkey Err", func(t *testing.T) {
+		e := &ValkeyError{}
 		w := &mockWire{
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 				return e
@@ -2381,24 +2381,24 @@ func TestClusterClient_SendToOnlyReplicaNodes(t *testing.T) {
 	t.Run("Dedicated", func(t *testing.T) {
 		closed := false
 		w := &mockWire{
-			DoFn: func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "Delegate"}, nil)
+			DoFn: func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "Delegate"}, nil)
 			},
-			DoMultiFn: func(cmd ...Completed) *redisresults {
+			DoMultiFn: func(cmd ...Completed) *valkeyresults {
 				if len(cmd) == 4 {
-					return &redisresults{s: []RedisResult{
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '*', values: []RedisMessage{
+					return &valkeyresults{s: []ValkeyResult{
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 							{typ: '+', string: "Delegate0"},
 							{typ: '+', string: "Delegate1"},
 						}}, nil),
 					}}
 				}
-				return &redisresults{s: []RedisResult{
-					newResult(RedisMessage{typ: '+', string: "Delegate0"}, nil),
-					newResult(RedisMessage{typ: '+', string: "Delegate1"}, nil),
+				return &valkeyresults{s: []ValkeyResult{
+					newResult(ValkeyMessage{typ: '+', string: "Delegate0"}, nil),
+					newResult(ValkeyMessage{typ: '+', string: "Delegate1"}, nil),
 				}}
 			},
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
@@ -2489,24 +2489,24 @@ func TestClusterClient_SendToOnlyReplicaNodes(t *testing.T) {
 	t.Run("Dedicate", func(t *testing.T) {
 		closed := false
 		w := &mockWire{
-			DoFn: func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "Delegate"}, nil)
+			DoFn: func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "Delegate"}, nil)
 			},
-			DoMultiFn: func(cmd ...Completed) *redisresults {
+			DoMultiFn: func(cmd ...Completed) *valkeyresults {
 				if len(cmd) == 4 {
-					return &redisresults{s: []RedisResult{
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '*', values: []RedisMessage{
+					return &valkeyresults{s: []ValkeyResult{
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 							{typ: '+', string: "Delegate0"},
 							{typ: '+', string: "Delegate1"},
 						}}, nil),
 					}}
 				}
-				return &redisresults{s: []RedisResult{
-					newResult(RedisMessage{typ: '+', string: "Delegate0"}, nil),
-					newResult(RedisMessage{typ: '+', string: "Delegate1"}, nil),
+				return &valkeyresults{s: []ValkeyResult{
+					newResult(ValkeyMessage{typ: '+', string: "Delegate0"}, nil),
+					newResult(ValkeyMessage{typ: '+', string: "Delegate1"}, nil),
 				}}
 			},
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
@@ -2598,97 +2598,97 @@ func TestClusterClient_SendReadOperationToReplicaNodesWriteOperationToPrimaryNod
 	defer ShouldNotLeaked(SetupLeakDetection())
 
 	primaryNodeConn := &mockConn{
-		DoOverride: map[string]func(cmd Completed) RedisResult{
-			"CLUSTER SLOTS": func(cmd Completed) RedisResult {
+		DoOverride: map[string]func(cmd Completed) ValkeyResult{
+			"CLUSTER SLOTS": func(cmd Completed) ValkeyResult {
 				return slotsMultiResp
 			},
-			"INFO": func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "INFO"}, nil)
+			"INFO": func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "INFO"}, nil)
 			},
-			"SET Do V": func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "SET Do V"}, nil)
+			"SET Do V": func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "SET Do V"}, nil)
 			},
-			"SET K2{a} V2{a}": func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "SET K2{a} V2{a}"}, nil)
+			"SET K2{a} V2{a}": func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "SET K2{a} V2{a}"}, nil)
 			},
 		},
-		DoMultiFn: func(multi ...Completed) *redisresults {
-			resps := make([]RedisResult, len(multi))
+		DoMultiFn: func(multi ...Completed) *valkeyresults {
+			resps := make([]ValkeyResult, len(multi))
 			for i, cmd := range multi {
 				if strings.HasPrefix(strings.Join(cmd.Commands(), " "), "SET K1") {
-					resps[i] = newResult(RedisMessage{typ: '+', string: strings.Join(cmd.Commands(), " ")}, nil)
+					resps[i] = newResult(ValkeyMessage{typ: '+', string: strings.Join(cmd.Commands(), " ")}, nil)
 					continue
 				}
 				if strings.HasPrefix(strings.Join(cmd.Commands(), " "), "SET K2") {
-					resps[i] = newResult(RedisMessage{typ: '+', string: strings.Join(cmd.Commands(), " ")}, nil)
+					resps[i] = newResult(ValkeyMessage{typ: '+', string: strings.Join(cmd.Commands(), " ")}, nil)
 					continue
 				}
 				if strings.HasPrefix(strings.Join(cmd.Commands(), " "), "MULTI") {
-					resps[i] = newResult(RedisMessage{typ: '+', string: "MULTI"}, nil)
+					resps[i] = newResult(ValkeyMessage{typ: '+', string: "MULTI"}, nil)
 					continue
 				}
 				if strings.HasPrefix(strings.Join(cmd.Commands(), " "), "EXEC") {
-					resps[i] = newResult(RedisMessage{typ: '+', string: "EXEC"}, nil)
+					resps[i] = newResult(ValkeyMessage{typ: '+', string: "EXEC"}, nil)
 					continue
 				}
 
-				return &redisresults{
-					s: []RedisResult{},
+				return &valkeyresults{
+					s: []ValkeyResult{},
 				}
 			}
-			return &redisresults{s: resps}
+			return &valkeyresults{s: resps}
 		},
 	}
 	replicaNodeConn := &mockConn{
-		DoOverride: map[string]func(cmd Completed) RedisResult{
-			"GET Do": func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "GET Do"}, nil)
+		DoOverride: map[string]func(cmd Completed) ValkeyResult{
+			"GET Do": func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "GET Do"}, nil)
 			},
-			"GET K1{a}": func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "GET K1{a}"}, nil)
+			"GET K1{a}": func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "GET K1{a}"}, nil)
 			},
-			"GET K2{a}": func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "GET K2{a}"}, nil)
+			"GET K2{a}": func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "GET K2{a}"}, nil)
 			},
 		},
-		DoMultiFn: func(multi ...Completed) *redisresults {
-			resps := make([]RedisResult, len(multi))
+		DoMultiFn: func(multi ...Completed) *valkeyresults {
+			resps := make([]ValkeyResult, len(multi))
 			for i, cmd := range multi {
 				if strings.HasPrefix(strings.Join(cmd.Commands(), " "), "GET K1") {
-					resps[i] = newResult(RedisMessage{typ: '+', string: strings.Join(cmd.Commands(), " ")}, nil)
+					resps[i] = newResult(ValkeyMessage{typ: '+', string: strings.Join(cmd.Commands(), " ")}, nil)
 					continue
 				}
 
-				return &redisresults{
-					s: []RedisResult{},
+				return &valkeyresults{
+					s: []ValkeyResult{},
 				}
 			}
-			return &redisresults{s: resps}
+			return &valkeyresults{s: resps}
 		},
-		DoCacheOverride: map[string]func(cmd Cacheable, ttl time.Duration) RedisResult{
-			"GET DoCache": func(cmd Cacheable, ttl time.Duration) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "GET DoCache"}, nil)
+		DoCacheOverride: map[string]func(cmd Cacheable, ttl time.Duration) ValkeyResult{
+			"GET DoCache": func(cmd Cacheable, ttl time.Duration) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "GET DoCache"}, nil)
 			},
-			"GET K1{a}": func(cmd Cacheable, ttl time.Duration) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "GET K1{a}"}, nil)
+			"GET K1{a}": func(cmd Cacheable, ttl time.Duration) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "GET K1{a}"}, nil)
 			},
-			"GET K2{a}": func(cmd Cacheable, ttl time.Duration) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "GET K2{a}"}, nil)
+			"GET K2{a}": func(cmd Cacheable, ttl time.Duration) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "GET K2{a}"}, nil)
 			},
 		},
-		DoMultiCacheFn: func(multi ...CacheableTTL) *redisresults {
-			resps := make([]RedisResult, len(multi))
+		DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
+			resps := make([]ValkeyResult, len(multi))
 			for i, cmd := range multi {
 				if strings.HasPrefix(strings.Join(cmd.Cmd.Commands(), " "), "GET K1") {
-					resps[i] = newResult(RedisMessage{typ: '+', string: strings.Join(cmd.Cmd.Commands(), " ")}, nil)
+					resps[i] = newResult(ValkeyMessage{typ: '+', string: strings.Join(cmd.Cmd.Commands(), " ")}, nil)
 					continue
 				}
 
-				return &redisresults{
-					s: []RedisResult{},
+				return &valkeyresults{
+					s: []ValkeyResult{},
 				}
 			}
-			return &redisresults{s: resps}
+			return &valkeyresults{s: resps}
 		},
 	}
 
@@ -2878,9 +2878,9 @@ func TestClusterClient_SendReadOperationToReplicaNodesWriteOperationToPrimaryNod
 		}
 	})
 
-	t.Run("Receive Redis Err", func(t *testing.T) {
+	t.Run("Receive Valkey Err", func(t *testing.T) {
 		c := client.B().Ssubscribe().Channel("ch").Build()
-		e := &RedisError{}
+		e := &ValkeyError{}
 		primaryNodeConn.ReceiveFn = func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 			return e
 		}
@@ -2913,11 +2913,11 @@ func TestClusterClient_SendReadOperationToReplicaNodesWriteOperationToPrimaryNod
 		}()
 		primaryNodeConn.AcquireFn = func() wire {
 			return &mockWire{
-				DoMultiFn: func(multi ...Completed) *redisresults {
-					return &redisresults{s: []RedisResult{
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '*', values: []RedisMessage{{typ: '+', string: "a"}}}, nil),
+				DoMultiFn: func(multi ...Completed) *valkeyresults {
+					return &valkeyresults{s: []ValkeyResult{
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}}}, nil),
 					}}
 				},
 			}
@@ -2957,8 +2957,8 @@ func TestClusterClient_SendReadOperationToReplicaNodesWriteOperationToPrimaryNod
 		}
 	})
 
-	t.Run("Dedicated Receive Redis Err", func(t *testing.T) {
-		e := &RedisError{}
+	t.Run("Dedicated Receive Valkey Err", func(t *testing.T) {
+		e := &ValkeyError{}
 		w := &mockWire{
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 				return e
@@ -2977,24 +2977,24 @@ func TestClusterClient_SendReadOperationToReplicaNodesWriteOperationToPrimaryNod
 	t.Run("Dedicated", func(t *testing.T) {
 		closed := false
 		w := &mockWire{
-			DoFn: func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "Delegate"}, nil)
+			DoFn: func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "Delegate"}, nil)
 			},
-			DoMultiFn: func(cmd ...Completed) *redisresults {
+			DoMultiFn: func(cmd ...Completed) *valkeyresults {
 				if len(cmd) == 4 {
-					return &redisresults{s: []RedisResult{
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '*', values: []RedisMessage{
+					return &valkeyresults{s: []ValkeyResult{
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 							{typ: '+', string: "Delegate0"},
 							{typ: '+', string: "Delegate1"},
 						}}, nil),
 					}}
 				}
-				return &redisresults{s: []RedisResult{
-					newResult(RedisMessage{typ: '+', string: "Delegate0"}, nil),
-					newResult(RedisMessage{typ: '+', string: "Delegate1"}, nil),
+				return &valkeyresults{s: []ValkeyResult{
+					newResult(ValkeyMessage{typ: '+', string: "Delegate0"}, nil),
+					newResult(ValkeyMessage{typ: '+', string: "Delegate1"}, nil),
 				}}
 			},
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
@@ -3085,24 +3085,24 @@ func TestClusterClient_SendReadOperationToReplicaNodesWriteOperationToPrimaryNod
 	t.Run("Dedicate", func(t *testing.T) {
 		closed := false
 		w := &mockWire{
-			DoFn: func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "Delegate"}, nil)
+			DoFn: func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "Delegate"}, nil)
 			},
-			DoMultiFn: func(cmd ...Completed) *redisresults {
+			DoMultiFn: func(cmd ...Completed) *valkeyresults {
 				if len(cmd) == 4 {
-					return &redisresults{s: []RedisResult{
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '+', string: "OK"}, nil),
-						newResult(RedisMessage{typ: '*', values: []RedisMessage{
+					return &valkeyresults{s: []ValkeyResult{
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '+', string: "OK"}, nil),
+						newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 							{typ: '+', string: "Delegate0"},
 							{typ: '+', string: "Delegate1"},
 						}}, nil),
 					}}
 				}
-				return &redisresults{s: []RedisResult{
-					newResult(RedisMessage{typ: '+', string: "Delegate0"}, nil),
-					newResult(RedisMessage{typ: '+', string: "Delegate1"}, nil),
+				return &valkeyresults{s: []ValkeyResult{
+					newResult(ValkeyMessage{typ: '+', string: "Delegate0"}, nil),
+					newResult(ValkeyMessage{typ: '+', string: "Delegate1"}, nil),
 				}}
 			},
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
@@ -3194,31 +3194,31 @@ func TestClusterClient_SendPrimaryNodeOnlyButOneSlotAssigned(t *testing.T) {
 	defer ShouldNotLeaked(SetupLeakDetection())
 
 	primaryNodeConn := &mockConn{
-		DoOverride: map[string]func(cmd Completed) RedisResult{
-			"CLUSTER SLOTS": func(cmd Completed) RedisResult {
+		DoOverride: map[string]func(cmd Completed) ValkeyResult{
+			"CLUSTER SLOTS": func(cmd Completed) ValkeyResult {
 				return singleSlotResp
 			},
-			"INFO": func(cmd Completed) RedisResult {
-				return newResult(RedisMessage{typ: '+', string: "INFO"}, nil)
+			"INFO": func(cmd Completed) ValkeyResult {
+				return newResult(ValkeyMessage{typ: '+', string: "INFO"}, nil)
 			},
 		},
-		DoMultiFn: func(multi ...Completed) *redisresults {
-			resps := make([]RedisResult, len(multi))
+		DoMultiFn: func(multi ...Completed) *valkeyresults {
+			resps := make([]ValkeyResult, len(multi))
 			for i, cmd := range multi {
 				if strings.HasPrefix(strings.Join(cmd.Commands(), " "), "MULTI") {
-					resps[i] = newResult(RedisMessage{typ: '+', string: "MULTI"}, nil)
+					resps[i] = newResult(ValkeyMessage{typ: '+', string: "MULTI"}, nil)
 					continue
 				}
 				if strings.HasPrefix(strings.Join(cmd.Commands(), " "), "EXEC") {
-					resps[i] = newResult(RedisMessage{typ: '+', string: "EXEC"}, nil)
+					resps[i] = newResult(ValkeyMessage{typ: '+', string: "EXEC"}, nil)
 					continue
 				}
 
-				return &redisresults{
-					s: []RedisResult{},
+				return &valkeyresults{
+					s: []ValkeyResult{},
 				}
 			}
-			return &redisresults{s: resps}
+			return &valkeyresults{s: resps}
 		},
 	}
 
@@ -3267,35 +3267,35 @@ func TestClusterClientErr(t *testing.T) {
 		cancel()
 		v := ctx.Err()
 		m := &mockConn{
-			DoFn: func(cmd Completed) RedisResult {
+			DoFn: func(cmd Completed) ValkeyResult {
 				if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
 					atomic.AddInt64(&count, 1)
 					return slotsResp
 				}
 				return newErrResult(v)
 			},
-			DoStreamFn: func(cmd Completed) RedisResultStream {
-				return RedisResultStream{e: v}
+			DoStreamFn: func(cmd Completed) ValkeyResultStream {
+				return ValkeyResultStream{e: v}
 			},
-			DoMultiFn: func(multi ...Completed) *redisresults {
-				res := make([]RedisResult, len(multi))
+			DoMultiFn: func(multi ...Completed) *valkeyresults {
+				res := make([]ValkeyResult, len(multi))
 				for i := range res {
 					res[i] = newErrResult(v)
 				}
-				return &redisresults{s: res}
+				return &valkeyresults{s: res}
 			},
-			DoMultiStreamFn: func(cmd ...Completed) MultiRedisResultStream {
-				return MultiRedisResultStream{e: v}
+			DoMultiStreamFn: func(cmd ...Completed) MultiValkeyResultStream {
+				return MultiValkeyResultStream{e: v}
 			},
-			DoCacheFn: func(cmd Cacheable, ttl time.Duration) RedisResult {
+			DoCacheFn: func(cmd Cacheable, ttl time.Duration) ValkeyResult {
 				return newErrResult(v)
 			},
-			DoMultiCacheFn: func(multi ...CacheableTTL) *redisresults {
-				res := make([]RedisResult, len(multi))
+			DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
+				res := make([]ValkeyResult, len(multi))
 				for i := range res {
 					res[i] = newErrResult(v)
 				}
-				return &redisresults{s: res}
+				return &valkeyresults{s: res}
 			},
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 				return v
@@ -3337,7 +3337,7 @@ func TestClusterClientErr(t *testing.T) {
 		var first int64
 		v := errors.New("refresh err")
 		m := &mockConn{
-			DoFn: func(cmd Completed) RedisResult {
+			DoFn: func(cmd Completed) ValkeyResult {
 				if atomic.AddInt64(&first, 1) == 1 {
 					return singleSlotResp
 				}
@@ -3387,7 +3387,7 @@ func TestClusterClientErr(t *testing.T) {
 	})
 
 	t.Run("refresh empty on pick", func(t *testing.T) {
-		m := &mockConn{DoFn: func(cmd Completed) RedisResult {
+		m := &mockConn{DoFn: func(cmd Completed) ValkeyResult {
 			return singleSlotResp
 		}}
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
@@ -3418,7 +3418,7 @@ func TestClusterClientErr(t *testing.T) {
 	})
 
 	t.Run("refresh empty on pick in dedicated wire", func(t *testing.T) {
-		m := &mockConn{DoFn: func(cmd Completed) RedisResult {
+		m := &mockConn{DoFn: func(cmd Completed) ValkeyResult {
 			return singleSlotResp
 		}}
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
@@ -3440,7 +3440,7 @@ func TestClusterClientErr(t *testing.T) {
 	})
 
 	t.Run("refresh empty on pick in dedicated wire (multi)", func(t *testing.T) {
-		m := &mockConn{DoFn: func(cmd Completed) RedisResult {
+		m := &mockConn{DoFn: func(cmd Completed) ValkeyResult {
 			return singleSlotResp
 		}}
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
@@ -3470,14 +3470,14 @@ func TestClusterClientErr(t *testing.T) {
 		var count, check int64
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
 			atomic.AddInt64(&check, 1)
-			return &mockConn{DoFn: func(cmd Completed) RedisResult {
+			return &mockConn{DoFn: func(cmd Completed) ValkeyResult {
 				if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
 					return slotsMultiResp
 				}
 				if atomic.AddInt64(&count, 1) <= 3 {
-					return newResult(RedisMessage{typ: '-', string: "MOVED 0 :0"}, nil)
+					return newResult(ValkeyMessage{typ: '-', string: "MOVED 0 :0"}, nil)
 				}
-				return newResult(RedisMessage{typ: '+', string: "b"}, nil)
+				return newResult(ValkeyMessage{typ: '+', string: "b"}, nil)
 			}}
 		})
 		if err != nil {
@@ -3494,14 +3494,14 @@ func TestClusterClientErr(t *testing.T) {
 	t.Run("slot moved", func(t *testing.T) {
 		var count int64
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
-			return &mockConn{DoFn: func(cmd Completed) RedisResult {
+			return &mockConn{DoFn: func(cmd Completed) ValkeyResult {
 				if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
 					return slotsMultiResp
 				}
 				if atomic.AddInt64(&count, 1) <= 3 {
-					return newResult(RedisMessage{typ: '-', string: "MOVED 0 :1"}, nil)
+					return newResult(ValkeyMessage{typ: '-', string: "MOVED 0 :1"}, nil)
 				}
-				return newResult(RedisMessage{typ: '+', string: "b"}, nil)
+				return newResult(ValkeyMessage{typ: '+', string: "b"}, nil)
 			}}
 		})
 		if err != nil {
@@ -3515,20 +3515,20 @@ func TestClusterClientErr(t *testing.T) {
 	t.Run("slot moved DoMulti (single)", func(t *testing.T) {
 		var count int64
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
-			return &mockConn{DoFn: func(cmd Completed) RedisResult {
+			return &mockConn{DoFn: func(cmd Completed) ValkeyResult {
 				return slotsMultiResp
-			}, DoMultiFn: func(multi ...Completed) *redisresults {
-				ret := make([]RedisResult, len(multi))
+			}, DoMultiFn: func(multi ...Completed) *valkeyresults {
+				ret := make([]ValkeyResult, len(multi))
 				if atomic.AddInt64(&count, 1) <= 3 {
 					for i := range ret {
-						ret[i] = newResult(RedisMessage{typ: '-', string: "MOVED 0 :1"}, nil)
+						ret[i] = newResult(ValkeyMessage{typ: '-', string: "MOVED 0 :1"}, nil)
 					}
-					return &redisresults{s: ret}
+					return &valkeyresults{s: ret}
 				}
 				for i := range ret {
-					ret[i] = newResult(RedisMessage{typ: '+', string: multi[i].Commands()[1]}, nil)
+					ret[i] = newResult(ValkeyMessage{typ: '+', string: multi[i].Commands()[1]}, nil)
 				}
-				return &redisresults{s: ret}
+				return &valkeyresults{s: ret}
 			}}
 		})
 		if err != nil {
@@ -3542,20 +3542,20 @@ func TestClusterClientErr(t *testing.T) {
 	t.Run("slot moved DoMulti (multi)", func(t *testing.T) {
 		var count int64
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
-			return &mockConn{DoFn: func(cmd Completed) RedisResult {
+			return &mockConn{DoFn: func(cmd Completed) ValkeyResult {
 				return slotsMultiResp
-			}, DoMultiFn: func(multi ...Completed) *redisresults {
-				ret := make([]RedisResult, len(multi))
+			}, DoMultiFn: func(multi ...Completed) *valkeyresults {
+				ret := make([]ValkeyResult, len(multi))
 				if atomic.AddInt64(&count, 1) <= 3 {
 					for i := range ret {
-						ret[i] = newResult(RedisMessage{typ: '-', string: "MOVED 0 :1"}, nil)
+						ret[i] = newResult(ValkeyMessage{typ: '-', string: "MOVED 0 :1"}, nil)
 					}
-					return &redisresults{s: ret}
+					return &valkeyresults{s: ret}
 				}
 				for i := range ret {
-					ret[i] = newResult(RedisMessage{typ: '+', string: multi[i].Commands()[1]}, nil)
+					ret[i] = newResult(ValkeyMessage{typ: '+', string: multi[i].Commands()[1]}, nil)
 				}
-				return &redisresults{s: ret}
+				return &valkeyresults{s: ret}
 			}}
 		})
 		if err != nil {
@@ -3575,20 +3575,20 @@ func TestClusterClientErr(t *testing.T) {
 	t.Run("slot moved DoMulti (multi) TRYAGAIN", func(t *testing.T) {
 		var count int64
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
-			return &mockConn{DoFn: func(cmd Completed) RedisResult {
+			return &mockConn{DoFn: func(cmd Completed) ValkeyResult {
 				return slotsMultiResp
-			}, DoMultiFn: func(multi ...Completed) *redisresults {
-				ret := make([]RedisResult, len(multi))
+			}, DoMultiFn: func(multi ...Completed) *valkeyresults {
+				ret := make([]ValkeyResult, len(multi))
 				if atomic.AddInt64(&count, 1) <= 2 {
 					for i := range ret {
-						ret[i] = newResult(RedisMessage{typ: '-', string: "TRYAGAIN"}, nil)
+						ret[i] = newResult(ValkeyMessage{typ: '-', string: "TRYAGAIN"}, nil)
 					}
-					return &redisresults{s: ret}
+					return &valkeyresults{s: ret}
 				}
 				for i := range ret {
-					ret[i] = newResult(RedisMessage{typ: '+', string: multi[i].Commands()[1]}, nil)
+					ret[i] = newResult(ValkeyMessage{typ: '+', string: multi[i].Commands()[1]}, nil)
 				}
-				return &redisresults{s: ret}
+				return &valkeyresults{s: ret}
 			}}
 		})
 		if err != nil {
@@ -3609,14 +3609,14 @@ func TestClusterClientErr(t *testing.T) {
 			if dst == ":2" {
 				atomic.AddInt64(&check, 1)
 			}
-			return &mockConn{DoFn: func(cmd Completed) RedisResult {
+			return &mockConn{DoFn: func(cmd Completed) ValkeyResult {
 				if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
 					return slotsMultiResp
 				}
 				if atomic.AddInt64(&count, 1) <= 3 {
-					return newResult(RedisMessage{typ: '-', string: "MOVED 0 :2"}, nil)
+					return newResult(ValkeyMessage{typ: '-', string: "MOVED 0 :2"}, nil)
 				}
-				return newResult(RedisMessage{typ: '+', string: "b"}, nil)
+				return newResult(ValkeyMessage{typ: '+', string: "b"}, nil)
 			}}
 
 		})
@@ -3637,20 +3637,20 @@ func TestClusterClientErr(t *testing.T) {
 			if dst == ":2" {
 				atomic.AddInt64(&check, 1)
 			}
-			return &mockConn{DoFn: func(cmd Completed) RedisResult {
+			return &mockConn{DoFn: func(cmd Completed) ValkeyResult {
 				return slotsMultiResp
-			}, DoMultiFn: func(multi ...Completed) *redisresults {
-				ret := make([]RedisResult, len(multi))
+			}, DoMultiFn: func(multi ...Completed) *valkeyresults {
+				ret := make([]ValkeyResult, len(multi))
 				if atomic.AddInt64(&count, 1) <= 3 {
 					for i := range ret {
-						ret[i] = newResult(RedisMessage{typ: '-', string: "MOVED 0 :2"}, nil)
+						ret[i] = newResult(ValkeyMessage{typ: '-', string: "MOVED 0 :2"}, nil)
 					}
-					return &redisresults{s: ret}
+					return &valkeyresults{s: ret}
 				}
 				for i := range ret {
-					ret[i] = newResult(RedisMessage{typ: '+', string: multi[i].Commands()[1]}, nil)
+					ret[i] = newResult(ValkeyMessage{typ: '+', string: multi[i].Commands()[1]}, nil)
 				}
-				return &redisresults{s: ret}
+				return &valkeyresults{s: ret}
 			}}
 		})
 		if err != nil {
@@ -3670,20 +3670,20 @@ func TestClusterClientErr(t *testing.T) {
 			if dst == ":2" {
 				atomic.AddInt64(&check, 1)
 			}
-			return &mockConn{DoFn: func(cmd Completed) RedisResult {
+			return &mockConn{DoFn: func(cmd Completed) ValkeyResult {
 				return slotsMultiResp
-			}, DoMultiFn: func(multi ...Completed) *redisresults {
-				ret := make([]RedisResult, len(multi))
+			}, DoMultiFn: func(multi ...Completed) *valkeyresults {
+				ret := make([]ValkeyResult, len(multi))
 				if atomic.AddInt64(&count, 1) <= 3 {
 					for i := range ret {
-						ret[i] = newResult(RedisMessage{typ: '-', string: "MOVED 0 :2"}, nil)
+						ret[i] = newResult(ValkeyMessage{typ: '-', string: "MOVED 0 :2"}, nil)
 					}
-					return &redisresults{s: ret}
+					return &valkeyresults{s: ret}
 				}
 				for i := range ret {
-					ret[i] = newResult(RedisMessage{typ: '+', string: multi[i].Commands()[1]}, nil)
+					ret[i] = newResult(ValkeyMessage{typ: '+', string: multi[i].Commands()[1]}, nil)
 				}
-				return &redisresults{s: ret}
+				return &valkeyresults{s: ret}
 			}}
 		})
 		if err != nil {
@@ -3706,20 +3706,20 @@ func TestClusterClientErr(t *testing.T) {
 	t.Run("slot moved new (multi 2) TRYAGAIN", func(t *testing.T) {
 		var count int64
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
-			return &mockConn{DoFn: func(cmd Completed) RedisResult {
+			return &mockConn{DoFn: func(cmd Completed) ValkeyResult {
 				return slotsMultiResp
-			}, DoMultiFn: func(multi ...Completed) *redisresults {
-				ret := make([]RedisResult, len(multi))
+			}, DoMultiFn: func(multi ...Completed) *valkeyresults {
+				ret := make([]ValkeyResult, len(multi))
 				if atomic.AddInt64(&count, 1) <= 2 {
 					for i := range ret {
-						ret[i] = newResult(RedisMessage{typ: '-', string: "TRYAGAIN"}, nil)
+						ret[i] = newResult(ValkeyMessage{typ: '-', string: "TRYAGAIN"}, nil)
 					}
-					return &redisresults{s: ret}
+					return &valkeyresults{s: ret}
 				}
 				for i := range ret {
-					ret[i] = newResult(RedisMessage{typ: '+', string: multi[i].Commands()[1]}, nil)
+					ret[i] = newResult(ValkeyMessage{typ: '+', string: multi[i].Commands()[1]}, nil)
 				}
-				return &redisresults{s: ret}
+				return &valkeyresults{s: ret}
 			}}
 		})
 		if err != nil {
@@ -3738,14 +3738,14 @@ func TestClusterClientErr(t *testing.T) {
 		var count int64
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
 			return &mockConn{
-				DoFn: func(cmd Completed) RedisResult {
+				DoFn: func(cmd Completed) ValkeyResult {
 					return slotsMultiResp
 				},
-				DoCacheFn: func(cmd Cacheable, ttl time.Duration) RedisResult {
+				DoCacheFn: func(cmd Cacheable, ttl time.Duration) ValkeyResult {
 					if atomic.AddInt64(&count, 1) <= 3 {
-						return newResult(RedisMessage{typ: '-', string: "MOVED 0 :1"}, nil)
+						return newResult(ValkeyMessage{typ: '-', string: "MOVED 0 :1"}, nil)
 					}
-					return newResult(RedisMessage{typ: '+', string: "b"}, nil)
+					return newResult(ValkeyMessage{typ: '+', string: "b"}, nil)
 				},
 			}
 		})
@@ -3760,20 +3760,20 @@ func TestClusterClientErr(t *testing.T) {
 	t.Run("slot moved (cache multi 1)", func(t *testing.T) {
 		var count int64
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
-			return &mockConn{DoFn: func(cmd Completed) RedisResult {
+			return &mockConn{DoFn: func(cmd Completed) ValkeyResult {
 				return slotsMultiResp
-			}, DoMultiCacheFn: func(multi ...CacheableTTL) *redisresults {
-				ret := make([]RedisResult, len(multi))
+			}, DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
+				ret := make([]ValkeyResult, len(multi))
 				if atomic.AddInt64(&count, 1) <= 3 {
 					for i := range ret {
-						ret[i] = newResult(RedisMessage{typ: '-', string: "MOVED 0 :1"}, nil)
+						ret[i] = newResult(ValkeyMessage{typ: '-', string: "MOVED 0 :1"}, nil)
 					}
-					return &redisresults{s: ret}
+					return &valkeyresults{s: ret}
 				}
 				for i := range ret {
-					ret[i] = newResult(RedisMessage{typ: '+', string: multi[i].Cmd.Commands()[1]}, nil)
+					ret[i] = newResult(ValkeyMessage{typ: '+', string: multi[i].Cmd.Commands()[1]}, nil)
 				}
-				return &redisresults{s: ret}
+				return &valkeyresults{s: ret}
 			}}
 		})
 		if err != nil {
@@ -3787,20 +3787,20 @@ func TestClusterClientErr(t *testing.T) {
 	t.Run("slot moved (cache multi 2)", func(t *testing.T) {
 		var count int64
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
-			return &mockConn{DoFn: func(cmd Completed) RedisResult {
+			return &mockConn{DoFn: func(cmd Completed) ValkeyResult {
 				return slotsMultiResp
-			}, DoMultiCacheFn: func(multi ...CacheableTTL) *redisresults {
-				ret := make([]RedisResult, len(multi))
+			}, DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
+				ret := make([]ValkeyResult, len(multi))
 				if atomic.AddInt64(&count, 1) <= 3 {
 					for i := range ret {
-						ret[i] = newResult(RedisMessage{typ: '-', string: "MOVED 0 :1"}, nil)
+						ret[i] = newResult(ValkeyMessage{typ: '-', string: "MOVED 0 :1"}, nil)
 					}
-					return &redisresults{s: ret}
+					return &valkeyresults{s: ret}
 				}
 				for i := range ret {
-					ret[i] = newResult(RedisMessage{typ: '+', string: multi[i].Cmd.Commands()[1]}, nil)
+					ret[i] = newResult(ValkeyMessage{typ: '+', string: multi[i].Cmd.Commands()[1]}, nil)
 				}
-				return &redisresults{s: ret}
+				return &valkeyresults{s: ret}
 			}}
 		})
 		if err != nil {
@@ -3821,17 +3821,17 @@ func TestClusterClientErr(t *testing.T) {
 		var count int64
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
 			return &mockConn{
-				DoFn: func(cmd Completed) RedisResult {
+				DoFn: func(cmd Completed) ValkeyResult {
 					if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
 						return slotsMultiResp
 					}
-					return newResult(RedisMessage{typ: '-', string: "ASK 0 :1"}, nil)
+					return newResult(ValkeyMessage{typ: '-', string: "ASK 0 :1"}, nil)
 				},
-				DoMultiFn: func(multi ...Completed) *redisresults {
+				DoMultiFn: func(multi ...Completed) *valkeyresults {
 					if atomic.AddInt64(&count, 1) <= 3 {
-						return &redisresults{s: []RedisResult{{}, newResult(RedisMessage{typ: '-', string: "ASK 0 :1"}, nil)}}
+						return &valkeyresults{s: []ValkeyResult{{}, newResult(ValkeyMessage{typ: '-', string: "ASK 0 :1"}, nil)}}
 					}
-					return &redisresults{s: []RedisResult{{}, newResult(RedisMessage{typ: '+', string: "b"}, nil)}}
+					return &valkeyresults{s: []ValkeyResult{{}, newResult(ValkeyMessage{typ: '+', string: "b"}, nil)}}
 				},
 			}
 		})
@@ -3847,22 +3847,22 @@ func TestClusterClientErr(t *testing.T) {
 		var count int64
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
 			return &mockConn{
-				DoFn: func(cmd Completed) RedisResult {
+				DoFn: func(cmd Completed) ValkeyResult {
 					return slotsMultiResp
 				},
-				DoMultiFn: func(multi ...Completed) *redisresults {
-					ret := make([]RedisResult, len(multi))
+				DoMultiFn: func(multi ...Completed) *valkeyresults {
+					ret := make([]ValkeyResult, len(multi))
 					if atomic.AddInt64(&count, 1) <= 3 {
 						for i := range ret {
-							ret[i] = newResult(RedisMessage{typ: '-', string: "ASK 0 :1"}, nil)
+							ret[i] = newResult(ValkeyMessage{typ: '-', string: "ASK 0 :1"}, nil)
 						}
-						return &redisresults{s: ret}
+						return &valkeyresults{s: ret}
 					}
 					for i := 0; i < len(multi); i += 2 {
-						ret[i] = newResult(RedisMessage{typ: '+', string: "OK"}, nil)
-						ret[i+1] = newResult(RedisMessage{typ: '+', string: multi[i+1].Commands()[1]}, nil)
+						ret[i] = newResult(ValkeyMessage{typ: '+', string: "OK"}, nil)
+						ret[i+1] = newResult(ValkeyMessage{typ: '+', string: multi[i+1].Commands()[1]}, nil)
 					}
-					return &redisresults{s: ret}
+					return &valkeyresults{s: ret}
 				},
 			}
 		})
@@ -3878,22 +3878,22 @@ func TestClusterClientErr(t *testing.T) {
 		var count int64
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
 			return &mockConn{
-				DoFn: func(cmd Completed) RedisResult {
+				DoFn: func(cmd Completed) ValkeyResult {
 					return slotsMultiResp
 				},
-				DoMultiFn: func(multi ...Completed) *redisresults {
-					ret := make([]RedisResult, len(multi))
+				DoMultiFn: func(multi ...Completed) *valkeyresults {
+					ret := make([]ValkeyResult, len(multi))
 					if atomic.AddInt64(&count, 1) <= 3 {
 						for i := range ret {
-							ret[i] = newResult(RedisMessage{typ: '-', string: "ASK 0 :1"}, nil)
+							ret[i] = newResult(ValkeyMessage{typ: '-', string: "ASK 0 :1"}, nil)
 						}
-						return &redisresults{s: ret}
+						return &valkeyresults{s: ret}
 					}
 					for i := 0; i < len(multi); i += 2 {
-						ret[i] = newResult(RedisMessage{typ: '+', string: "OK"}, nil)
-						ret[i+1] = newResult(RedisMessage{typ: '+', string: multi[i+1].Commands()[1]}, nil)
+						ret[i] = newResult(ValkeyMessage{typ: '+', string: "OK"}, nil)
+						ret[i+1] = newResult(ValkeyMessage{typ: '+', string: multi[i+1].Commands()[1]}, nil)
 					}
-					return &redisresults{s: ret}
+					return &valkeyresults{s: ret}
 				},
 			}
 		})
@@ -3915,17 +3915,17 @@ func TestClusterClientErr(t *testing.T) {
 		var count int64
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
 			return &mockConn{
-				DoFn: func(cmd Completed) RedisResult {
+				DoFn: func(cmd Completed) ValkeyResult {
 					return slotsMultiResp
 				},
-				DoCacheFn: func(cmd Cacheable, ttl time.Duration) RedisResult {
-					return newResult(RedisMessage{typ: '-', string: "ASK 0 :1"}, nil)
+				DoCacheFn: func(cmd Cacheable, ttl time.Duration) ValkeyResult {
+					return newResult(ValkeyMessage{typ: '-', string: "ASK 0 :1"}, nil)
 				},
-				DoMultiFn: func(multi ...Completed) *redisresults {
+				DoMultiFn: func(multi ...Completed) *valkeyresults {
 					if atomic.AddInt64(&count, 1) <= 3 {
-						return &redisresults{s: []RedisResult{{}, {}, {}, {}, {}, newResult(RedisMessage{typ: '-', string: "ASK 0 :1"}, nil)}}
+						return &valkeyresults{s: []ValkeyResult{{}, {}, {}, {}, {}, newResult(ValkeyMessage{typ: '-', string: "ASK 0 :1"}, nil)}}
 					}
-					return &redisresults{s: []RedisResult{{}, {}, {}, {}, {}, newResult(RedisMessage{typ: '*', values: []RedisMessage{{}, {typ: '+', string: "b"}}}, nil)}}
+					return &valkeyresults{s: []ValkeyResult{{}, {}, {}, {}, {}, newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{{}, {typ: '+', string: "b"}}}, nil)}}
 				},
 			}
 		})
@@ -3941,17 +3941,17 @@ func TestClusterClientErr(t *testing.T) {
 		var count int64
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
 			return &mockConn{
-				DoFn: func(cmd Completed) RedisResult {
+				DoFn: func(cmd Completed) ValkeyResult {
 					return slotsMultiResp
 				},
-				DoMultiCacheFn: func(multi ...CacheableTTL) *redisresults {
-					return &redisresults{s: []RedisResult{newResult(RedisMessage{typ: '-', string: "ASK 0 :1"}, nil)}}
+				DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
+					return &valkeyresults{s: []ValkeyResult{newResult(ValkeyMessage{typ: '-', string: "ASK 0 :1"}, nil)}}
 				},
-				DoMultiFn: func(multi ...Completed) *redisresults {
+				DoMultiFn: func(multi ...Completed) *valkeyresults {
 					if atomic.AddInt64(&count, 1) <= 3 {
-						return &redisresults{s: []RedisResult{{}, {}, {}, {}, {}, newResult(RedisMessage{typ: '-', string: "ASK 0 :1"}, nil)}}
+						return &valkeyresults{s: []ValkeyResult{{}, {}, {}, {}, {}, newResult(ValkeyMessage{typ: '-', string: "ASK 0 :1"}, nil)}}
 					}
-					return &redisresults{s: []RedisResult{{}, {}, {}, {}, {}, newResult(RedisMessage{typ: '*', values: []RedisMessage{{}, {typ: '+', string: "b"}}}, nil)}}
+					return &valkeyresults{s: []ValkeyResult{{}, {}, {}, {}, {}, newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{{}, {typ: '+', string: "b"}}}, nil)}}
 				},
 			}
 		})
@@ -3967,22 +3967,22 @@ func TestClusterClientErr(t *testing.T) {
 		var count int64
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
 			return &mockConn{
-				DoFn: func(cmd Completed) RedisResult {
+				DoFn: func(cmd Completed) ValkeyResult {
 					return slotsMultiResp
 				},
-				DoMultiCacheFn: func(multi ...CacheableTTL) *redisresults {
-					return &redisresults{s: []RedisResult{newResult(RedisMessage{typ: '-', string: "ASK 0 :1"}, nil)}}
+				DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
+					return &valkeyresults{s: []ValkeyResult{newResult(ValkeyMessage{typ: '-', string: "ASK 0 :1"}, nil)}}
 				},
-				DoMultiFn: func(multi ...Completed) *redisresults {
+				DoMultiFn: func(multi ...Completed) *valkeyresults {
 					if atomic.AddInt64(&count, 1) <= 3 {
-						return &redisresults{s: []RedisResult{
-							{}, {}, {}, {}, {}, newResult(RedisMessage{typ: '-', string: "ASK 0 :1"}, nil),
-							{}, {}, {}, {}, {}, newResult(RedisMessage{typ: '-', string: "ASK 0 :1"}, nil),
+						return &valkeyresults{s: []ValkeyResult{
+							{}, {}, {}, {}, {}, newResult(ValkeyMessage{typ: '-', string: "ASK 0 :1"}, nil),
+							{}, {}, {}, {}, {}, newResult(ValkeyMessage{typ: '-', string: "ASK 0 :1"}, nil),
 						}}
 					}
-					return &redisresults{s: []RedisResult{
-						{}, {}, {}, {}, {}, newResult(RedisMessage{typ: '*', values: []RedisMessage{{}, {}, {typ: '+', string: multi[4].Commands()[1]}}}, nil),
-						{}, {}, {}, {}, {}, newResult(RedisMessage{typ: '*', values: []RedisMessage{{}, {}, {typ: '+', string: multi[10].Commands()[1]}}}, nil),
+					return &valkeyresults{s: []ValkeyResult{
+						{}, {}, {}, {}, {}, newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{{}, {}, {typ: '+', string: multi[4].Commands()[1]}}}, nil),
+						{}, {}, {}, {}, {}, newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{{}, {}, {typ: '+', string: multi[10].Commands()[1]}}}, nil),
 					}}
 				},
 			}
@@ -4004,14 +4004,14 @@ func TestClusterClientErr(t *testing.T) {
 	t.Run("slot try again", func(t *testing.T) {
 		var count int64
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
-			return &mockConn{DoFn: func(cmd Completed) RedisResult {
+			return &mockConn{DoFn: func(cmd Completed) ValkeyResult {
 				if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
 					return slotsMultiResp
 				}
 				if atomic.AddInt64(&count, 1) <= 3 {
-					return newResult(RedisMessage{typ: '-', string: "TRYAGAIN"}, nil)
+					return newResult(ValkeyMessage{typ: '-', string: "TRYAGAIN"}, nil)
 				}
-				return newResult(RedisMessage{typ: '+', string: "b"}, nil)
+				return newResult(ValkeyMessage{typ: '+', string: "b"}, nil)
 			}}
 		})
 		if err != nil {
@@ -4025,15 +4025,15 @@ func TestClusterClientErr(t *testing.T) {
 	t.Run("slot try again DoMulti 1", func(t *testing.T) {
 		var count int64
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
-			return &mockConn{DoFn: func(cmd Completed) RedisResult {
+			return &mockConn{DoFn: func(cmd Completed) ValkeyResult {
 				return slotsMultiResp
-			}, DoMultiFn: func(multi ...Completed) *redisresults {
+			}, DoMultiFn: func(multi ...Completed) *valkeyresults {
 				if atomic.AddInt64(&count, 1) <= 3 {
-					return &redisresults{s: []RedisResult{newResult(RedisMessage{typ: '-', string: "TRYAGAIN"}, nil)}}
+					return &valkeyresults{s: []ValkeyResult{newResult(ValkeyMessage{typ: '-', string: "TRYAGAIN"}, nil)}}
 				}
-				ret := make([]RedisResult, len(multi))
-				ret[0] = newResult(RedisMessage{typ: '+', string: "b"}, nil)
-				return &redisresults{s: ret}
+				ret := make([]ValkeyResult, len(multi))
+				ret[0] = newResult(ValkeyMessage{typ: '+', string: "b"}, nil)
+				return &valkeyresults{s: ret}
 			}}
 		})
 		if err != nil {
@@ -4047,15 +4047,15 @@ func TestClusterClientErr(t *testing.T) {
 	t.Run("slot try again DoMulti 2", func(t *testing.T) {
 		var count int64
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
-			return &mockConn{DoFn: func(cmd Completed) RedisResult {
+			return &mockConn{DoFn: func(cmd Completed) ValkeyResult {
 				return slotsMultiResp
-			}, DoMultiFn: func(multi ...Completed) *redisresults {
+			}, DoMultiFn: func(multi ...Completed) *valkeyresults {
 				if atomic.AddInt64(&count, 1) <= 3 {
-					return &redisresults{s: []RedisResult{newResult(RedisMessage{typ: '-', string: "TRYAGAIN"}, nil)}}
+					return &valkeyresults{s: []ValkeyResult{newResult(ValkeyMessage{typ: '-', string: "TRYAGAIN"}, nil)}}
 				}
-				ret := make([]RedisResult, len(multi))
-				ret[0] = newResult(RedisMessage{typ: '+', string: multi[0].Commands()[1]}, nil)
-				return &redisresults{s: ret}
+				ret := make([]ValkeyResult, len(multi))
+				ret[0] = newResult(ValkeyMessage{typ: '+', string: multi[0].Commands()[1]}, nil)
+				return &valkeyresults{s: ret}
 			}}
 		})
 		if err != nil {
@@ -4076,14 +4076,14 @@ func TestClusterClientErr(t *testing.T) {
 		var count int64
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
 			return &mockConn{
-				DoFn: func(cmd Completed) RedisResult {
+				DoFn: func(cmd Completed) ValkeyResult {
 					return slotsMultiResp
 				},
-				DoCacheFn: func(cmd Cacheable, ttl time.Duration) RedisResult {
+				DoCacheFn: func(cmd Cacheable, ttl time.Duration) ValkeyResult {
 					if atomic.AddInt64(&count, 1) <= 3 {
-						return newResult(RedisMessage{typ: '-', string: "TRYAGAIN"}, nil)
+						return newResult(ValkeyMessage{typ: '-', string: "TRYAGAIN"}, nil)
 					}
-					return newResult(RedisMessage{typ: '+', string: "b"}, nil)
+					return newResult(ValkeyMessage{typ: '+', string: "b"}, nil)
 				},
 			}
 		})
@@ -4098,13 +4098,13 @@ func TestClusterClientErr(t *testing.T) {
 	t.Run("slot try again (cache multi 1)", func(t *testing.T) {
 		var count int64
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
-			return &mockConn{DoFn: func(cmd Completed) RedisResult {
+			return &mockConn{DoFn: func(cmd Completed) ValkeyResult {
 				return slotsMultiResp
-			}, DoMultiCacheFn: func(multi ...CacheableTTL) *redisresults {
+			}, DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
 				if atomic.AddInt64(&count, 1) <= 3 {
-					return &redisresults{s: []RedisResult{newResult(RedisMessage{typ: '-', string: "TRYAGAIN"}, nil)}}
+					return &valkeyresults{s: []ValkeyResult{newResult(ValkeyMessage{typ: '-', string: "TRYAGAIN"}, nil)}}
 				}
-				return &redisresults{s: []RedisResult{newResult(RedisMessage{typ: '+', string: "b"}, nil)}}
+				return &valkeyresults{s: []ValkeyResult{newResult(ValkeyMessage{typ: '+', string: "b"}, nil)}}
 			}}
 		})
 		if err != nil {
@@ -4118,16 +4118,16 @@ func TestClusterClientErr(t *testing.T) {
 	t.Run("slot try again (cache multi 2)", func(t *testing.T) {
 		var count int64
 		client, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
-			return &mockConn{DoFn: func(cmd Completed) RedisResult {
+			return &mockConn{DoFn: func(cmd Completed) ValkeyResult {
 				if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
 					return slotsMultiResp
 				}
 				return shardsMultiResp
-			}, DoMultiCacheFn: func(multi ...CacheableTTL) *redisresults {
+			}, DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
 				if atomic.AddInt64(&count, 1) <= 3 {
-					return &redisresults{s: []RedisResult{newResult(RedisMessage{typ: '-', string: "TRYAGAIN"}, nil)}}
+					return &valkeyresults{s: []ValkeyResult{newResult(ValkeyMessage{typ: '-', string: "TRYAGAIN"}, nil)}}
 				}
-				return &redisresults{s: []RedisResult{newResult(RedisMessage{typ: '+', string: multi[0].Cmd.Commands()[1]}, nil)}}
+				return &valkeyresults{s: []ValkeyResult{newResult(ValkeyMessage{typ: '+', string: multi[0].Cmd.Commands()[1]}, nil)}}
 			}}
 		})
 		if err != nil {
@@ -4148,8 +4148,8 @@ func TestClusterClientErr(t *testing.T) {
 func TestClusterClientRetry(t *testing.T) {
 	defer ShouldNotLeaked(SetupLeakDetection())
 	SetupClientRetry(t, func(m *mockConn) Client {
-		m.DoOverride = map[string]func(cmd Completed) RedisResult{
-			"CLUSTER SLOTS": func(cmd Completed) RedisResult { return slotsMultiResp },
+		m.DoOverride = map[string]func(cmd Completed) ValkeyResult{
+			"CLUSTER SLOTS": func(cmd Completed) ValkeyResult { return slotsMultiResp },
 		}
 		c, err := newClusterClient(&ClientOption{InitAddress: []string{":0"}}, func(dst string, opt *ClientOption) conn {
 			return m
@@ -4164,11 +4164,11 @@ func TestClusterClientRetry(t *testing.T) {
 func TestClusterClientReplicaOnly_PickReplica(t *testing.T) {
 	defer ShouldNotLeaked(SetupLeakDetection())
 	m := &mockConn{
-		DoFn: func(cmd Completed) RedisResult {
+		DoFn: func(cmd Completed) ValkeyResult {
 			if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
 				return slotsMultiResp
 			}
-			return RedisResult{}
+			return ValkeyResult{}
 		},
 	}
 
@@ -4199,11 +4199,11 @@ func TestClusterClientReplicaOnly_PickMasterIfNoReplica(t *testing.T) {
 	defer ShouldNotLeaked(SetupLeakDetection())
 	t.Run("replicas should be picked", func(t *testing.T) {
 		m := &mockConn{
-			DoFn: func(cmd Completed) RedisResult {
+			DoFn: func(cmd Completed) ValkeyResult {
 				if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
 					return slotsMultiResp
 				}
-				return RedisResult{}
+				return ValkeyResult{}
 			},
 		}
 
@@ -4231,11 +4231,11 @@ func TestClusterClientReplicaOnly_PickMasterIfNoReplica(t *testing.T) {
 
 	t.Run("distributed to replicas", func(t *testing.T) {
 		m := &mockConn{
-			DoFn: func(cmd Completed) RedisResult {
+			DoFn: func(cmd Completed) ValkeyResult {
 				if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
 					return slotsMultiRespWithMultiReplicas
 				}
-				return RedisResult{}
+				return ValkeyResult{}
 			},
 		}
 

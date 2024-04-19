@@ -104,7 +104,7 @@
     "group": "graph"
   },
   "GRAPH.CONFIG GET": {
-    "summary": "Retrieves a RedisGraph configuration",
+    "summary": "Retrieves a ValkeyGraph configuration",
     "arguments": [
       {
         "name": "name",
@@ -115,7 +115,7 @@
     "group": "graph"
   },
   "GRAPH.CONFIG SET": {
-    "summary": "Updates a RedisGraph configuration",
+    "summary": "Updates a ValkeyGraph configuration",
     "arguments": [
       {
         "name": "name",

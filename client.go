@@ -1,4 +1,4 @@
-package rueidis
+package valkey
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/redis/rueidis/internal/cmds"
+	"github.com/rueian/valkey-go/internal/cmds"
 )
 
 type singleClient struct {
@@ -41,27 +41,27 @@ func (c *singleClient) B() Builder {
 	return c.cmd
 }
 
-func (c *singleClient) Do(ctx context.Context, cmd Completed) (resp RedisResult) {
+func (c *singleClient) Do(ctx context.Context, cmd Completed) (resp ValkeyResult) {
 retry:
 	resp = c.conn.Do(ctx, cmd)
-	if c.retry && cmd.IsReadOnly() && c.isRetryable(resp.NonRedisError(), ctx) {
+	if c.retry && cmd.IsReadOnly() && c.isRetryable(resp.NonValkeyError(), ctx) {
 		goto retry
 	}
-	if resp.NonRedisError() == nil { // not recycle cmds if error, since cmds may be used later in pipe. consider recycle them by pipe
+	if resp.NonValkeyError() == nil { // not recycle cmds if error, since cmds may be used later in pipe. consider recycle them by pipe
 		cmds.PutCompleted(cmd)
 	}
 	return resp
 }
 
-func (c *singleClient) DoStream(ctx context.Context, cmd Completed) RedisResultStream {
+func (c *singleClient) DoStream(ctx context.Context, cmd Completed) ValkeyResultStream {
 	s := c.conn.DoStream(ctx, cmd)
 	cmds.PutCompleted(cmd)
 	return s
 }
 
-func (c *singleClient) DoMultiStream(ctx context.Context, multi ...Completed) MultiRedisResultStream {
+func (c *singleClient) DoMultiStream(ctx context.Context, multi ...Completed) MultiValkeyResultStream {
 	if len(multi) == 0 {
-		return RedisResultStream{e: io.EOF}
+		return ValkeyResultStream{e: io.EOF}
 	}
 	s := c.conn.DoMultiStream(ctx, multi...)
 	for _, cmd := range multi {
@@ -70,7 +70,7 @@ func (c *singleClient) DoMultiStream(ctx context.Context, multi ...Completed) Mu
 	return s
 }
 
-func (c *singleClient) DoMulti(ctx context.Context, multi ...Completed) (resps []RedisResult) {
+func (c *singleClient) DoMulti(ctx context.Context, multi ...Completed) (resps []ValkeyResult) {
 	if len(multi) == 0 {
 		return nil
 	}
@@ -78,20 +78,20 @@ retry:
 	resps = c.conn.DoMulti(ctx, multi...).s
 	if c.retry && allReadOnly(multi) {
 		for _, resp := range resps {
-			if c.isRetryable(resp.NonRedisError(), ctx) {
+			if c.isRetryable(resp.NonValkeyError(), ctx) {
 				goto retry
 			}
 		}
 	}
 	for i, cmd := range multi {
-		if resps[i].NonRedisError() == nil {
+		if resps[i].NonValkeyError() == nil {
 			cmds.PutCompleted(cmd)
 		}
 	}
 	return resps
 }
 
-func (c *singleClient) DoMultiCache(ctx context.Context, multi ...CacheableTTL) (resps []RedisResult) {
+func (c *singleClient) DoMultiCache(ctx context.Context, multi ...CacheableTTL) (resps []ValkeyResult) {
 	if len(multi) == 0 {
 		return nil
 	}
@@ -99,26 +99,26 @@ retry:
 	resps = c.conn.DoMultiCache(ctx, multi...).s
 	if c.retry {
 		for _, resp := range resps {
-			if c.isRetryable(resp.NonRedisError(), ctx) {
+			if c.isRetryable(resp.NonValkeyError(), ctx) {
 				goto retry
 			}
 		}
 	}
 	for i, cmd := range multi {
-		if err := resps[i].NonRedisError(); err == nil || err == ErrDoCacheAborted {
+		if err := resps[i].NonValkeyError(); err == nil || err == ErrDoCacheAborted {
 			cmds.PutCacheable(cmd.Cmd)
 		}
 	}
 	return resps
 }
 
-func (c *singleClient) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) (resp RedisResult) {
+func (c *singleClient) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) (resp ValkeyResult) {
 retry:
 	resp = c.conn.DoCache(ctx, cmd, ttl)
-	if c.retry && c.isRetryable(resp.NonRedisError(), ctx) {
+	if c.retry && c.isRetryable(resp.NonValkeyError(), ctx) {
 		goto retry
 	}
-	if err := resp.NonRedisError(); err == nil || err == ErrDoCacheAborted {
+	if err := resp.NonValkeyError(); err == nil || err == ErrDoCacheAborted {
 		cmds.PutCacheable(cmd)
 	}
 	return resp
@@ -128,7 +128,7 @@ func (c *singleClient) Receive(ctx context.Context, subscribe Completed, fn func
 retry:
 	err = c.conn.Receive(ctx, subscribe, fn)
 	if c.retry {
-		if _, ok := err.(*RedisError); !ok && c.isRetryable(err, ctx) {
+		if _, ok := err.(*ValkeyError); !ok && c.isRetryable(err, ctx) {
 			goto retry
 		}
 	}
@@ -174,20 +174,20 @@ func (c *dedicatedSingleClient) B() Builder {
 	return c.cmd
 }
 
-func (c *dedicatedSingleClient) Do(ctx context.Context, cmd Completed) (resp RedisResult) {
+func (c *dedicatedSingleClient) Do(ctx context.Context, cmd Completed) (resp ValkeyResult) {
 retry:
 	c.check()
 	resp = c.wire.Do(ctx, cmd)
-	if c.retry && cmd.IsReadOnly() && isRetryable(resp.NonRedisError(), c.wire, ctx) {
+	if c.retry && cmd.IsReadOnly() && isRetryable(resp.NonValkeyError(), c.wire, ctx) {
 		goto retry
 	}
-	if resp.NonRedisError() == nil {
+	if resp.NonValkeyError() == nil {
 		cmds.PutCompleted(cmd)
 	}
 	return resp
 }
 
-func (c *dedicatedSingleClient) DoMulti(ctx context.Context, multi ...Completed) (resp []RedisResult) {
+func (c *dedicatedSingleClient) DoMulti(ctx context.Context, multi ...Completed) (resp []ValkeyResult) {
 	if len(multi) == 0 {
 		return nil
 	}
@@ -202,7 +202,7 @@ retry:
 		goto retry
 	}
 	for i, cmd := range multi {
-		if resp[i].NonRedisError() == nil {
+		if resp[i].NonValkeyError() == nil {
 			cmds.PutCompleted(cmd)
 		}
 	}
@@ -214,7 +214,7 @@ retry:
 	c.check()
 	err = c.wire.Receive(ctx, subscribe, fn)
 	if c.retry {
-		if _, ok := err.(*RedisError); !ok && isRetryable(err, c.wire, ctx) {
+		if _, ok := err.(*ValkeyError); !ok && isRetryable(err, c.wire, ctx) {
 			goto retry
 		}
 	}
@@ -254,9 +254,9 @@ func isRetryable(err error, w wire, ctx context.Context) bool {
 	return err != nil && w.Error() == nil && ctx.Err() == nil
 }
 
-func anyRetryable(resp []RedisResult, w wire, ctx context.Context) bool {
+func anyRetryable(resp []ValkeyResult, w wire, ctx context.Context) bool {
 	for _, r := range resp {
-		if isRetryable(r.NonRedisError(), w, ctx) {
+		if isRetryable(r.NonValkeyError(), w, ctx) {
 			return true
 		}
 	}
