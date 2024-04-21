@@ -3,7 +3,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/rueian/valkey-go.svg)](https://pkg.go.dev/github.com/rueian/valkey-go)
 [![CircleCI](https://dl.circleci.com/status-badge/img/gh/rueian/valkey-go/tree/main.svg?style=shield)](https://dl.circleci.com/status-badge/redirect/gh/rueian/valkey-go/tree/main)
 [![Go Report Card](https://goreportcard.com/badge/github.com/rueian/valkey-go)](https://goreportcard.com/report/github.com/rueian/valkey-go)
-[![codecov](https://codecov.io/gh/rueian/valkey-go/branch/master/graph/badge.svg?token=wGTB8GdY06)](https://codecov.io/gh/rueian/valkey-go)
+[![codecov](https://codecov.io/gh/rueian/valkey-go/branch/main/graph/badge.svg?token=934zeTPaTc)](https://codecov.io/gh/rueian/valkey-go)
 
 A fast Golang Valkey client that does auto pipelining and supports server-assisted client-side caching.
 
