@@ -5,7 +5,7 @@ go 1.20
 replace github.com/rueian/valkey-go => ../
 
 require (
-	github.com/rueian/valkey-go v1.0.34
+	github.com/rueian/valkey-go v1.0.35
 	go.uber.org/mock v0.3.0
 )
 
