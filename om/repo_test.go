@@ -3,7 +3,7 @@ package om
 import (
 	"testing"
 
-	"github.com/rueian/valkey-go"
+	"github.com/valkey-io/valkey-go"
 )
 
 func setup(t *testing.T) valkey.Client {

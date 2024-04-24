@@ -7,8 +7,8 @@ package main
 
 import (
 	"context"
-	"github.com/rueian/valkey-go"
-	"github.com/rueian/valkey-go/valkeylock"
+	"github.com/valkey-io/valkey-go"
+	"github.com/valkey-io/valkey-go/valkeylock"
 )
 
 func main() {

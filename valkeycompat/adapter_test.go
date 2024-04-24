@@ -39,7 +39,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/rueian/valkey-go"
+	"github.com/valkey-io/valkey-go"
 )
 
 type TimeValue struct {

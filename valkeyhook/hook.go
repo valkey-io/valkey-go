@@ -5,7 +5,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/rueian/valkey-go"
+	"github.com/valkey-io/valkey-go"
 )
 
 var _ valkey.Client = (*hookclient)(nil)

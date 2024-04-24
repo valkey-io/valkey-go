@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"sync/atomic"
 
-	"github.com/rueian/valkey-go/internal/util"
+	"github.com/valkey-io/valkey-go/internal/util"
 )
 
 // NewLuaScript creates a Lua instance whose Lua.Exec uses EVALSHA and EVAL.

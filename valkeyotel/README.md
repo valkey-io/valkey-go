@@ -15,8 +15,8 @@ Client side caching metrics:
 package main
 
 import (
-    "github.com/rueian/valkey-go"
-    "github.com/rueian/valkey-go/valkeyotel"
+    "github.com/valkey-io/valkey-go"
+    "github.com/valkey-io/valkey-go/valkeyotel"
 )
 
 func main() {

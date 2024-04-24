@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rueian/valkey-go"
+	"github.com/valkey-io/valkey-go"
 	"go.uber.org/mock/gomock"
 )
 

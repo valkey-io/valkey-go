@@ -17,7 +17,7 @@ import (
 	"testing"
 
 	"go.uber.org/mock/gomock"
-	"github.com/rueian/valkey-go/mock"
+	"github.com/valkey-io/valkey-go/mock"
 )
 
 func TestWithValkey(t *testing.T) {
@@ -53,7 +53,7 @@ import (
 	"testing"
 
 	"go.uber.org/mock/gomock"
-	"github.com/rueian/valkey-go/mock"
+	"github.com/valkey-io/valkey-go/mock"
 )
 
 func TestWithValkeyReceive(t *testing.T) {

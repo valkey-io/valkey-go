@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/rueian/valkey-go/internal/cmds"
-	"github.com/rueian/valkey-go/internal/util"
+	"github.com/valkey-io/valkey-go/internal/cmds"
+	"github.com/valkey-io/valkey-go/internal/util"
 )
 
 type connFn func(dst string, opt *ClientOption) conn

@@ -1,9 +1,9 @@
 # valkey-go
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/rueian/valkey-go.svg)](https://pkg.go.dev/github.com/rueian/valkey-go)
-[![CircleCI](https://dl.circleci.com/status-badge/img/gh/rueian/valkey-go/tree/main.svg?style=shield)](https://dl.circleci.com/status-badge/redirect/gh/rueian/valkey-go/tree/main)
-[![Go Report Card](https://goreportcard.com/badge/github.com/rueian/valkey-go)](https://goreportcard.com/report/github.com/rueian/valkey-go)
-[![codecov](https://codecov.io/gh/rueian/valkey-go/branch/main/graph/badge.svg?token=934zeTPaTc)](https://codecov.io/gh/rueian/valkey-go)
+[![Go Reference](https://pkg.go.dev/badge/github.com/valkey-io/valkey-go.svg)](https://pkg.go.dev/github.com/valkey-io/valkey-go)
+[![CircleCI](https://dl.circleci.com/status-badge/img/gh/valkey-io/valkey-go/tree/main.svg?style=shield)](https://dl.circleci.com/status-badge/redirect/gh/valkey-io/valkey-go/tree/main)
+[![Go Report Card](https://goreportcard.com/badge/github.com/valkey-io/valkey-go)](https://goreportcard.com/report/github.com/valkey-io/valkey-go)
+[![codecov](https://codecov.io/gh/valkey-io/valkey-go/branch/main/graph/badge.svg?token=934zeTPaTc)](https://codecov.io/gh/valkey-io/valkey-go)
 
 A fast Golang Valkey client that does auto pipelining and supports server-assisted client-side caching.
 
@@ -31,7 +31,7 @@ package main
 
 import (
 	"context"
-	"github.com/rueian/valkey-go"
+	"github.com/valkey-io/valkey-go"
 )
 
 func main() {
@@ -49,7 +49,7 @@ func main() {
 }
 ```
 
-Checkout more examples: [Command Response Cheatsheet](https://github.com/rueian/valkey-go#command-response-cheatsheet)
+Checkout more examples: [Command Response Cheatsheet](https://github.com/valkey-io/valkey-go#command-response-cheatsheet)
 
 ## Developer Friendly Command Builder
 
@@ -181,7 +181,7 @@ Otherwise, their client-side cache will not be invalidated by valkey.
 ### Client Side Caching with Cache Aside Pattern
 
 Cache-Aside is a widely used caching strategy.
-[valkeyaside](https://github.com/rueian/valkey-go/blob/main/valkeyaside/README.md) can help you cache data into your client-side cache backed by Valkey. For example:
+[valkeyaside](https://github.com/valkey-io/valkey-go/blob/main/valkeyaside/README.md) can help you cache data into your client-side cache backed by Valkey. For example:
 
 ```go
 client, err := valkeyaside.NewClient(valkeyaside.ClientOption{
@@ -200,7 +200,7 @@ val, err := client.Get(context.Background(), time.Minute, "mykey", func(ctx cont
 // ...
 ```
 
-Please refer to the full example at [valkeyaside](https://github.com/rueian/valkey-go/blob/main/valkeyaside/README.md).
+Please refer to the full example at [valkeyaside](https://github.com/valkey-io/valkey-go/blob/main/valkeyaside/README.md).
 
 ### Disable Client Side Caching
 
@@ -539,7 +539,7 @@ if err := valkey.DecodeSliceOfJSON(client.Do(ctx, client.B().Mget().Key("user1")
 
 ## Contributing
 
-Contributions are welcome, including [issues](https://github.com/rueian/valkey-go/issues), [pull requests](https://github.com/rueian/valkey-go/pulls), and [discussions](https://github.com/rueian/valkey-go/discussions).
+Contributions are welcome, including [issues](https://github.com/valkey-io/valkey-go/issues), [pull requests](https://github.com/valkey-io/valkey-go/pulls), and [discussions](https://github.com/valkey-io/valkey-go/discussions).
 Contributions mean a lot to us and help us improve this library and the community!
 
 ### Generate command builders

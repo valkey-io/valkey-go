@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rueian/valkey-go/internal/cmds"
+	"github.com/valkey-io/valkey-go/internal/cmds"
 )
 
 func setupMux(wires []*mockWire) (conn *mux, checkClean func(t *testing.T)) {

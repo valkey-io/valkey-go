@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/rueian/valkey-go/internal/cmds"
+	"github.com/valkey-io/valkey-go/internal/cmds"
 )
 
 type singleClient struct {

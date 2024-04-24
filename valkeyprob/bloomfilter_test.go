@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/rueian/valkey-go"
+	"github.com/valkey-io/valkey-go"
 )
 
 var address = []string{"127.0.0.1:7001", "127.0.0.1:7002", "127.0.0.1:7003"}

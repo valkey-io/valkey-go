@@ -13,8 +13,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/rueian/valkey-go"
-	"github.com/rueian/valkey-go/valkeyhook"
+	"github.com/valkey-io/valkey-go"
+	"github.com/valkey-io/valkey-go/valkeyhook"
 )
 
 type hook struct{}

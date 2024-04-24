@@ -1,4 +1,4 @@
-module github.com/rueian/valkey-go
+module github.com/valkey-io/valkey-go
 
 go 1.20
 

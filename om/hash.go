@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/rueian/valkey-go"
+	"github.com/valkey-io/valkey-go"
 )
 
 // NewHashRepository creates an HashRepository.

@@ -10,11 +10,11 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/rueian/valkey-go"
+	"github.com/valkey-io/valkey-go"
 )
 
 var (
-	name   = "github.com/rueian/valkey-go"
+	name   = "github.com/valkey-io/valkey-go"
 	kind   = trace.WithSpanKind(trace.SpanKindClient)
 	dbattr = attribute.String("db.system", "valkey")
 	dbstmt = attribute.Key("db.statement")

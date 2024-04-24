@@ -34,8 +34,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/rueian/valkey-go"
-	"github.com/rueian/valkey-go/internal/util"
+	"github.com/valkey-io/valkey-go"
+	"github.com/valkey-io/valkey-go/internal/util"
 )
 
 type baseCmd[T any] struct {

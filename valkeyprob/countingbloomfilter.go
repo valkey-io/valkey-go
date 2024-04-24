@@ -6,7 +6,7 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/rueian/valkey-go"
+	"github.com/valkey-io/valkey-go"
 )
 
 var (
