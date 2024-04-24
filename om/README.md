@@ -10,8 +10,8 @@ import (
     "fmt"
     "time"
 
-    "github.com/rueian/valkey-go"
-    "github.com/rueian/valkey-go/om"
+    "github.com/valkey-io/valkey-go"
+    "github.com/valkey-io/valkey-go/om"
 )
 
 type Example struct {

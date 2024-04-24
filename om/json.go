@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rueian/valkey-go"
+	"github.com/valkey-io/valkey-go"
 )
 
 // NewJSONRepository creates an JSONRepository.

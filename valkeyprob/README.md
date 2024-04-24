@@ -20,8 +20,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/rueian/valkey-go"
-	"github.com/rueian/valkey-go/valkeyprob"
+	"github.com/valkey-io/valkey-go"
+	"github.com/valkey-io/valkey-go/valkeyprob"
 )
 
 func main() {
@@ -74,8 +74,8 @@ import (
     "context"
     "fmt"
 
-    "github.com/rueian/valkey-go"
-    "github.com/rueian/valkey-go/valkeyprob"
+    "github.com/valkey-io/valkey-go"
+    "github.com/valkey-io/valkey-go/valkeyprob"
 )
 
 func main() {

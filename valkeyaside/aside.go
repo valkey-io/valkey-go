@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/oklog/ulid/v2"
-	"github.com/rueian/valkey-go"
+	"github.com/valkey-io/valkey-go"
 )
 
 type ClientOption struct {

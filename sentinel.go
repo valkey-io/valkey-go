@@ -14,7 +14,7 @@ import (
 
 	"math/rand"
 
-	"github.com/rueian/valkey-go/internal/cmds"
+	"github.com/valkey-io/valkey-go/internal/cmds"
 )
 
 func newSentinelClient(opt *ClientOption, connFn connFn) (client *sentinelClient, err error) {

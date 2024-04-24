@@ -5,8 +5,8 @@ import (
 	"errors"
 	"time"
 
-	intl "github.com/rueian/valkey-go/internal/cmds"
-	"github.com/rueian/valkey-go/internal/util"
+	intl "github.com/valkey-io/valkey-go/internal/cmds"
+	"github.com/valkey-io/valkey-go/internal/util"
 )
 
 type mgetcachecmds struct {

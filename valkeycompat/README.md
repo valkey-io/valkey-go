@@ -20,8 +20,8 @@ package main
 import (
 	"context"
 	"time"
-	"github.com/rueian/valkey-go"
-	"github.com/rueian/valkey-go/valkeycompat"
+	"github.com/valkey-io/valkey-go"
+	"github.com/valkey-io/valkey-go/valkeycompat"
 )
 
 func main() {

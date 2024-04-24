@@ -9,7 +9,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/rueian/valkey-go/internal/util"
+	"github.com/valkey-io/valkey-go/internal/util"
 )
 
 const messageStructSize = int(unsafe.Sizeof(ValkeyMessage{}))

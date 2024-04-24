@@ -1,11 +1,11 @@
-module github.com/rueian/valkey-go/mock
+module github.com/valkey-io/valkey-go/mock
 
 go 1.20
 
-replace github.com/rueian/valkey-go => ../
+replace github.com/valkey-io/valkey-go => ../
 
 require (
-	github.com/rueian/valkey-go v1.0.35
+	github.com/valkey-io/valkey-go v1.0.35
 	go.uber.org/mock v0.3.0
 )
 

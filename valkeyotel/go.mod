@@ -1,11 +1,11 @@
-module github.com/rueian/valkey-go/valkeyotel
+module github.com/valkey-io/valkey-go/valkeyotel
 
 go 1.20
 
-replace github.com/rueian/valkey-go => ../
+replace github.com/valkey-io/valkey-go => ../
 
 require (
-	github.com/rueian/valkey-go v1.0.35
+	github.com/valkey-io/valkey-go v1.0.35
 	go.opentelemetry.io/otel v1.24.0
 	go.opentelemetry.io/otel/metric v1.24.0
 	go.opentelemetry.io/otel/sdk v1.24.0
