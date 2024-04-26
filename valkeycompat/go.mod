@@ -7,7 +7,7 @@ replace github.com/valkey-io/valkey-go => ../
 require (
 	github.com/onsi/ginkgo/v2 v2.15.0
 	github.com/onsi/gomega v1.31.1
-	github.com/valkey-io/valkey-go v1.0.35
+	github.com/valkey-io/valkey-go v1.0.35-io
 )
 
 require (
