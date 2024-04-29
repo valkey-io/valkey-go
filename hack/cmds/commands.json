@@ -6714,6 +6714,26 @@
       {
         "name": "max",
         "type": "string"
+      },
+      {
+        "name": "withscores",
+        "type": "enum",
+        "enum": [
+          "WITHSCORES"
+        ],
+        "optional": true
+      },
+      {
+        "command": "LIMIT",
+        "name": [
+          "offset",
+          "count"
+        ],
+        "type": [
+          "integer",
+          "integer"
+        ],
+        "optional": true
       }
     ],
     "since": "1.2.0",

@@ -1904,7 +1904,24 @@ func (c ZremrangebyscoreKey) Min(min string) ZremrangebyscoreMin {
 	return (ZremrangebyscoreMin)(c)
 }
 
+type ZremrangebyscoreLimit Incomplete
+
+func (c ZremrangebyscoreLimit) Build() Completed {
+	c.cs.Build()
+	return Completed{cs: c.cs, cf: uint16(c.cf), ks: c.ks}
+}
+
 type ZremrangebyscoreMax Incomplete
+
+func (c ZremrangebyscoreMax) Withscores() ZremrangebyscoreWithscores {
+	c.cs.s = append(c.cs.s, "WITHSCORES")
+	return (ZremrangebyscoreWithscores)(c)
+}
+
+func (c ZremrangebyscoreMax) Limit(offset int64, count int64) ZremrangebyscoreLimit {
+	c.cs.s = append(c.cs.s, "LIMIT", strconv.FormatInt(offset, 10), strconv.FormatInt(count, 10))
+	return (ZremrangebyscoreLimit)(c)
+}
 
 func (c ZremrangebyscoreMax) Build() Completed {
 	c.cs.Build()
@@ -1916,6 +1933,18 @@ type ZremrangebyscoreMin Incomplete
 func (c ZremrangebyscoreMin) Max(max string) ZremrangebyscoreMax {
 	c.cs.s = append(c.cs.s, max)
 	return (ZremrangebyscoreMax)(c)
+}
+
+type ZremrangebyscoreWithscores Incomplete
+
+func (c ZremrangebyscoreWithscores) Limit(offset int64, count int64) ZremrangebyscoreLimit {
+	c.cs.s = append(c.cs.s, "LIMIT", strconv.FormatInt(offset, 10), strconv.FormatInt(count, 10))
+	return (ZremrangebyscoreLimit)(c)
+}
+
+func (c ZremrangebyscoreWithscores) Build() Completed {
+	c.cs.Build()
+	return Completed{cs: c.cs, cf: uint16(c.cf), ks: c.ks}
 }
 
 type Zrevrange Incomplete
