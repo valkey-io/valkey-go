@@ -58,6 +58,38 @@ func TestIsValkeyErr(t *testing.T) {
 	}
 }
 
+func TestValkeyErrorIsMoved(t *testing.T) {
+	for _, c := range []struct {
+		err  string
+		addr string
+	}{
+		{err: "MOVED 1 127.0.0.1:1", addr: "127.0.0.1:1"},
+		{err: "MOVED 1 [::1]:1", addr: "[::1]:1"},
+		{err: "MOVED 1 ::1:1", addr: "[::1]:1"},
+	} {
+		e := ValkeyError{typ: '-', string: c.err}
+		if addr, ok := e.IsMoved(); !ok || addr != c.addr {
+			t.Fail()
+		}
+	}
+}
+
+func TestValkeyErrorIsAsk(t *testing.T) {
+	for _, c := range []struct {
+		err  string
+		addr string
+	}{
+		{err: "ASK 1 127.0.0.1:1", addr: "127.0.0.1:1"},
+		{err: "ASK 1 [::1]:1", addr: "[::1]:1"},
+		{err: "ASK 1 ::1:1", addr: "[::1]:1"},
+	} {
+		e := ValkeyError{typ: '-', string: c.err}
+		if addr, ok := e.IsAsk(); !ok || addr != c.addr {
+			t.Fail()
+		}
+	}
+}
+
 func TestIsValkeyBusyGroup(t *testing.T) {
 	err := errors.New("other")
 	if IsValkeyBusyGroup(err) {
