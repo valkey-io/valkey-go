@@ -5,7 +5,7 @@ go 1.20.0
 replace github.com/valkey-io/valkey-go => ../
 
 require (
-	github.com/valkey-io/valkey-go v1.0.35-io
+	github.com/valkey-io/valkey-go v1.0.36
 	github.com/twmb/murmur3 v1.1.8
 )
 
