@@ -132,7 +132,7 @@ type BloomFilter interface {
 	Delete(ctx context.Context) error
 
 	// Count returns count of items in Bloom filter.
-	Count(ctx context.Context) (uint, error)
+	Count(ctx context.Context) (uint64, error)
 }
 
 type bloomFilter struct {
@@ -317,7 +317,7 @@ func (c *bloomFilter) Delete(ctx context.Context) error {
 	return resp.Error()
 }
 
-func (c *bloomFilter) Count(ctx context.Context) (uint, error) {
+func (c *bloomFilter) Count(ctx context.Context) (uint64, error) {
 	resp := c.client.Do(
 		ctx,
 		c.client.B().
@@ -325,18 +325,14 @@ func (c *bloomFilter) Count(ctx context.Context) (uint, error) {
 			Key(c.counter).
 			Build(),
 	)
-	if resp.Error() != nil {
-		if valkey.IsValkeyNil(resp.Error()) {
+	count, err := resp.AsUint64()
+	if err != nil {
+		if valkey.IsValkeyNil(err) {
 			return 0, nil
 		}
 
-		return 0, resp.Error()
-	}
-
-	count, err := resp.AsUint64()
-	if err != nil {
 		return 0, err
 	}
 
-	return uint(count), nil
+	return count, nil
 }
