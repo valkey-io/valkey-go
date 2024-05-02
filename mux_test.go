@@ -456,7 +456,7 @@ func TestMuxDelegation(t *testing.T) {
 					result := make([]ValkeyResult, len(multi))
 					for j, cmd := range multi {
 						if s := cmd.Cmd.Slot() & uint16(len(wires)-1); s != idx {
-							result[j] = newErrResult(errors.New(fmt.Sprintf("wrong slot %v %v", s, idx)))
+							result[j] = newErrResult(fmt.Errorf("wrong slot %v %v", s, idx))
 						} else {
 							result[j] = newResult(ValkeyMessage{typ: '+', string: cmd.Cmd.Commands()[1]}, nil)
 						}
@@ -497,7 +497,7 @@ func TestMuxDelegation(t *testing.T) {
 				DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
 					for _, cmd := range multi {
 						if s := cmd.Cmd.Slot() & uint16(len(wires)-1); s != idx {
-							return &valkeyresults{s: []ValkeyResult{newErrResult(errors.New(fmt.Sprintf("wrong slot %v %v", s, idx)))}}
+							return &valkeyresults{s: []ValkeyResult{newErrResult(fmt.Errorf("wrong slot %v %v", s, idx))}}
 						}
 					}
 					return &valkeyresults{s: []ValkeyResult{newErrResult(context.DeadlineExceeded)}}
@@ -896,7 +896,6 @@ func (m *mockWire) CleanSubscriptions() {
 	if m.CleanSubscriptionsFn != nil {
 		m.CleanSubscriptionsFn()
 	}
-	return
 }
 
 func (m *mockWire) SetPubSubHooks(hooks PubSubHooks) <-chan error {
@@ -910,7 +909,6 @@ func (m *mockWire) SetOnCloseHook(fn func(error)) {
 	if m.SetOnCloseHookFn != nil {
 		m.SetOnCloseHookFn(fn)
 	}
-	return
 }
 
 func (m *mockWire) Info() map[string]ValkeyMessage {
