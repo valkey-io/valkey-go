@@ -43,7 +43,11 @@ import (
 	"github.com/valkey-io/valkey-go/internal/util"
 )
 
-const KeepTTL = -1
+const (
+	KeepTTL           = -1
+	BitCountIndexByte = "BYTE"
+	BitCountIndexBit  = "BIT"
+)
 
 type Cmdable interface {
 	Cache(ttl time.Duration) CacheCompat
@@ -1096,8 +1100,19 @@ func (c *Compat) BitCount(ctx context.Context, key string, bitCount *BitCount) *
 	var resp valkey.ValkeyResult
 	if bitCount == nil {
 		resp = c.client.Do(ctx, c.client.B().Bitcount().Key(key).Build())
-	} else {
+		return newIntCmd(resp)
+	}
+
+	if bitCount.Unit == "" {
 		resp = c.client.Do(ctx, c.client.B().Bitcount().Key(key).Start(bitCount.Start).End(bitCount.End).Build())
+		return newIntCmd(resp)
+	}
+
+	switch bitCount.Unit {
+	case BitCountIndexByte:
+		resp = c.client.Do(ctx, c.client.B().Bitcount().Key(key).Start(bitCount.Start).End(bitCount.End).Byte().Build())
+	case BitCountIndexBit:
+		resp = c.client.Do(ctx, c.client.B().Bitcount().Key(key).Start(bitCount.Start).End(bitCount.End).Bit().Build())
 	}
 	return newIntCmd(resp)
 }
@@ -4584,8 +4599,19 @@ func (c CacheCompat) BitCount(ctx context.Context, key string, bitCount *BitCoun
 	var resp valkey.ValkeyResult
 	if bitCount == nil {
 		resp = c.client.DoCache(ctx, c.client.B().Bitcount().Key(key).Cache(), c.ttl)
-	} else {
+		return newIntCmd(resp)
+	}
+
+	if bitCount.Unit == "" {
 		resp = c.client.DoCache(ctx, c.client.B().Bitcount().Key(key).Start(bitCount.Start).End(bitCount.End).Cache(), c.ttl)
+		return newIntCmd(resp)
+	}
+
+	switch bitCount.Unit {
+	case BitCountIndexByte:
+		resp = c.client.DoCache(ctx, c.client.B().Bitcount().Key(key).Start(bitCount.Start).End(bitCount.End).Byte().Cache(), c.ttl)
+	case BitCountIndexBit:
+		resp = c.client.DoCache(ctx, c.client.B().Bitcount().Key(key).Start(bitCount.Start).End(bitCount.End).Bit().Cache(), c.ttl)
 	}
 	return newIntCmd(resp)
 }
