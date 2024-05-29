@@ -8,8 +8,8 @@ replace (
 )
 
 require (
-	github.com/valkey-io/valkey-go v1.0.37
-	github.com/valkey-io/valkey-go/mock v1.0.37
+	github.com/valkey-io/valkey-go v1.0.38
+	github.com/valkey-io/valkey-go/mock v1.0.38
 	go.uber.org/mock v0.4.0
 )
 
