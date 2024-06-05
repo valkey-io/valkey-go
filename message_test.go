@@ -1286,315 +1286,401 @@ func TestValkeyMessage(t *testing.T) {
 		}
 	})
 	t.Run("ToInt64", func(t *testing.T) {
-		if _, err := (&ValkeyMessage{typ: '_'}).ToInt64(); err == nil {
-			t.Fatal("ToInt64 not failed as expected")
+		// Test case where the message type is '_', which is not a RESP3 int64
+		if val, err := (&ValkeyMessage{typ: '_'}).ToInt64(); err == nil {
+			t.Fatal("ToInt64 did not fail as expected")
+		} else if val != 0 {
+			t.Fatalf("expected 0, got %d", val)
 		}
 
-		defer func() {
-			if !strings.Contains(recover().(string), "valkey message type t is not a RESP3 int64") {
-				t.Fatal("ToInt64 not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: 't'}).ToInt64()
+		// Test case where the message type is 't', which is not a RESP3 int64
+		if val, err := (&ValkeyMessage{typ: 't'}).ToInt64(); err == nil {
+			t.Fatal("ToInt64 did not fail as expected")
+		} else if val != 0 {
+			t.Fatalf("expected 0, got %d", val)
+		} else if !strings.Contains(err.Error(), "valkey message type t is not a RESP3 int64") {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("ToBool", func(t *testing.T) {
-		if _, err := (&ValkeyMessage{typ: '_'}).ToBool(); err == nil {
-			t.Fatal("ToBool not failed as expected")
+		// Test case where the message type is '_', which is not a RESP3 bool
+		if val, err := (&ValkeyMessage{typ: '_'}).ToBool(); err == nil {
+			t.Fatal("ToBool did not fail as expected")
+		} else if val != false {
+			t.Fatalf("expected false, got %v", val)
 		}
 
-		defer func() {
-			if !strings.Contains(recover().(string), "valkey message type t is not a RESP3 bool") {
-				t.Fatal("ToBool not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: 't'}).ToBool()
+		// Test case where the message type is 't', which is not a RESP3 bool
+		if val, err := (&ValkeyMessage{typ: 't'}).ToBool(); err == nil {
+			t.Fatal("ToBool did not fail as expected")
+		} else if val != false {
+			t.Fatalf("expected false, got %v", val)
+		} else if !strings.Contains(err.Error(), "valkey message type t is not a RESP3 bool") {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsBool", func(t *testing.T) {
-		if _, err := (&ValkeyMessage{typ: '_'}).AsBool(); err == nil {
-			t.Fatal("AsBool not failed as expected")
+		// Test case where the message type is '_', which is not a RESP3 int, string, or bool
+		if val, err := (&ValkeyMessage{typ: '_'}).AsBool(); err == nil {
+			t.Fatal("AsBool did not fail as expected")
+		} else if val != false {
+			t.Fatalf("expected false, got %v", val)
 		}
 
-		defer func() {
-			if !strings.Contains(recover().(string), "valkey message type t is not a int, string or bool") {
-				t.Fatal("AsBool not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: 't'}).AsBool()
+		// Test case where the message type is 't', which is not a RESP3 int, string, or bool
+		if val, err := (&ValkeyMessage{typ: 't'}).AsBool(); err == nil {
+			t.Fatal("AsBool did not fail as expected")
+		} else if val != false {
+			t.Fatalf("expected false, got %v", val)
+		} else if !strings.Contains(err.Error(), "valkey message type t is not a int, string or bool") {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("ToFloat64", func(t *testing.T) {
-		if _, err := (&ValkeyMessage{typ: '_'}).ToFloat64(); err == nil {
-			t.Fatal("ToFloat64 not failed as expected")
+		// Test case where the message type is '_', which is not a RESP3 float64
+		if val, err := (&ValkeyMessage{typ: '_'}).ToFloat64(); err == nil {
+			t.Fatal("ToFloat64 did not fail as expected")
+		} else if val != 0 {
+			t.Fatalf("expected 0, got %f", val)
 		}
 
-		defer func() {
-			if !strings.Contains(recover().(string), "valkey message type t is not a RESP3 float64") {
-				t.Fatal("ToFloat64 not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: 't'}).ToFloat64()
+		// Test case where the message type is 't', which is not a RESP3 float64
+		if val, err := (&ValkeyMessage{typ: 't'}).ToFloat64(); err == nil {
+			t.Fatal("ToFloat64 did not fail as expected")
+		} else if val != 0 {
+			t.Fatalf("expected 0, got %f", val)
+		} else if !strings.Contains(err.Error(), "valkey message type t is not a RESP3 float64") {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("ToString", func(t *testing.T) {
-		if _, err := (&ValkeyMessage{typ: '_'}).ToString(); err == nil {
-			t.Fatal("ToString not failed as expected")
+		// Test case where the message type is '_', which is not a RESP3 string
+		if val, err := (&ValkeyMessage{typ: '_'}).ToString(); err == nil {
+			t.Fatal("ToString did not fail as expected")
+		} else if val != "" {
+			t.Fatalf("expected empty string, got %v", val)
 		}
 
-		defer func() {
-			if !strings.Contains(recover().(string), fmt.Sprintf("valkey message type %s is not a string", typeNames[':'])) {
-				t.Fatal("ToString not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: ':'}).ToString()
+		// Test case where the message type is ':', which is not a RESP3 string
+		if val, err := (&ValkeyMessage{typ: ':'}).ToString(); err == nil {
+			t.Fatal("ToString did not fail as expected")
+		} else if val != "" {
+			t.Fatalf("expected empty string, got %v", val)
+		} else if !strings.Contains(err.Error(), fmt.Sprintf("valkey message type %s is not a string", typeNames[':'])) {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsReader", func(t *testing.T) {
-		if _, err := (&ValkeyMessage{typ: '_'}).AsReader(); err == nil {
-			t.Fatal("AsReader not failed as expected")
+		// Test case where the message type is '_', which is not a RESP3 string
+		if val, err := (&ValkeyMessage{typ: '_'}).AsReader(); err == nil {
+			t.Fatal("AsReader did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
 		}
 
-		defer func() {
-			if !strings.Contains(recover().(string), fmt.Sprintf("valkey message type %s is not a string", typeNames[':'])) {
-				t.Fatal("AsReader not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: ':'}).AsReader()
+		// Test case where the message type is ':', which is not a RESP3 string
+		if val, err := (&ValkeyMessage{typ: ':'}).AsReader(); err == nil {
+			t.Fatal("AsReader did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
+		} else if !strings.Contains(err.Error(), fmt.Sprintf("valkey message type %s is not a string", typeNames[':'])) {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsBytes", func(t *testing.T) {
-		if _, err := (&ValkeyMessage{typ: '_'}).AsBytes(); err == nil {
-			t.Fatal("AsBytes not failed as expected")
+		// Test case where the message type is '_', which is not a RESP3 string
+		if val, err := (&ValkeyMessage{typ: '_'}).AsBytes(); err == nil {
+			t.Fatal("AsBytes did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
 		}
 
-		defer func() {
-			if !strings.Contains(recover().(string), fmt.Sprintf("valkey message type %s is not a string", typeNames[':'])) {
-				t.Fatal("AsBytes not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: ':'}).AsBytes()
+		// Test case where the message type is ':', which is not a RESP3 string
+		if val, err := (&ValkeyMessage{typ: ':'}).AsBytes(); err == nil {
+			t.Fatal("AsBytes did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
+		} else if !strings.Contains(err.Error(), fmt.Sprintf("valkey message type %s is not a string", typeNames[':'])) {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("DecodeJSON", func(t *testing.T) {
+		// Test case where the message type is '_', which is not a RESP3 string
 		if err := (&ValkeyMessage{typ: '_'}).DecodeJSON(nil); err == nil {
-			t.Fatal("DecodeJSON not failed as expected")
+			t.Fatal("DecodeJSON did not fail as expected")
 		}
 
-		defer func() {
-			if !strings.Contains(recover().(string), fmt.Sprintf("valkey message type %s is not a string", typeNames[':'])) {
-				t.Fatal("DecodeJSON not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: ':'}).DecodeJSON(nil)
+		// Test case where the message type is ':', which is not a RESP3 string
+		if err := (&ValkeyMessage{typ: ':'}).DecodeJSON(nil); err == nil {
+			t.Fatal("DecodeJSON did not fail as expected")
+		} else if !strings.Contains(err.Error(), fmt.Sprintf("valkey message type %s is not a string", typeNames[':'])) {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsInt64", func(t *testing.T) {
-		if _, err := (&ValkeyMessage{typ: '_'}).AsInt64(); err == nil {
-			t.Fatal("AsInt64 not failed as expected")
+		// Test case where the message type is '_', which is not a RESP3 string
+		if val, err := (&ValkeyMessage{typ: '_'}).AsInt64(); err == nil {
+			t.Fatal("AsInt64 did not fail as expected")
+		} else if val != 0 {
+			t.Fatalf("expected 0, got %d", val)
 		}
-		defer func() {
-			if !strings.Contains(recover().(string), fmt.Sprintf("valkey message type %s is not a string", typeNames['*'])) {
-				t.Fatal("AsInt64 not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: '*', values: []ValkeyMessage{{}}}).AsInt64()
+
+		// Test case where the message type is '*', which is not a RESP3 string
+		if val, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{{}}}).AsInt64(); err == nil {
+			t.Fatal("AsInt64 did not fail as expected")
+		} else if val != 0 {
+			t.Fatalf("expected 0, got %d", val)
+		} else if !strings.Contains(err.Error(), fmt.Sprintf("valkey message type %s is not a string", typeNames['*'])) {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsUint64", func(t *testing.T) {
-		if _, err := (&ValkeyMessage{typ: '_'}).AsUint64(); err == nil {
-			t.Fatal("AsUint64 not failed as expected")
+		// Test case where the message type is '_', which is not a RESP3 string
+		if val, err := (&ValkeyMessage{typ: '_'}).AsUint64(); err == nil {
+			t.Fatal("AsUint64 did not fail as expected")
+		} else if val != 0 {
+			t.Fatalf("expected 0, got %d", val)
 		}
-		defer func() {
-			if !strings.Contains(recover().(string), fmt.Sprintf("valkey message type %s is not a string", typeNames['*'])) {
-				t.Fatal("AsUint64 not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: '*', values: []ValkeyMessage{{}}}).AsUint64()
+
+		// Test case where the message type is '*', which is not a RESP3 string
+		if val, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{{}}}).AsUint64(); err == nil {
+			t.Fatal("AsUint64 did not fail as expected")
+		} else if val != 0 {
+			t.Fatalf("expected 0, got %d", val)
+		} else if !strings.Contains(err.Error(), fmt.Sprintf("valkey message type %s is not a string", typeNames['*'])) {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsFloat64", func(t *testing.T) {
-		if _, err := (&ValkeyMessage{typ: '_'}).AsFloat64(); err == nil {
-			t.Fatal("AsFloat64 not failed as expected")
+		// Test case where the message type is '_', which is not a RESP3 string
+		if val, err := (&ValkeyMessage{typ: '_'}).AsFloat64(); err == nil {
+			t.Fatal("AsFloat64 did not fail as expected")
+		} else if val != 0 {
+			t.Fatalf("expected 0, got %f", val)
 		}
-		defer func() {
-			if !strings.Contains(recover().(string), fmt.Sprintf("valkey message type %s is not a string", typeNames[':'])) {
-				t.Fatal("AsFloat64 not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: ':'}).AsFloat64()
+
+		// Test case where the message type is ':', which is not a RESP3 string
+		if val, err := (&ValkeyMessage{typ: ':'}).AsFloat64(); err == nil {
+			t.Fatal("AsFloat64 did not fail as expected")
+		} else if val != 0 {
+			t.Fatalf("expected 0, got %f", val)
+		} else if !strings.Contains(err.Error(), fmt.Sprintf("valkey message type %s is not a string", typeNames[':'])) {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("ToArray", func(t *testing.T) {
-		if _, err := (&ValkeyMessage{typ: '_'}).ToArray(); err == nil {
-			t.Fatal("ToArray not failed as expected")
+		// Test case where the message type is '_', which is not a RESP3 array
+		if val, err := (&ValkeyMessage{typ: '_'}).ToArray(); err == nil {
+			t.Fatal("ToArray did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
 		}
 
-		defer func() {
-			if !strings.Contains(recover().(string), "valkey message type t is not a array") {
-				t.Fatal("ToArray not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: 't'}).ToArray()
+		// Test case where the message type is 't', which is not a RESP3 array
+		if val, err := (&ValkeyMessage{typ: 't'}).ToArray(); err == nil {
+			t.Fatal("ToArray did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
+		} else if !strings.Contains(err.Error(), "valkey message type t is not a array") {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsStrSlice", func(t *testing.T) {
-		if _, err := (&ValkeyMessage{typ: '_'}).AsStrSlice(); err == nil {
-			t.Fatal("AsStrSlice not failed as expected")
+		// Test case where the message type is '_', which is not a RESP3 array
+		if val, err := (&ValkeyMessage{typ: '_'}).AsStrSlice(); err == nil {
+			t.Fatal("AsStrSlice did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
 		}
 
-		defer func() {
-			if !strings.Contains(recover().(string), "valkey message type t is not a array") {
-				t.Fatal("AsStrSlice not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: 't'}).AsStrSlice()
+		// Test case where the message type is 't', which is not a RESP3 array
+		if val, err := (&ValkeyMessage{typ: 't'}).AsStrSlice(); err == nil {
+			t.Fatal("AsStrSlice did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
+		} else if !strings.Contains(err.Error(), "valkey message type t is not a array") {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsIntSlice", func(t *testing.T) {
-		if _, err := (&ValkeyMessage{typ: '_'}).AsIntSlice(); err == nil {
-			t.Fatal("AsIntSlice not failed as expected")
+		if val, err := (&ValkeyMessage{typ: '_'}).AsIntSlice(); err == nil {
+			t.Fatal("AsIntSlice did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
 		}
 
-		defer func() {
-			if !strings.Contains(recover().(string), "valkey message type t is not a array") {
-				t.Fatal("AsIntSlice not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: 't'}).AsIntSlice()
+		if val, err := (&ValkeyMessage{typ: 't'}).AsIntSlice(); err == nil {
+			t.Fatal("AsIntSlice did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
+		} else if !strings.Contains(err.Error(), "valkey message type t is not a array") {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsFloatSlice", func(t *testing.T) {
-		if _, err := (&ValkeyMessage{typ: '_'}).AsFloatSlice(); err == nil {
-			t.Fatal("AsFloatSlice not failed as expected")
+		if val, err := (&ValkeyMessage{typ: '_'}).AsFloatSlice(); err == nil {
+			t.Fatal("AsFloatSlice did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
 		}
 
-		defer func() {
-			if !strings.Contains(recover().(string), "valkey message type t is not a array") {
-				t.Fatal("AsFloatSlice not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: 't'}).AsFloatSlice()
+		if val, err := (&ValkeyMessage{typ: 't'}).AsFloatSlice(); err == nil {
+			t.Fatal("AsFloatSlice did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
+		} else if !strings.Contains(err.Error(), "valkey message type t is not a array") {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsBoolSlice", func(t *testing.T) {
-		if _, err := (&ValkeyMessage{typ: '_'}).AsBoolSlice(); err == nil {
-			t.Fatal("AsBoolSlice not failed as expected")
+		if val, err := (&ValkeyMessage{typ: '_'}).AsBoolSlice(); err == nil {
+			t.Fatal("AsBoolSlice did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
 		}
 
-		defer func() {
-			if !strings.Contains(recover().(string), "valkey message type t is not a array") {
-				t.Fatal("AsBoolSlice not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: 't'}).AsBoolSlice()
+		if val, err := (&ValkeyMessage{typ: 't'}).AsBoolSlice(); err == nil {
+			t.Fatal("AsBoolSlice did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
+		} else if !strings.Contains(err.Error(), "valkey message type t is not a array") {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsMap", func(t *testing.T) {
-		if _, err := (&ValkeyMessage{typ: '_'}).AsMap(); err == nil {
-			t.Fatal("AsMap not failed as expected")
+		if val, err := (&ValkeyMessage{typ: '_'}).AsMap(); err == nil {
+			t.Fatal("AsMap did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
 		}
 
-		defer func() {
-			if !strings.Contains(recover().(string), "valkey message type t is not a map/array/set or its length is not even") {
-				t.Fatal("AsMap not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: 't'}).AsMap()
+		if val, err := (&ValkeyMessage{typ: 't'}).AsMap(); err == nil {
+			t.Fatal("AsMap did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
+		} else if !strings.Contains(err.Error(), "valkey message type t is not a map/array/set or its length is not even") {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsStrMap", func(t *testing.T) {
-		if _, err := (&ValkeyMessage{typ: '_'}).AsStrMap(); err == nil {
-			t.Fatal("AsStrMap not failed as expected")
+		if val, err := (&ValkeyMessage{typ: '_'}).AsStrMap(); err == nil {
+			t.Fatal("AsStrMap did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
 		}
 
-		defer func() {
-			if !strings.Contains(recover().(string), "valkey message type t is not a map/array/set") {
-				t.Fatal("AsMap not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: 't'}).AsStrMap()
+		if val, err := (&ValkeyMessage{typ: 't'}).AsStrMap(); err == nil {
+			t.Fatal("AsStrMap did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
+		} else if !strings.Contains(err.Error(), "valkey message type t is not a map/array/set") {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsIntMap", func(t *testing.T) {
-		if _, err := (&ValkeyMessage{typ: '_'}).AsIntMap(); err == nil {
-			t.Fatal("AsIntMap not failed as expected")
+		if val, err := (&ValkeyMessage{typ: '_'}).AsIntMap(); err == nil {
+			t.Fatal("AsIntMap did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
 		}
 
-		defer func() {
-			if !strings.Contains(recover().(string), "valkey message type t is not a map/array/set") {
-				t.Fatal("AsMap not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: 't'}).AsIntMap()
+		if val, err := (&ValkeyMessage{typ: 't'}).AsIntMap(); err == nil {
+			t.Fatal("AsIntMap did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
+		} else if !strings.Contains(err.Error(), "valkey message type t is not a map/array/set") {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("ToMap", func(t *testing.T) {
-		if _, err := (&ValkeyMessage{typ: '_'}).ToMap(); err == nil {
-			t.Fatal("ToMap not failed as expected")
+		if val, err := (&ValkeyMessage{typ: '_'}).ToMap(); err == nil {
+			t.Fatal("ToMap did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
 		}
 
-		defer func() {
-			if !strings.Contains(recover().(string), "valkey message type t is not a RESP3 map") {
-				t.Fatal("ToMap not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: 't'}).ToMap()
+		if val, err := (&ValkeyMessage{typ: 't'}).ToMap(); err == nil {
+			t.Fatal("ToMap did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
+		} else if !strings.Contains(err.Error(), "valkey message type t is not a RESP3 map") {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("ToAny", func(t *testing.T) {
-		if _, err := (&ValkeyMessage{typ: '_'}).ToAny(); err == nil {
-			t.Fatal("ToAny not failed as expected")
+		if val, err := (&ValkeyMessage{typ: '_'}).ToAny(); err == nil {
+			t.Fatal("ToAny did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
 		}
 
-		defer func() {
-			if !strings.Contains(recover().(string), "valkey message type t is not a supported in ToAny") {
-				t.Fatal("ToAny not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: 't'}).ToAny()
+		if val, err := (&ValkeyMessage{typ: 't'}).ToAny(); err == nil {
+			t.Fatal("ToAny did not fail as expected")
+		} else if val != nil {
+			t.Fatalf("expected nil, got %v", val)
+		} else if !strings.Contains(err.Error(), "valkey message type t is not a supported in ToAny") {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsXRangeEntry - no range id", func(t *testing.T) {
 		if _, err := (&ValkeyMessage{typ: '_'}).AsXRangeEntry(); err == nil {
-			t.Fatal("AsXRangeEntry not failed as expected")
+			t.Fatal("AsXRangeEntry did not fail as expected")
 		}
 
 		if _, err := (&ValkeyMessage{typ: '*'}).AsXRangeEntry(); err == nil {
-			t.Fatal("AsXRangeEntry not failed as expected")
+			t.Fatal("AsXRangeEntry did not fail as expected")
 		}
 
 		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: '_'}, {typ: '%'}}}).AsXRangeEntry(); err == nil {
-			t.Fatal("AsXRangeEntry not failed as expected")
+			t.Fatal("AsXRangeEntry did not fail as expected")
 		}
 
-		defer func() {
-			if !strings.Contains(recover().(string), fmt.Sprintf("valkey message type %s is not a string", typeNames[':'])) {
-				t.Fatal("AsXRangeEntry not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: ':'}, {typ: '%'}}}).AsXRangeEntry()
+		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: ':'}, {typ: '%'}}}).AsXRangeEntry(); err == nil {
+			t.Fatal("AsXRangeEntry did not fail as expected")
+		} else if !strings.Contains(err.Error(), fmt.Sprintf("valkey message type %s is not a string", typeNames[':'])) {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsXRangeEntry - no range field values", func(t *testing.T) {
 		if _, err := (&ValkeyMessage{typ: '_'}).AsXRangeEntry(); err == nil {
-			t.Fatal("AsXRangeEntry not failed as expected")
+			t.Fatal("AsXRangeEntry did not fail as expected")
 		}
 
 		if _, err := (&ValkeyMessage{typ: '*'}).AsXRangeEntry(); err == nil {
-			t.Fatal("AsXRangeEntry not failed as expected")
+			t.Fatal("AsXRangeEntry did not fail as expected")
 		}
 
 		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: '+'}, {typ: '-'}}}).AsXRangeEntry(); err == nil {
-			t.Fatal("AsXRangeEntry not failed as expected")
+			t.Fatal("AsXRangeEntry did not fail as expected")
 		}
 
-		defer func() {
-			if !strings.Contains(recover().(string), "valkey message type t is not a map/array/set") {
-				t.Fatal("AsXRangeEntry not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: '+'}, {typ: 't'}}}).AsXRangeEntry()
+		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: '+'}, {typ: 't'}}}).AsXRangeEntry(); err == nil {
+			t.Fatal("AsXRangeEntry did not fail as expected")
+		} else if !strings.Contains(err.Error(), "valkey message type t is not a map/array/set") {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsXRange", func(t *testing.T) {
@@ -1609,48 +1695,50 @@ func TestValkeyMessage(t *testing.T) {
 
 	t.Run("AsXRead", func(t *testing.T) {
 		if _, err := (&ValkeyMessage{typ: '_'}).AsXRead(); err == nil {
-			t.Fatal("AsXRead not failed as expected")
+			t.Fatal("AsXRead did not fail as expected")
 		}
+
 		if _, err := (&ValkeyMessage{typ: '%', values: []ValkeyMessage{
 			{typ: '+', string: "stream1"},
 			{typ: '*', values: []ValkeyMessage{{typ: '*', values: []ValkeyMessage{{string: "id1", typ: '+'}}}}},
 		}}).AsXRead(); err == nil {
-			t.Fatal("AsXRead not failed as expected")
+			t.Fatal("AsXRead did not fail as expected")
 		}
+
 		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{
 			{typ: '*', values: []ValkeyMessage{
 				{typ: '+', string: "stream1"},
 			}},
 		}}).AsXRead(); err == nil {
-			t.Fatal("AsXRead not failed as expected")
+			t.Fatal("AsXRead did not fail as expected")
 		}
+
 		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{
 			{typ: '*', values: []ValkeyMessage{
 				{typ: '+', string: "stream1"},
 				{typ: '*', values: []ValkeyMessage{{typ: '*', values: []ValkeyMessage{{string: "id1", typ: '+'}}}}},
 			}},
 		}}).AsXRead(); err == nil {
-			t.Fatal("AsXRead not failed as expected")
+			t.Fatal("AsXRead did not fail as expected")
 		}
 
-		defer func() {
-			if !strings.Contains(recover().(string), "valkey message type t is not a map/array/set") {
-				t.Fatal("AsXRangeEntry not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: 't'}).AsXRead()
+		if _, err := (&ValkeyMessage{typ: 't'}).AsXRead(); err == nil {
+			t.Fatal("AsXRead did not fail as expected")
+		} else if !strings.Contains(err.Error(), "valkey message type t is not a map/array/set") {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsZScore", func(t *testing.T) {
 		if _, err := (&ValkeyMessage{typ: '_'}).AsZScore(); err == nil {
-			t.Fatal("AsZScore not failed as expected")
+			t.Fatal("AsZScore did not fail as expected")
 		}
-		defer func() {
-			if !strings.Contains(recover().(string), "valkey message is not a map/array/set or its length is not 2") {
-				t.Fatal("AsZScore not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: '*'}).AsZScore()
+
+		if _, err := (&ValkeyMessage{typ: '*'}).AsZScore(); err == nil {
+			t.Fatal("AsZScore did not fail as expected")
+		} else if !strings.Contains(err.Error(), "valkey message is not a map/array/set or its length is not 2") {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsZScores", func(t *testing.T) {
@@ -1675,78 +1763,80 @@ func TestValkeyMessage(t *testing.T) {
 
 	t.Run("AsLMPop", func(t *testing.T) {
 		if _, err := (&ValkeyMessage{typ: '_'}).AsLMPop(); err == nil {
-			t.Fatal("AsLMPop not failed as expected")
+			t.Fatal("AsLMPop did not fail as expected")
 		}
+
 		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{
 			{typ: '+', string: "k"},
 			{typ: '_'},
 		}}).AsLMPop(); err == nil {
-			t.Fatal("AsLMPop not fails as expected")
+			t.Fatal("AsLMPop did not fail as expected")
 		}
-		defer func() {
-			if !strings.Contains(recover().(string), fmt.Sprintf("valkey message type %s is not a LMPOP response", typeNames['*'])) {
-				t.Fatal("AsLMPop not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: '*', values: []ValkeyMessage{
+
+		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{
 			{typ: '+', string: "k"},
-		}}).AsLMPop()
+		}}).AsLMPop(); err == nil {
+			t.Fatal("AsLMPop did not fail as expected")
+		} else if !strings.Contains(err.Error(), fmt.Sprintf("valkey message type %s is not a LMPOP response", typeNames['*'])) {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsZMPop", func(t *testing.T) {
 		if _, err := (&ValkeyMessage{typ: '_'}).AsZMPop(); err == nil {
-			t.Fatal("AsZMPop not failed as expected")
+			t.Fatal("AsZMPop did not fail as expected")
 		}
+
 		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{
 			{typ: '+', string: "k"},
 			{typ: '_'},
 		}}).AsZMPop(); err == nil {
-			t.Fatal("AsZMPop not fails as expected")
+			t.Fatal("AsZMPop did not fail as expected")
 		}
-		defer func() {
-			if !strings.Contains(recover().(string), fmt.Sprintf("valkey message type %s is not a ZMPOP response", typeNames['*'])) {
-				t.Fatal("AsZMPop not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: '*', values: []ValkeyMessage{
+
+		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{
 			{typ: '+', string: "k"},
-		}}).AsZMPop()
+		}}).AsZMPop(); err == nil {
+			t.Fatal("AsZMPop did not fail as expected")
+		} else if !strings.Contains(err.Error(), fmt.Sprintf("valkey message type %s is not a ZMPOP response", typeNames['*'])) {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsFtSearch", func(t *testing.T) {
 		if _, _, err := (&ValkeyMessage{typ: '_'}).AsFtSearch(); err == nil {
-			t.Fatal("AsFtSearch not failed as expected")
+			t.Fatal("AsFtSearch did not fail as expected")
 		}
-		defer func() {
-			if !strings.Contains(recover().(string), fmt.Sprintf("valkey message type %s is not a FT.SEARCH response", typeNames['*'])) {
-				t.Fatal("AsFtSearch not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: '*', values: []ValkeyMessage{}}).AsFtSearch()
+
+		if _, _, err := (&ValkeyMessage{typ: '*'}).AsFtSearch(); err == nil {
+			t.Fatal("AsFtSearch did not fail as expected")
+		} else if !strings.Contains(err.Error(), fmt.Sprintf("valkey message type %s is not a FT.SEARCH response", typeNames['*'])) {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsFtAggregate", func(t *testing.T) {
 		if _, _, err := (&ValkeyMessage{typ: '_'}).AsFtAggregate(); err == nil {
-			t.Fatal("AsFtAggregate not failed as expected")
+			t.Fatal("AsFtAggregate did not fail as expected")
 		}
-		defer func() {
-			if !strings.Contains(recover().(string), fmt.Sprintf("valkey message type %s is not a FT.AGGREGATE response", typeNames['*'])) {
-				t.Fatal("AsFtAggregate not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: '*', values: []ValkeyMessage{}}).AsFtAggregate()
+
+		if _, _, err := (&ValkeyMessage{typ: '*'}).AsFtAggregate(); err == nil {
+			t.Fatal("AsFtAggregate did not fail as expected")
+		} else if !strings.Contains(err.Error(), fmt.Sprintf("valkey message type %s is not a FT.AGGREGATE response", typeNames['*'])) {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsFtAggregateCursor", func(t *testing.T) {
 		if _, _, _, err := (&ValkeyMessage{typ: '_'}).AsFtAggregateCursor(); err == nil {
-			t.Fatal("AsFtAggregate not failed as expected")
+			t.Fatal("AsFtAggregateCursor did not fail as expected")
 		}
-		defer func() {
-			if !strings.Contains(recover().(string), fmt.Sprintf("valkey message type %s is not a FT.AGGREGATE response", typeNames['*'])) {
-				t.Fatal("AsFtAggregate not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: '*', values: []ValkeyMessage{}}).AsFtAggregateCursor()
+
+		if _, _, _, err := (&ValkeyMessage{typ: '*'}).AsFtAggregateCursor(); err == nil {
+			t.Fatal("AsFtAggregateCursor did not fail as expected")
+		} else if !strings.Contains(err.Error(), fmt.Sprintf("valkey message type %s is not a FT.AGGREGATE response", typeNames['*'])) {
+			t.Fatalf("unexpected error: %v", err)
+		}
 	})
 
 	t.Run("AsScanEntry", func(t *testing.T) {
@@ -1765,22 +1855,16 @@ func TestValkeyMessage(t *testing.T) {
 		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{{string: "0", typ: '+'}, {typ: '_'}}}}).AsScanEntry(); !reflect.DeepEqual(ScanEntry{}, ret) {
 			t.Fatal("AsScanEntry not get value as expected")
 		}
-
-		defer func() {
-			if !strings.Contains(recover().(string), fmt.Sprintf("valkey message type %s is not a scan response or its length is not at least 2", typeNames['*'])) {
-				t.Fatal("AsScanEntry not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: ':'}}}).AsScanEntry()
 	})
 
-	t.Run("ToMap with non string key", func(t *testing.T) {
-		defer func() {
-			if !strings.Contains(recover().(string), fmt.Sprintf("valkey message type %s as map key is not supported", typeNames[':'])) {
-				t.Fatal("ToMap not panic as expected")
-			}
-		}()
-		(&ValkeyMessage{typ: '%', values: []ValkeyMessage{{typ: ':'}, {typ: ':'}}}).ToMap()
+	t.Run("ToMap with non-string key", func(t *testing.T) {
+		_, err := (&ValkeyMessage{typ: '~', values: []ValkeyMessage{{typ: ':'}, {typ: ':'}}}).ToMap()
+		if err == nil {
+			t.Fatal("ToMap did not fail as expected")
+		}
+		if !strings.Contains(err.Error(), "valkey message type set is not a RESP3 map") {
+			t.Fatalf("ToMap failed with unexpected error: %v", err)
+		}
 	})
 
 	t.Run("IsCacheHit", func(t *testing.T) {
