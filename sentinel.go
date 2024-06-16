@@ -12,9 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"math/rand"
-
 	"github.com/valkey-io/valkey-go/internal/cmds"
+	"github.com/valkey-io/valkey-go/internal/util"
 )
 
 func newSentinelClient(opt *ClientOption, connFn connFn) (client *sentinelClient, err error) {
@@ -436,7 +435,7 @@ func pickReplica(resp []ValkeyResult) (string, error) {
 	}
 
 	// choose a replica randomly
-	m := eligible[rand.Intn(len(eligible))]
+	m := eligible[util.FastRand(len(eligible))]
 	return net.JoinHostPort(m["ip"], m["port"]), nil
 }
 
