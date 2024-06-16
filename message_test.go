@@ -38,6 +38,24 @@ func TestIsValkeyNil(t *testing.T) {
 	}
 }
 
+func TestIsParseErr(t *testing.T) {
+	err := errParse
+	if !IsParseErr(err) {
+		t.Fatal("IsParseErr fail")
+	}
+	if IsParseErr(errors.New("other")) {
+		t.Fatal("IsParseErr fail")
+	}
+	if err.Error() != "valkey: parse error" {
+		t.Fatal("IsValkeyNil fail")
+	}
+	wrappedErr := wrapped{msg: "wrapped", err: errParse}
+	wrappedNonParseErr := wrapped{msg: "wrapped", err: errors.New("other")}
+	if !IsParseErr(wrappedErr) || IsParseErr(wrappedNonParseErr) {
+		t.Fatal("IsParseErr fail : wrapped error")
+	}
+}
+
 func TestIsValkeyErr(t *testing.T) {
 	err := Nil
 	if ret, ok := IsValkeyErr(err); ok || ret != Nil {
