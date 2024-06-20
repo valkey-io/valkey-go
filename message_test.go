@@ -1873,6 +1873,9 @@ func TestValkeyMessage(t *testing.T) {
 		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{{string: "0", typ: '+'}, {typ: '_'}}}}).AsScanEntry(); !reflect.DeepEqual(ScanEntry{}, ret) {
 			t.Fatal("AsScanEntry not get value as expected")
 		}
+		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{{string: "0", typ: '+'}}}}).AsScanEntry(); err == nil || !strings.Contains(err.Error(), "a scan response or its length is not at least 2") {
+			t.Fatal("AsScanEntry not get value as expected")
+		}
 	})
 
 	t.Run("ToMap with non-string key", func(t *testing.T) {
@@ -1881,6 +1884,13 @@ func TestValkeyMessage(t *testing.T) {
 			t.Fatal("ToMap did not fail as expected")
 		}
 		if !strings.Contains(err.Error(), "valkey message type set is not a RESP3 map") {
+			t.Fatalf("ToMap failed with unexpected error: %v", err)
+		}
+		_, err = (&ValkeyMessage{typ: '%', values: []ValkeyMessage{{typ: ':'}, {typ: ':'}}}).ToMap()
+		if err == nil {
+			t.Fatal("ToMap did not fail as expected")
+		}
+		if !strings.Contains(err.Error(), "int64 as map key is not supported") {
 			t.Fatalf("ToMap failed with unexpected error: %v", err)
 		}
 	})
