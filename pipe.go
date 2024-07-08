@@ -21,7 +21,7 @@ import (
 )
 
 const LibName = "valkey"
-const LibVer = "1.0.40"
+const LibVer = "1.0.41"
 
 var noHello = regexp.MustCompile("unknown command .?(HELLO|hello).?")
 
