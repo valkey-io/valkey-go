@@ -38,6 +38,12 @@ import (
 	"github.com/valkey-io/valkey-go/internal/util"
 )
 
+type Cmder interface {
+	SetErr(error)
+	Err() error
+	from(result valkey.ValkeyResult)
+}
+
 type baseCmd[T any] struct {
 	err error
 	val T
@@ -67,14 +73,18 @@ type Cmd struct {
 	baseCmd[any]
 }
 
-func newCmd(res valkey.ValkeyResult) *Cmd {
-	cmd := &Cmd{}
+func (cmd *Cmd) from(res valkey.ValkeyResult) {
 	val, err := res.ToAny()
 	if err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	cmd.SetVal(val)
+}
+
+func newCmd(res valkey.ValkeyResult) *Cmd {
+	cmd := &Cmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -327,11 +337,15 @@ type StringCmd struct {
 	baseCmd[string]
 }
 
-func newStringCmd(res valkey.ValkeyResult) *StringCmd {
-	cmd := &StringCmd{}
+func (cmd *StringCmd) from(res valkey.ValkeyResult) {
 	val, err := res.ToString()
 	cmd.SetErr(err)
 	cmd.SetVal(val)
+}
+
+func newStringCmd(res valkey.ValkeyResult) *StringCmd {
+	cmd := &StringCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -397,8 +411,7 @@ type BoolCmd struct {
 	baseCmd[bool]
 }
 
-func newBoolCmd(res valkey.ValkeyResult) *BoolCmd {
-	cmd := &BoolCmd{}
+func (cmd *BoolCmd) from(res valkey.ValkeyResult) {
 	val, err := res.AsBool()
 	if valkey.IsValkeyNil(err) {
 		val = false
@@ -406,6 +419,11 @@ func newBoolCmd(res valkey.ValkeyResult) *BoolCmd {
 	}
 	cmd.SetVal(val)
 	cmd.SetErr(err)
+}
+
+func newBoolCmd(res valkey.ValkeyResult) *BoolCmd {
+	cmd := &BoolCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -413,11 +431,15 @@ type IntCmd struct {
 	baseCmd[int64]
 }
 
-func newIntCmd(res valkey.ValkeyResult) *IntCmd {
-	cmd := &IntCmd{}
+func (cmd *IntCmd) from(res valkey.ValkeyResult) {
 	val, err := res.AsInt64()
 	cmd.SetErr(err)
 	cmd.SetVal(val)
+}
+
+func newIntCmd(res valkey.ValkeyResult) *IntCmd {
+	cmd := &IntCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -427,17 +449,22 @@ func (cmd *IntCmd) Uint64() (uint64, error) {
 
 type DurationCmd struct {
 	baseCmd[time.Duration]
+	precision time.Duration
 }
 
-func newDurationCmd(res valkey.ValkeyResult, precision time.Duration) *DurationCmd {
-	cmd := &DurationCmd{}
+func (cmd *DurationCmd) from(res valkey.ValkeyResult) {
 	val, err := res.AsInt64()
 	cmd.SetErr(err)
 	if val > 0 {
-		cmd.SetVal(time.Duration(val) * precision)
-		return cmd
+		cmd.SetVal(time.Duration(val) * cmd.precision)
+		return
 	}
 	cmd.SetVal(time.Duration(val))
+}
+
+func newDurationCmd(res valkey.ValkeyResult, precision time.Duration) *DurationCmd {
+	cmd := &DurationCmd{precision: precision}
+	cmd.from(res)
 	return cmd
 }
 
@@ -454,19 +481,17 @@ func newStatusCmd(res valkey.ValkeyResult) *StatusCmd {
 type SliceCmd struct {
 	baseCmd[[]any]
 	keys []string
+	json bool
 }
 
-// newSliceCmd returns SliceCmd according to input arguments, if the caller is JSONObjKeys,
-// set isJSONObjKeys to true.
-func newSliceCmd(res valkey.ValkeyResult, isJSONObjKeys bool, keys ...string) *SliceCmd {
-	cmd := &SliceCmd{keys: keys}
+func (cmd *SliceCmd) from(res valkey.ValkeyResult) {
 	arr, err := res.ToArray()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	vals := make([]any, len(arr))
-	if isJSONObjKeys {
+	if cmd.json {
 		for i, v := range arr {
 			// for JSON.OBJKEYS
 			if v.IsNil() {
@@ -476,12 +501,12 @@ func newSliceCmd(res valkey.ValkeyResult, isJSONObjKeys bool, keys ...string) *S
 			arr, err := v.ToAny()
 			if err != nil {
 				cmd.SetErr(err)
-				return cmd
+				return
 			}
 			vals[i] = arr
 		}
 		cmd.SetVal(vals)
-		return cmd
+		return
 	}
 	for i, v := range arr {
 		// keep the old behavior the same as before (don't handle error while parsing v as string)
@@ -490,6 +515,13 @@ func newSliceCmd(res valkey.ValkeyResult, isJSONObjKeys bool, keys ...string) *S
 		}
 	}
 	cmd.SetVal(vals)
+}
+
+// newSliceCmd returns SliceCmd according to input arguments, if the caller is JSONObjKeys,
+// set isJSONObjKeys to true.
+func newSliceCmd(res valkey.ValkeyResult, isJSONObjKeys bool, keys ...string) *SliceCmd {
+	cmd := &SliceCmd{keys: keys, json: isJSONObjKeys}
+	cmd.from(res)
 	return cmd
 }
 
@@ -507,11 +539,15 @@ type StringSliceCmd struct {
 	baseCmd[[]string]
 }
 
-func newStringSliceCmd(res valkey.ValkeyResult) *StringSliceCmd {
-	cmd := &StringSliceCmd{}
+func (cmd *StringSliceCmd) from(res valkey.ValkeyResult) {
 	val, err := res.AsStrSlice()
 	cmd.SetVal(val)
 	cmd.SetErr(err)
+}
+
+func newStringSliceCmd(res valkey.ValkeyResult) *StringSliceCmd {
+	cmd := &StringSliceCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -520,9 +556,15 @@ type IntSliceCmd struct {
 	val []int64
 }
 
+func (cmd *IntSliceCmd) from(res valkey.ValkeyResult) {
+	cmd.val, cmd.err = res.AsIntSlice()
+
+}
+
 func newIntSliceCmd(res valkey.ValkeyResult) *IntSliceCmd {
-	val, err := res.AsIntSlice()
-	return &IntSliceCmd{val: val, err: err}
+	cmd := &IntSliceCmd{}
+	cmd.from(res)
+	return cmd
 }
 
 func (cmd *IntSliceCmd) SetVal(val []int64) {
@@ -549,18 +591,22 @@ type BoolSliceCmd struct {
 	baseCmd[[]bool]
 }
 
-func newBoolSliceCmd(res valkey.ValkeyResult) *BoolSliceCmd {
-	cmd := &BoolSliceCmd{}
+func (cmd *BoolSliceCmd) from(res valkey.ValkeyResult) {
 	ints, err := res.AsIntSlice()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	val := make([]bool, 0, len(ints))
 	for _, i := range ints {
 		val = append(val, i == 1)
 	}
 	cmd.SetVal(val)
+}
+
+func newBoolSliceCmd(res valkey.ValkeyResult) *BoolSliceCmd {
+	cmd := &BoolSliceCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -568,41 +614,54 @@ type FloatSliceCmd struct {
 	baseCmd[[]float64]
 }
 
-func newFloatSliceCmd(res valkey.ValkeyResult) *FloatSliceCmd {
-	cmd := &FloatSliceCmd{}
+func (cmd *FloatSliceCmd) from(res valkey.ValkeyResult) {
 	val, err := res.AsFloatSlice()
 	cmd.SetErr(err)
 	cmd.SetVal(val)
+}
+
+func newFloatSliceCmd(res valkey.ValkeyResult) *FloatSliceCmd {
+	cmd := &FloatSliceCmd{}
+	cmd.from(res)
 	return cmd
 }
 
 type ZSliceCmd struct {
 	baseCmd[[]Z]
+	single bool
+}
+
+func (cmd *ZSliceCmd) from(res valkey.ValkeyResult) {
+	if cmd.single {
+		s, err := res.AsZScore()
+		if err != nil {
+			cmd.SetErr(err)
+			return
+		}
+		cmd.SetVal([]Z{{Member: s.Member, Score: s.Score}})
+	} else {
+		scores, err := res.AsZScores()
+		if err != nil {
+			cmd.SetErr(err)
+			return
+		}
+		val := make([]Z, 0, len(scores))
+		for _, s := range scores {
+			val = append(val, Z{Member: s.Member, Score: s.Score})
+		}
+		cmd.SetVal(val)
+	}
 }
 
 func newZSliceCmd(res valkey.ValkeyResult) *ZSliceCmd {
 	cmd := &ZSliceCmd{}
-	scores, err := res.AsZScores()
-	if err != nil {
-		cmd.SetErr(err)
-		return cmd
-	}
-	val := make([]Z, 0, len(scores))
-	for _, s := range scores {
-		val = append(val, Z{Member: s.Member, Score: s.Score})
-	}
-	cmd.SetVal(val)
+	cmd.from(res)
 	return cmd
 }
 
 func newZSliceSingleCmd(res valkey.ValkeyResult) *ZSliceCmd {
-	cmd := &ZSliceCmd{}
-	s, err := res.AsZScore()
-	if err != nil {
-		cmd.SetErr(err)
-		return cmd
-	}
-	cmd.SetVal([]Z{{Member: s.Member, Score: s.Score}})
+	cmd := &ZSliceCmd{single: true}
+	cmd.from(res)
 	return cmd
 }
 
@@ -610,11 +669,15 @@ type FloatCmd struct {
 	baseCmd[float64]
 }
 
-func newFloatCmd(res valkey.ValkeyResult) *FloatCmd {
-	cmd := &FloatCmd{}
+func (cmd *FloatCmd) from(res valkey.ValkeyResult) {
 	val, err := res.AsFloat64()
 	cmd.SetErr(err)
 	cmd.SetVal(val)
+}
+
+func newFloatCmd(res valkey.ValkeyResult) *FloatCmd {
+	cmd := &FloatCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -624,9 +687,19 @@ type ScanCmd struct {
 	cursor uint64
 }
 
-func newScanCmd(res valkey.ValkeyResult) *ScanCmd {
+func (cmd *ScanCmd) from(res valkey.ValkeyResult) {
 	e, err := res.AsScanEntry()
-	return &ScanCmd{cursor: e.Cursor, keys: e.Elements, err: err}
+	if err != nil {
+		cmd.err = err
+		return
+	}
+	cmd.cursor, cmd.keys = e.Cursor, e.Elements
+}
+
+func newScanCmd(res valkey.ValkeyResult) *ScanCmd {
+	cmd := &ScanCmd{}
+	cmd.from(res)
+	return cmd
 }
 
 func (cmd *ScanCmd) SetVal(keys []string, cursor uint64) {
@@ -636,6 +709,10 @@ func (cmd *ScanCmd) SetVal(keys []string, cursor uint64) {
 
 func (cmd *ScanCmd) Val() (keys []string, cursor uint64) {
 	return cmd.keys, cmd.cursor
+}
+
+func (cmd *ScanCmd) SetErr(err error) {
+	cmd.err = err
 }
 
 func (cmd *ScanCmd) Err() error {
@@ -655,8 +732,7 @@ type KeyValueSliceCmd struct {
 	baseCmd[[]KeyValue]
 }
 
-func newKeyValueSliceCmd(res valkey.ValkeyResult) *KeyValueSliceCmd {
-	cmd := &KeyValueSliceCmd{}
+func (cmd *KeyValueSliceCmd) from(res valkey.ValkeyResult) {
 	arr, err := res.ToArray()
 	for _, a := range arr {
 		kv, _ := a.AsStrSlice()
@@ -665,6 +741,11 @@ func newKeyValueSliceCmd(res valkey.ValkeyResult) *KeyValueSliceCmd {
 		}
 	}
 	cmd.SetErr(err)
+}
+
+func newKeyValueSliceCmd(res valkey.ValkeyResult) *KeyValueSliceCmd {
+	cmd := &KeyValueSliceCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -673,10 +754,14 @@ type KeyValuesCmd struct {
 	val valkey.KeyValues
 }
 
+func (cmd *KeyValuesCmd) from(res valkey.ValkeyResult) {
+	cmd.val, cmd.err = res.AsLMPop()
+}
+
 func newKeyValuesCmd(res valkey.ValkeyResult) *KeyValuesCmd {
-	ret := &KeyValuesCmd{}
-	ret.val, ret.err = res.AsLMPop()
-	return ret
+	cmd := &KeyValuesCmd{}
+	cmd.from(res)
+	return cmd
 }
 
 func (cmd *KeyValuesCmd) SetVal(key string, val []string) {
@@ -709,19 +794,23 @@ type KeyFlagsCmd struct {
 	baseCmd[[]KeyFlags]
 }
 
-func newKeyFlagsCmd(res valkey.ValkeyResult) *KeyFlagsCmd {
-	ret := &KeyFlagsCmd{}
-	if ret.err = res.Error(); ret.err == nil {
+func (cmd *KeyFlagsCmd) from(res valkey.ValkeyResult) {
+	if cmd.err = res.Error(); cmd.err == nil {
 		kfs, _ := res.ToArray()
-		ret.val = make([]KeyFlags, len(kfs))
+		cmd.val = make([]KeyFlags, len(kfs))
 		for i := 0; i < len(kfs); i++ {
 			if kf, _ := kfs[i].ToArray(); len(kf) >= 2 {
-				ret.val[i].Key, _ = kf[0].ToString()
-				ret.val[i].Flags, _ = kf[1].AsStrSlice()
+				cmd.val[i].Key, _ = kf[0].ToString()
+				cmd.val[i].Flags, _ = kf[1].AsStrSlice()
 			}
 		}
 	}
-	return ret
+}
+
+func newKeyFlagsCmd(res valkey.ValkeyResult) *KeyFlagsCmd {
+	cmd := &KeyFlagsCmd{}
+	cmd.from(res)
+	return cmd
 }
 
 type ZSliceWithKeyCmd struct {
@@ -730,16 +819,23 @@ type ZSliceWithKeyCmd struct {
 	val []Z
 }
 
-func newZSliceWithKeyCmd(res valkey.ValkeyResult) *ZSliceWithKeyCmd {
+func (cmd *ZSliceWithKeyCmd) from(res valkey.ValkeyResult) {
 	v, err := res.AsZMPop()
 	if err != nil {
-		return &ZSliceWithKeyCmd{err: err}
+		cmd.err = err
+		return
 	}
 	val := make([]Z, 0, len(v.Values))
 	for _, s := range v.Values {
 		val = append(val, Z{Member: s.Member, Score: s.Score})
 	}
-	return &ZSliceWithKeyCmd{key: v.Key, val: val}
+	cmd.key, cmd.val = v.Key, val
+}
+
+func newZSliceWithKeyCmd(res valkey.ValkeyResult) *ZSliceWithKeyCmd {
+	cmd := &ZSliceWithKeyCmd{}
+	cmd.from(res)
+	return cmd
 }
 
 func (cmd *ZSliceWithKeyCmd) SetVal(key string, val []Z) {
@@ -767,11 +863,15 @@ type StringStringMapCmd struct {
 	baseCmd[map[string]string]
 }
 
-func newStringStringMapCmd(res valkey.ValkeyResult) *StringStringMapCmd {
-	cmd := &StringStringMapCmd{}
+func (cmd *StringStringMapCmd) from(res valkey.ValkeyResult) {
 	val, err := res.AsStrMap()
 	cmd.SetErr(err)
 	cmd.SetVal(val)
+}
+
+func newStringStringMapCmd(res valkey.ValkeyResult) *StringStringMapCmd {
+	cmd := &StringStringMapCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -800,11 +900,15 @@ type StringIntMapCmd struct {
 	baseCmd[map[string]int64]
 }
 
-func newStringIntMapCmd(res valkey.ValkeyResult) *StringIntMapCmd {
-	cmd := &StringIntMapCmd{}
+func (cmd *StringIntMapCmd) from(res valkey.ValkeyResult) {
 	val, err := res.AsIntMap()
 	cmd.SetErr(err)
 	cmd.SetVal(val)
+}
+
+func newStringIntMapCmd(res valkey.ValkeyResult) *StringIntMapCmd {
+	cmd := &StringIntMapCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -812,18 +916,22 @@ type StringStructMapCmd struct {
 	baseCmd[map[string]struct{}]
 }
 
-func newStringStructMapCmd(res valkey.ValkeyResult) *StringStructMapCmd {
-	cmd := &StringStructMapCmd{}
+func (cmd *StringStructMapCmd) from(res valkey.ValkeyResult) {
 	strSlice, err := res.AsStrSlice()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	val := make(map[string]struct{}, len(strSlice))
 	for _, v := range strSlice {
 		val[v] = struct{}{}
 	}
 	cmd.SetVal(val)
+}
+
+func newStringStructMapCmd(res valkey.ValkeyResult) *StringStructMapCmd {
+	cmd := &StringStructMapCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -831,14 +939,18 @@ type XMessageSliceCmd struct {
 	baseCmd[[]XMessage]
 }
 
-func newXMessageSliceCmd(res valkey.ValkeyResult) *XMessageSliceCmd {
-	cmd := &XMessageSliceCmd{}
+func (cmd *XMessageSliceCmd) from(res valkey.ValkeyResult) {
 	val, err := res.AsXRange()
 	cmd.SetErr(err)
 	cmd.val = make([]XMessage, len(val))
 	for i, r := range val {
 		cmd.val[i] = newXMessage(r)
 	}
+}
+
+func newXMessageSliceCmd(res valkey.ValkeyResult) *XMessageSliceCmd {
+	cmd := &XMessageSliceCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -862,12 +974,11 @@ type XStreamSliceCmd struct {
 	baseCmd[[]XStream]
 }
 
-func newXStreamSliceCmd(res valkey.ValkeyResult) *XStreamSliceCmd {
-	cmd := &XStreamSliceCmd{}
+func (cmd *XStreamSliceCmd) from(res valkey.ValkeyResult) {
 	streams, err := res.AsXRead()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	val := make([]XStream, 0, len(streams))
 	for name, messages := range streams {
@@ -878,6 +989,11 @@ func newXStreamSliceCmd(res valkey.ValkeyResult) *XStreamSliceCmd {
 		val = append(val, XStream{Stream: name, Messages: msgs})
 	}
 	cmd.SetVal(val)
+}
+
+func newXStreamSliceCmd(res valkey.ValkeyResult) *XStreamSliceCmd {
+	cmd := &XStreamSliceCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -892,31 +1008,30 @@ type XPendingCmd struct {
 	baseCmd[XPending]
 }
 
-func newXPendingCmd(res valkey.ValkeyResult) *XPendingCmd {
-	cmd := &XPendingCmd{}
+func (cmd *XPendingCmd) from(res valkey.ValkeyResult) {
 	arr, err := res.ToArray()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	if len(arr) < 4 {
 		cmd.SetErr(fmt.Errorf("got %d, wanted 4", len(arr)))
-		return cmd
+		return
 	}
 	count, err := arr[0].AsInt64()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	lower, err := arr[1].ToString()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	higher, err := arr[2].ToString()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	val := XPending{
 		Count:  count,
@@ -926,27 +1041,27 @@ func newXPendingCmd(res valkey.ValkeyResult) *XPendingCmd {
 	consumerArr, err := arr[3].ToArray()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	for _, v := range consumerArr {
 		consumer, err := v.ToArray()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		if len(consumer) < 2 {
 			cmd.SetErr(fmt.Errorf("got %d, wanted 2", len(arr)))
-			return cmd
+			return
 		}
 		consumerName, err := consumer[0].ToString()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		consumerPending, err := consumer[1].AsInt64()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		if val.Consumers == nil {
 			val.Consumers = make(map[string]int64)
@@ -954,6 +1069,11 @@ func newXPendingCmd(res valkey.ValkeyResult) *XPendingCmd {
 		val.Consumers[consumerName] = consumerPending
 	}
 	cmd.SetVal(val)
+}
+
+func newXPendingCmd(res valkey.ValkeyResult) *XPendingCmd {
+	cmd := &XPendingCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -968,43 +1088,42 @@ type XPendingExtCmd struct {
 	baseCmd[[]XPendingExt]
 }
 
-func newXPendingExtCmd(res valkey.ValkeyResult) *XPendingExtCmd {
-	cmd := &XPendingExtCmd{}
+func (cmd *XPendingExtCmd) from(res valkey.ValkeyResult) {
 	arrs, err := res.ToArray()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	val := make([]XPendingExt, 0, len(arrs))
 	for _, v := range arrs {
 		arr, err := v.ToArray()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		if len(arr) < 4 {
 			cmd.SetErr(fmt.Errorf("got %d, wanted 4", len(arr)))
-			return cmd
+			return
 		}
 		id, err := arr[0].ToString()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		consumer, err := arr[1].ToString()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		idle, err := arr[2].AsInt64()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		retryCount, err := arr[3].AsInt64()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		val = append(val, XPendingExt{
 			ID:         id,
@@ -1014,6 +1133,11 @@ func newXPendingExtCmd(res valkey.ValkeyResult) *XPendingExtCmd {
 		})
 	}
 	cmd.SetVal(val)
+}
+
+func newXPendingExtCmd(res valkey.ValkeyResult) *XPendingExtCmd {
+	cmd := &XPendingExtCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -1023,27 +1147,37 @@ type XAutoClaimCmd struct {
 	val   []XMessage
 }
 
-func newXAutoClaimCmd(res valkey.ValkeyResult) *XAutoClaimCmd {
+func (cmd *XAutoClaimCmd) from(res valkey.ValkeyResult) {
 	arr, err := res.ToArray()
 	if err != nil {
-		return &XAutoClaimCmd{err: err}
+		cmd.SetErr(err)
+		return
 	}
 	if len(arr) < 2 {
-		return &XAutoClaimCmd{err: fmt.Errorf("got %d, wanted 2", len(arr))}
+		cmd.SetErr(fmt.Errorf("got %d, wanted 2", len(arr)))
+		return
 	}
 	start, err := arr[0].ToString()
 	if err != nil {
-		return &XAutoClaimCmd{err: err}
+		cmd.SetErr(err)
+		return
 	}
 	ranges, err := arr[1].AsXRange()
 	if err != nil {
-		return &XAutoClaimCmd{err: err}
+		cmd.SetErr(err)
+		return
 	}
 	val := make([]XMessage, 0, len(ranges))
 	for _, r := range ranges {
 		val = append(val, newXMessage(r))
 	}
-	return &XAutoClaimCmd{val: val, start: start, err: err}
+	cmd.val, cmd.start = val, start
+}
+
+func newXAutoClaimCmd(res valkey.ValkeyResult) *XAutoClaimCmd {
+	cmd := &XAutoClaimCmd{}
+	cmd.from(res)
+	return cmd
 }
 
 func (cmd *XAutoClaimCmd) SetVal(val []XMessage, start string) {
@@ -1073,23 +1207,34 @@ type XAutoClaimJustIDCmd struct {
 	val   []string
 }
 
-func newXAutoClaimJustIDCmd(res valkey.ValkeyResult) *XAutoClaimJustIDCmd {
+func (cmd *XAutoClaimJustIDCmd) from(res valkey.ValkeyResult) {
 	arr, err := res.ToArray()
 	if err != nil {
-		return &XAutoClaimJustIDCmd{err: err}
+		cmd.SetErr(err)
+		return
 	}
 	if len(arr) < 2 {
-		return &XAutoClaimJustIDCmd{err: fmt.Errorf("got %d, wanted 2", len(arr))}
+		cmd.SetErr(fmt.Errorf("got %d, wanted 2", len(arr)))
+		return
 	}
 	start, err := arr[0].ToString()
 	if err != nil {
-		return &XAutoClaimJustIDCmd{err: err}
+		cmd.SetErr(err)
+		return
 	}
 	val, err := arr[1].AsStrSlice()
 	if err != nil {
-		return &XAutoClaimJustIDCmd{err: err}
+		cmd.SetErr(err)
+		return
 	}
-	return &XAutoClaimJustIDCmd{val: val, start: start, err: err}
+	cmd.val, cmd.start = val, start
+}
+
+func newXAutoClaimJustIDCmd(res valkey.ValkeyResult) *XAutoClaimJustIDCmd {
+	cmd := &XAutoClaimJustIDCmd{}
+	cmd.from(res)
+	return cmd
+
 }
 
 func (cmd *XAutoClaimJustIDCmd) SetVal(val []string, start string) {
@@ -1126,19 +1271,18 @@ type XInfoGroupsCmd struct {
 	baseCmd[[]XInfoGroup]
 }
 
-func newXInfoGroupsCmd(res valkey.ValkeyResult) *XInfoGroupsCmd {
-	cmd := &XInfoGroupsCmd{}
+func (cmd *XInfoGroupsCmd) from(res valkey.ValkeyResult) {
 	arr, err := res.ToArray()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	groupInfos := make([]XInfoGroup, 0, len(arr))
 	for _, v := range arr {
 		info, err := v.AsMap()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		var group XInfoGroup
 		if attr, ok := info["name"]; ok {
@@ -1162,6 +1306,11 @@ func newXInfoGroupsCmd(res valkey.ValkeyResult) *XInfoGroupsCmd {
 		groupInfos = append(groupInfos, group)
 	}
 	cmd.SetVal(groupInfos)
+}
+
+func newXInfoGroupsCmd(res valkey.ValkeyResult) *XInfoGroupsCmd {
+	cmd := &XInfoGroupsCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -1181,12 +1330,11 @@ type XInfoStreamCmd struct {
 	baseCmd[XInfoStream]
 }
 
-func newXInfoStreamCmd(res valkey.ValkeyResult) *XInfoStreamCmd {
-	cmd := &XInfoStreamCmd{}
+func (cmd *XInfoStreamCmd) from(res valkey.ValkeyResult) {
 	kv, err := res.AsMap()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	var val XInfoStream
 	if v, ok := kv["length"]; ok {
@@ -1224,6 +1372,11 @@ func newXInfoStreamCmd(res valkey.ValkeyResult) *XInfoStreamCmd {
 		}
 	}
 	cmd.SetVal(val)
+}
+
+func newXInfoStreamCmd(res valkey.ValkeyResult) *XInfoStreamCmd {
+	cmd := &XInfoStreamCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -1273,12 +1426,11 @@ type XInfoStreamFullCmd struct {
 	baseCmd[XInfoStreamFull]
 }
 
-func newXInfoStreamFullCmd(res valkey.ValkeyResult) *XInfoStreamFullCmd {
-	cmd := &XInfoStreamFullCmd{}
+func (cmd *XInfoStreamFullCmd) from(res valkey.ValkeyResult) {
 	kv, err := res.AsMap()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	var val XInfoStreamFull
 	if v, ok := kv["length"]; ok {
@@ -1306,14 +1458,14 @@ func newXInfoStreamFullCmd(res valkey.ValkeyResult) *XInfoStreamFullCmd {
 		val.Groups, err = readStreamGroups(v)
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 	}
 	if v, ok := kv["entries"]; ok {
 		ranges, err := v.AsXRange()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		val.Entries = make([]XMessage, 0, len(ranges))
 		for _, r := range ranges {
@@ -1321,6 +1473,11 @@ func newXInfoStreamFullCmd(res valkey.ValkeyResult) *XInfoStreamFullCmd {
 		}
 	}
 	cmd.SetVal(val)
+}
+
+func newXInfoStreamFullCmd(res valkey.ValkeyResult) *XInfoStreamFullCmd {
+	cmd := &XInfoStreamFullCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -1472,19 +1629,18 @@ type XInfoConsumersCmd struct {
 	baseCmd[[]XInfoConsumer]
 }
 
-func newXInfoConsumersCmd(res valkey.ValkeyResult) *XInfoConsumersCmd {
-	cmd := &XInfoConsumersCmd{}
+func (cmd *XInfoConsumersCmd) from(res valkey.ValkeyResult) {
 	arr, err := res.ToArray()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	val := make([]XInfoConsumer, 0, len(arr))
 	for _, v := range arr {
 		info, err := v.AsMap()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		var consumer XInfoConsumer
 		if attr, ok := info["name"]; ok {
@@ -1500,6 +1656,11 @@ func newXInfoConsumersCmd(res valkey.ValkeyResult) *XInfoConsumersCmd {
 		val = append(val, consumer)
 	}
 	cmd.SetVal(val)
+}
+
+func newXInfoConsumersCmd(res valkey.ValkeyResult) *XInfoConsumersCmd {
+	cmd := &XInfoConsumersCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -1526,34 +1687,38 @@ type ZWithKeyCmd struct {
 	baseCmd[ZWithKey]
 }
 
-func newZWithKeyCmd(res valkey.ValkeyResult) *ZWithKeyCmd {
-	cmd := &ZWithKeyCmd{}
+func (cmd *ZWithKeyCmd) from(res valkey.ValkeyResult) {
 	arr, err := res.ToArray()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	if len(arr) < 3 {
 		cmd.SetErr(fmt.Errorf("got %d, wanted 3", len(arr)))
-		return cmd
+		return
 	}
 	val := ZWithKey{}
 	val.Key, err = arr[0].ToString()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	val.Member, err = arr[1].ToString()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	val.Score, err = arr[2].AsFloat64()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	cmd.SetVal(val)
+}
+
+func newZWithKeyCmd(res valkey.ValkeyResult) *ZWithKeyCmd {
+	cmd := &ZWithKeyCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -1566,44 +1731,52 @@ type RankWithScoreCmd struct {
 	baseCmd[RankScore]
 }
 
-func newRankWithScoreCmd(res valkey.ValkeyResult) *RankWithScoreCmd {
-	ret := &RankWithScoreCmd{}
-	if ret.err = res.Error(); ret.err == nil {
+func (cmd *RankWithScoreCmd) from(res valkey.ValkeyResult) {
+	if cmd.err = res.Error(); cmd.err == nil {
 		vs, _ := res.ToArray()
 		if len(vs) >= 2 {
-			ret.val.Rank, _ = vs[0].AsInt64()
-			ret.val.Score, _ = vs[1].AsFloat64()
+			cmd.val.Rank, _ = vs[0].AsInt64()
+			cmd.val.Score, _ = vs[1].AsFloat64()
 		}
 	}
-	return ret
+}
+
+func newRankWithScoreCmd(res valkey.ValkeyResult) *RankWithScoreCmd {
+	cmd := &RankWithScoreCmd{}
+	cmd.from(res)
+	return cmd
 }
 
 type TimeCmd struct {
 	baseCmd[time.Time]
 }
 
-func newTimeCmd(res valkey.ValkeyResult) *TimeCmd {
-	cmd := &TimeCmd{}
+func (cmd *TimeCmd) from(res valkey.ValkeyResult) {
 	arr, err := res.ToArray()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	if len(arr) < 2 {
 		cmd.SetErr(fmt.Errorf("got %d, wanted 2", len(arr)))
-		return cmd
+		return
 	}
 	sec, err := arr[0].AsInt64()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	microSec, err := arr[1].AsInt64()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	cmd.SetVal(time.Unix(sec, microSec*1000))
+}
+
+func newTimeCmd(res valkey.ValkeyResult) *TimeCmd {
+	cmd := &TimeCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -1622,61 +1795,60 @@ type ClusterSlotsCmd struct {
 	baseCmd[[]ClusterSlot]
 }
 
-func newClusterSlotsCmd(res valkey.ValkeyResult) *ClusterSlotsCmd {
-	cmd := &ClusterSlotsCmd{}
+func (cmd *ClusterSlotsCmd) from(res valkey.ValkeyResult) {
 	arr, err := res.ToArray()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	val := make([]ClusterSlot, 0, len(arr))
 	for _, v := range arr {
 		slot, err := v.ToArray()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		if len(slot) < 2 {
 			cmd.SetErr(fmt.Errorf("got %d, excpected atleast 2", len(slot)))
-			return cmd
+			return
 		}
 		start, err := slot[0].AsInt64()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		end, err := slot[1].AsInt64()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		nodes := make([]ClusterNode, len(slot)-2)
 		for i, j := 2, 0; i < len(slot); i, j = i+1, j+1 {
 			node, err := slot[i].ToArray()
 			if err != nil {
 				cmd.SetErr(err)
-				return cmd
+				return
 			}
 			if len(node) < 2 {
 				cmd.SetErr(fmt.Errorf("got %d, expected 2 or 3", len(node)))
-				return cmd
+				return
 			}
 			ip, err := node[0].ToString()
 			if err != nil {
 				cmd.SetErr(err)
-				return cmd
+				return
 			}
 			port, err := node[1].AsInt64()
 			if err != nil {
 				cmd.SetErr(err)
-				return cmd
+				return
 			}
 			nodes[j].Addr = net.JoinHostPort(ip, strconv.FormatInt(port, 10))
 			if len(node) > 2 {
 				id, err := node[2].ToString()
 				if err != nil {
 					cmd.SetErr(err)
-					return cmd
+					return
 				}
 				nodes[j].ID = id
 			}
@@ -1688,22 +1860,26 @@ func newClusterSlotsCmd(res valkey.ValkeyResult) *ClusterSlotsCmd {
 		})
 	}
 	cmd.SetVal(val)
+}
+
+func newClusterSlotsCmd(res valkey.ValkeyResult) *ClusterSlotsCmd {
+	cmd := &ClusterSlotsCmd{}
+	cmd.from(res)
 	return cmd
 }
 
-func newClusterShardsCmd(res valkey.ValkeyResult) *ClusterShardsCmd {
-	cmd := &ClusterShardsCmd{}
+func (cmd *ClusterShardsCmd) from(res valkey.ValkeyResult) {
 	arr, err := res.ToArray()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	val := make([]ClusterShard, 0, len(arr))
 	for _, v := range arr {
 		dict, err := v.ToMap()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		shard := ClusterShard{}
 		{
@@ -1719,19 +1895,19 @@ func newClusterShardsCmd(res valkey.ValkeyResult) *ClusterShardsCmd {
 			nodes, ok := dict["nodes"]
 			if !ok {
 				cmd.SetErr(errors.New("nodes not found"))
-				return cmd
+				return
 			}
 			arr, err := nodes.ToArray()
 			if err != nil {
 				cmd.SetErr(err)
-				return cmd
+				return
 			}
 			shard.Nodes = make([]Node, len(arr))
 			for i := 0; i < len(arr); i++ {
 				nodeMap, err := arr[i].ToMap()
 				if err != nil {
 					cmd.SetErr(err)
-					return cmd
+					return
 				}
 				for k, v := range nodeMap {
 					switch k {
@@ -1760,6 +1936,11 @@ func newClusterShardsCmd(res valkey.ValkeyResult) *ClusterShardsCmd {
 		val = append(val, shard)
 	}
 	cmd.SetVal(val)
+}
+
+func newClusterShardsCmd(res valkey.ValkeyResult) *ClusterShardsCmd {
+	cmd := &ClusterShardsCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -1795,12 +1976,11 @@ type GeoPosCmd struct {
 	baseCmd[[]*GeoPos]
 }
 
-func newGeoPosCmd(res valkey.ValkeyResult) *GeoPosCmd {
-	cmd := &GeoPosCmd{}
+func (cmd *GeoPosCmd) from(res valkey.ValkeyResult) {
 	arr, err := res.ToArray()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	val := make([]*GeoPos, 0, len(arr))
 	for _, v := range arr {
@@ -1811,21 +1991,21 @@ func newGeoPosCmd(res valkey.ValkeyResult) *GeoPosCmd {
 				continue
 			}
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		if len(loc) != 2 {
 			cmd.SetErr(fmt.Errorf("got %d, expected 2", len(loc)))
-			return cmd
+			return
 		}
 		long, err := loc[0].AsFloat64()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		lat, err := loc[1].AsFloat64()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		val = append(val, &GeoPos{
 			Longitude: long,
@@ -1833,6 +2013,11 @@ func newGeoPosCmd(res valkey.ValkeyResult) *GeoPosCmd {
 		})
 	}
 	cmd.SetVal(val)
+}
+
+func newGeoPosCmd(res valkey.ValkeyResult) *GeoPosCmd {
+	cmd := &GeoPosCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -1840,10 +2025,14 @@ type GeoLocationCmd struct {
 	baseCmd[[]valkey.GeoLocation]
 }
 
+func (cmd *GeoLocationCmd) from(res valkey.ValkeyResult) {
+	cmd.val, cmd.err = res.AsGeosearch()
+}
+
 func newGeoLocationCmd(res valkey.ValkeyResult) *GeoLocationCmd {
-	ret := &GeoLocationCmd{}
-	ret.val, ret.err = res.AsGeosearch()
-	return ret
+	cmd := &GeoLocationCmd{}
+	cmd.from(res)
+	return cmd
 }
 
 type CommandInfo struct {
@@ -1861,34 +2050,33 @@ type CommandsInfoCmd struct {
 	baseCmd[map[string]CommandInfo]
 }
 
-func newCommandsInfoCmd(res valkey.ValkeyResult) *CommandsInfoCmd {
-	cmd := &CommandsInfoCmd{}
+func (cmd *CommandsInfoCmd) from(res valkey.ValkeyResult) {
 	arr, err := res.ToArray()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	val := make(map[string]CommandInfo, len(arr))
 	for _, v := range arr {
 		info, err := v.ToArray()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		if len(info) < 6 {
 			cmd.SetErr(fmt.Errorf("got %d, wanted at least 6", len(info)))
-			return cmd
+			return
 		}
 		var _cmd CommandInfo
 		_cmd.Name, err = info[0].ToString()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		_cmd.Arity, err = info[1].AsInt64()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		_cmd.Flags, err = info[2].AsStrSlice()
 		if err != nil {
@@ -1896,23 +2084,23 @@ func newCommandsInfoCmd(res valkey.ValkeyResult) *CommandsInfoCmd {
 				_cmd.Flags = []string{}
 			} else {
 				cmd.SetErr(err)
-				return cmd
+				return
 			}
 		}
 		_cmd.FirstKeyPos, err = info[3].AsInt64()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		_cmd.LastKeyPos, err = info[4].AsInt64()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		_cmd.StepCount, err = info[5].AsInt64()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		for _, flag := range _cmd.Flags {
 			if flag == "readonly" {
@@ -1930,12 +2118,17 @@ func newCommandsInfoCmd(res valkey.ValkeyResult) *CommandsInfoCmd {
 				_cmd.ACLFlags = []string{}
 			} else {
 				cmd.SetErr(err)
-				return cmd
+				return
 			}
 		}
 		val[_cmd.Name] = _cmd
 	}
 	cmd.SetVal(val)
+}
+
+func newCommandsInfoCmd(res valkey.ValkeyResult) *CommandsInfoCmd {
+	cmd := &CommandsInfoCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -2228,12 +2421,11 @@ type FunctionListCmd struct {
 	baseCmd[[]Library]
 }
 
-func newFunctionListCmd(res valkey.ValkeyResult) *FunctionListCmd {
-	cmd := &FunctionListCmd{}
+func (cmd *FunctionListCmd) from(res valkey.ValkeyResult) {
 	arr, err := res.ToArray()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	val := make([]Library, len(arr))
 	for i := 0; i < len(arr); i++ {
@@ -2266,6 +2458,11 @@ func newFunctionListCmd(res valkey.ValkeyResult) *FunctionListCmd {
 		}
 	}
 	cmd.SetVal(val)
+}
+
+func newFunctionListCmd(res valkey.ValkeyResult) *FunctionListCmd {
+	cmd := &FunctionListCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -2320,12 +2517,11 @@ type MapStringInterfaceSliceCmd struct {
 	baseCmd[[]map[string]any]
 }
 
-func newMapStringInterfaceSliceCmd(res valkey.ValkeyResult) *MapStringInterfaceSliceCmd {
-	cmd := &MapStringInterfaceSliceCmd{}
+func (cmd *MapStringInterfaceSliceCmd) from(res valkey.ValkeyResult) {
 	arr, err := res.ToArray()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	cmd.val = make([]map[string]any, 0, len(arr))
 	for _, ele := range arr {
@@ -2333,7 +2529,7 @@ func newMapStringInterfaceSliceCmd(res valkey.ValkeyResult) *MapStringInterfaceS
 		eleMap := make(map[string]any, len(m))
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		for k, v := range m {
 			var val any
@@ -2342,13 +2538,18 @@ func newMapStringInterfaceSliceCmd(res valkey.ValkeyResult) *MapStringInterfaceS
 				val, err = v.ToAny()
 				if err != nil {
 					cmd.SetErr(err)
-					return cmd
+					return
 				}
 			}
 			eleMap[k] = val
 		}
 		cmd.val = append(cmd.val, eleMap)
 	}
+}
+
+func newMapStringInterfaceSliceCmd(res valkey.ValkeyResult) *MapStringInterfaceSliceCmd {
+	cmd := &MapStringInterfaceSliceCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -2391,17 +2592,16 @@ type BFInfoCmd struct {
 	baseCmd[BFInfo]
 }
 
-func newBFInfoCmd(res valkey.ValkeyResult) *BFInfoCmd {
-	cmd := &BFInfoCmd{}
+func (cmd *BFInfoCmd) from(res valkey.ValkeyResult) {
 	info := BFInfo{}
 	if err := res.Error(); err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	m, err := res.AsIntMap()
 	if err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	keys := make([]string, 0, len(m))
 	values := make([]any, 0, len(m))
@@ -2411,9 +2611,14 @@ func newBFInfoCmd(res valkey.ValkeyResult) *BFInfoCmd {
 	}
 	if err := Scan(&info, keys, values); err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	cmd.SetVal(info)
+}
+
+func newBFInfoCmd(res valkey.ValkeyResult) *BFInfoCmd {
+	cmd := &BFInfoCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -2426,17 +2631,16 @@ type ScanDumpCmd struct {
 	baseCmd[ScanDump]
 }
 
-func newScanDumpCmd(res valkey.ValkeyResult) *ScanDumpCmd {
-	cmd := &ScanDumpCmd{}
+func (cmd *ScanDumpCmd) from(res valkey.ValkeyResult) {
 	scanDump := ScanDump{}
 	if err := res.Error(); err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	arr, err := res.ToArray()
 	if err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	if len(arr) != 2 {
 		panic(fmt.Sprintf("wrong length of valkey message, got %v, want %v", len(arr), 2))
@@ -2444,16 +2648,21 @@ func newScanDumpCmd(res valkey.ValkeyResult) *ScanDumpCmd {
 	iter, err := arr[0].AsInt64()
 	if err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	data, err := arr[1].ToString()
 	if err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	scanDump.Iter = iter
 	scanDump.Data = data
 	cmd.SetVal(scanDump)
+}
+
+func newScanDumpCmd(res valkey.ValkeyResult) *ScanDumpCmd {
+	cmd := &ScanDumpCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -2472,13 +2681,12 @@ type CFInfoCmd struct {
 	baseCmd[CFInfo]
 }
 
-func newCFInfoCmd(res valkey.ValkeyResult) *CFInfoCmd {
-	cmd := &CFInfoCmd{}
+func (cmd *CFInfoCmd) from(res valkey.ValkeyResult) {
 	info := CFInfo{}
 	m, err := res.AsMap()
 	if err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	keys := make([]string, 0, len(m))
 	values := make([]any, 0, len(m))
@@ -2487,15 +2695,20 @@ func newCFInfoCmd(res valkey.ValkeyResult) *CFInfoCmd {
 		val, err := v.AsInt64()
 		if err != nil {
 			cmd.err = err
-			return cmd
+			return
 		}
 		values = append(values, strconv.FormatInt(val, 10))
 	}
 	if err := Scan(&info, keys, values); err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	cmd.SetVal(info)
+}
+
+func newCFInfoCmd(res valkey.ValkeyResult) *CFInfoCmd {
+	cmd := &CFInfoCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -2509,13 +2722,12 @@ type CMSInfoCmd struct {
 	baseCmd[CMSInfo]
 }
 
-func newCMSInfoCmd(res valkey.ValkeyResult) *CMSInfoCmd {
-	cmd := &CMSInfoCmd{}
+func (cmd *CMSInfoCmd) from(res valkey.ValkeyResult) {
 	info := CMSInfo{}
 	m, err := res.AsIntMap()
 	if err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	keys := make([]string, 0, len(m))
 	values := make([]any, 0, len(m))
@@ -2525,9 +2737,14 @@ func newCMSInfoCmd(res valkey.ValkeyResult) *CMSInfoCmd {
 	}
 	if err := Scan(&info, keys, values); err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	cmd.SetVal(info)
+}
+
+func newCMSInfoCmd(res valkey.ValkeyResult) *CMSInfoCmd {
+	cmd := &CMSInfoCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -2542,13 +2759,12 @@ type TopKInfoCmd struct {
 	baseCmd[TopKInfo]
 }
 
-func newTopKInfoCmd(res valkey.ValkeyResult) *TopKInfoCmd {
-	cmd := &TopKInfoCmd{}
+func (cmd *TopKInfoCmd) from(res valkey.ValkeyResult) {
 	info := TopKInfo{}
 	m, err := res.ToMap()
 	if err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	keys := make([]string, 0, len(m))
 	values := make([]any, 0, len(m))
@@ -2559,14 +2775,14 @@ func newTopKInfoCmd(res valkey.ValkeyResult) *TopKInfoCmd {
 			intVal, err := v.AsInt64()
 			if err != nil {
 				cmd.err = err
-				return cmd
+				return
 			}
 			values = append(values, strconv.FormatInt(intVal, 10))
 		case "decay":
 			decay, err := v.AsFloat64()
 			if err != nil {
 				cmd.err = err
-				return cmd
+				return
 			}
 			// args of strconv.FormatFloat is copied from cmds.TopkReserveParamsDepth.Decay
 			values = append(values, strconv.FormatFloat(decay, 'f', -1, 64))
@@ -2576,9 +2792,14 @@ func newTopKInfoCmd(res valkey.ValkeyResult) *TopKInfoCmd {
 	}
 	if err := Scan(&info, keys, values); err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	cmd.SetVal(info)
+}
+
+func newTopKInfoCmd(res valkey.ValkeyResult) *TopKInfoCmd {
+	cmd := &TopKInfoCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -2586,14 +2807,18 @@ type MapStringIntCmd struct {
 	baseCmd[map[string]int64]
 }
 
-func newMapStringIntCmd(res valkey.ValkeyResult) *MapStringIntCmd {
-	cmd := &MapStringIntCmd{}
+func (cmd *MapStringIntCmd) from(res valkey.ValkeyResult) {
 	m, err := res.AsIntMap()
 	if err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	cmd.SetVal(m)
+}
+
+func newMapStringIntCmd(res valkey.ValkeyResult) *MapStringIntCmd {
+	cmd := &MapStringIntCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -2614,13 +2839,12 @@ type TDigestInfoCmd struct {
 	baseCmd[TDigestInfo]
 }
 
-func newTDigestInfoCmd(res valkey.ValkeyResult) *TDigestInfoCmd {
-	cmd := &TDigestInfoCmd{}
+func (cmd *TDigestInfoCmd) from(res valkey.ValkeyResult) {
 	info := TDigestInfo{}
 	m, err := res.AsIntMap()
 	if err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	keys := make([]string, 0, len(m))
 	values := make([]any, 0, len(m))
@@ -2630,9 +2854,14 @@ func newTDigestInfoCmd(res valkey.ValkeyResult) *TDigestInfoCmd {
 	}
 	if err := Scan(&info, keys, values); err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	cmd.SetVal(info)
+}
+
+func newTDigestInfoCmd(res valkey.ValkeyResult) *TDigestInfoCmd {
+	cmd := &TDigestInfoCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -2736,17 +2965,16 @@ type TSTimestampValueCmd struct {
 	baseCmd[TSTimestampValue]
 }
 
-func newTSTimestampValueCmd(res valkey.ValkeyResult) *TSTimestampValueCmd {
-	cmd := &TSTimestampValueCmd{}
+func (cmd *TSTimestampValueCmd) from(res valkey.ValkeyResult) {
 	val := TSTimestampValue{}
 	if err := res.Error(); err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	arr, err := res.ToArray()
 	if err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	if len(arr) != 2 {
 		panic(fmt.Sprintf("wrong len of array reply, should be 2, got %v", len(arr)))
@@ -2754,14 +2982,19 @@ func newTSTimestampValueCmd(res valkey.ValkeyResult) *TSTimestampValueCmd {
 	val.Timestamp, err = arr[0].AsInt64()
 	if err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	val.Value, err = arr[1].AsFloat64()
 	if err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	cmd.SetVal(val)
+}
+
+func newTSTimestampValueCmd(res valkey.ValkeyResult) *TSTimestampValueCmd {
+	cmd := &TSTimestampValueCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -2769,12 +3002,11 @@ type MapStringInterfaceCmd struct {
 	baseCmd[map[string]any]
 }
 
-func newMapStringInterfaceCmd(res valkey.ValkeyResult) *MapStringInterfaceCmd {
-	cmd := &MapStringInterfaceCmd{}
+func (cmd *MapStringInterfaceCmd) from(res valkey.ValkeyResult) {
 	m, err := res.AsMap()
 	if err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	strIntMap := make(map[string]any, len(m))
 	for k, ele := range m {
@@ -2784,12 +3016,17 @@ func newMapStringInterfaceCmd(res valkey.ValkeyResult) *MapStringInterfaceCmd {
 			v, err = ele.ToAny()
 			if err != nil {
 				cmd.err = err
-				return cmd
+				return
 			}
 		}
 		strIntMap[k] = v
 	}
 	cmd.SetVal(strIntMap)
+}
+
+func newMapStringInterfaceCmd(res valkey.ValkeyResult) *MapStringInterfaceCmd {
+	cmd := &MapStringInterfaceCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -2797,33 +3034,37 @@ type TSTimestampValueSliceCmd struct {
 	baseCmd[[]TSTimestampValue]
 }
 
-func newTSTimestampValueSliceCmd(res valkey.ValkeyResult) *TSTimestampValueSliceCmd {
-	cmd := &TSTimestampValueSliceCmd{}
+func (cmd *TSTimestampValueSliceCmd) from(res valkey.ValkeyResult) {
 	msgSlice, err := res.ToArray()
 	if err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	tsValSlice := make([]TSTimestampValue, 0, len(msgSlice))
 	for i := 0; i < len(msgSlice); i++ {
 		msgArray, err := msgSlice[i].ToArray()
 		if err != nil {
 			cmd.err = err
-			return cmd
+			return
 		}
 		tstmp, err := msgArray[0].AsInt64()
 		if err != nil {
 			cmd.err = err
-			return cmd
+			return
 		}
 		val, err := msgArray[1].AsFloat64()
 		if err != nil {
 			cmd.err = err
-			return cmd
+			return
 		}
 		tsValSlice = append(tsValSlice, TSTimestampValue{Timestamp: tstmp, Value: val})
 	}
 	cmd.SetVal(tsValSlice)
+}
+
+func newTSTimestampValueSliceCmd(res valkey.ValkeyResult) *TSTimestampValueSliceCmd {
+	cmd := &TSTimestampValueSliceCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -2831,19 +3072,18 @@ type MapStringSliceInterfaceCmd struct {
 	baseCmd[map[string][]any]
 }
 
-func newMapStringSliceInterfaceCmd(res valkey.ValkeyResult) *MapStringSliceInterfaceCmd {
-	cmd := &MapStringSliceInterfaceCmd{}
+func (cmd *MapStringSliceInterfaceCmd) from(res valkey.ValkeyResult) {
 	m, err := res.ToMap()
 	if err != nil {
 		cmd.err = err
-		return cmd
+		return
 	}
 	mapStrSliceInt := make(map[string][]any, len(m))
 	for k, entry := range m {
 		vals, err := entry.ToArray()
 		if err != nil {
 			cmd.err = err
-			return cmd
+			return
 		}
 		anySlice := make([]any, 0, len(vals))
 		for _, v := range vals {
@@ -2851,13 +3091,18 @@ func newMapStringSliceInterfaceCmd(res valkey.ValkeyResult) *MapStringSliceInter
 			ele, err := v.ToAny()
 			if err != nil {
 				cmd.err = err
-				return cmd
+				return
 			}
 			anySlice = append(anySlice, ele)
 		}
 		mapStrSliceInt[k] = anySlice
 	}
 	cmd.SetVal(mapStrSliceInt)
+}
+
+func newMapStringSliceInterfaceCmd(res valkey.ValkeyResult) *MapStringSliceInterfaceCmd {
+	cmd := &MapStringSliceInterfaceCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -2970,12 +3215,11 @@ func (cmd *JSONCmd) Result() (string, error) {
 	return cmd.Val(), nil
 }
 
-func newJSONCmd(res valkey.ValkeyResult) *JSONCmd {
-	cmd := &JSONCmd{}
+func (cmd *JSONCmd) from(res valkey.ValkeyResult) {
 	msg, err := res.ToMessage()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	switch {
 	// JSON.GET
@@ -2984,7 +3228,7 @@ func newJSONCmd(res valkey.ValkeyResult) *JSONCmd {
 		str, err := res.ToString()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		cmd.SetVal(str)
 	// JSON.NUMINCRBY
@@ -2997,7 +3241,7 @@ func newJSONCmd(res valkey.ValkeyResult) *JSONCmd {
 		arr, err := res.ToArray()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		expanded := make([]any, len(arr))
 		for i, e := range arr {
@@ -3007,7 +3251,7 @@ func newJSONCmd(res valkey.ValkeyResult) *JSONCmd {
 					continue
 				}
 				cmd.SetErr(err)
-				return cmd
+				return
 			}
 			expanded[i] = anyE
 		}
@@ -3015,12 +3259,17 @@ func newJSONCmd(res valkey.ValkeyResult) *JSONCmd {
 		val, err := json.Marshal(cmd.expanded)
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		cmd.SetVal(string(val))
 	default:
 		panic("invalid type, expect array or string")
 	}
+}
+
+func newJSONCmd(res valkey.ValkeyResult) *JSONCmd {
+	cmd := &JSONCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -3034,27 +3283,31 @@ type IntPointerSliceCmd struct {
 	baseCmd[[]*int64]
 }
 
-// newIntPointerSliceCmd initialises an IntPointerSliceCmd
-func newIntPointerSliceCmd(res valkey.ValkeyResult) *IntPointerSliceCmd {
-	cmd := &IntPointerSliceCmd{}
+func (cmd *IntPointerSliceCmd) from(res valkey.ValkeyResult) {
 	arr, err := res.ToArray()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	intPtrSlice := make([]*int64, len(arr))
 	for i, e := range arr {
 		if e.IsNil() {
 			continue
 		}
-		len, err := e.ToInt64()
+		length, err := e.ToInt64()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
-		intPtrSlice[i] = &len
+		intPtrSlice[i] = &length
 	}
 	cmd.SetVal(intPtrSlice)
+}
+
+// newIntPointerSliceCmd initialises an IntPointerSliceCmd
+func newIntPointerSliceCmd(res valkey.ValkeyResult) *IntPointerSliceCmd {
+	cmd := &IntPointerSliceCmd{}
+	cmd.from(res)
 	return cmd
 }
 
@@ -3062,12 +3315,11 @@ type JSONSliceCmd struct {
 	baseCmd[[]any]
 }
 
-func newJSONSliceCmd(res valkey.ValkeyResult) *JSONSliceCmd {
-	cmd := &JSONSliceCmd{}
+func (cmd *JSONSliceCmd) from(res valkey.ValkeyResult) {
 	arr, err := res.ToArray()
 	if err != nil {
 		cmd.SetErr(err)
-		return cmd
+		return
 	}
 	anySlice := make([]any, len(arr))
 	for i, e := range arr {
@@ -3077,10 +3329,15 @@ func newJSONSliceCmd(res valkey.ValkeyResult) *JSONSliceCmd {
 		anyE, err := e.ToAny()
 		if err != nil {
 			cmd.SetErr(err)
-			return cmd
+			return
 		}
 		anySlice[i] = anyE
 	}
 	cmd.SetVal(anySlice)
+}
+
+func newJSONSliceCmd(res valkey.ValkeyResult) *JSONSliceCmd {
+	cmd := &JSONSliceCmd{}
+	cmd.from(res)
 	return cmd
 }
