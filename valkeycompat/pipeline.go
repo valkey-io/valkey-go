@@ -29,6 +29,7 @@ package valkeycompat
 import (
 	"context"
 	"errors"
+	"runtime"
 	"time"
 	"unsafe"
 
@@ -85,7 +86,7 @@ func (p *proxy) Do(_ context.Context, cmd valkey.Completed) valkey.ValkeyResult 
 }
 
 func newPipeline(real valkey.Client) *Pipeline {
-	return &Pipeline{comp: Compat{client: &proxy{Client: real}}}
+	return &Pipeline{comp: Compat{client: &proxy{Client: real}, maxp: runtime.GOMAXPROCS(0), pOnly: true}}
 }
 
 // Pipeline implements pipelining as described in
