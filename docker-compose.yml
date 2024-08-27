@@ -2,11 +2,11 @@ version: "3.8"
 
 services:
   valkey:
-    image: valkey/valkey:7.2-alpine
+    image: valkey/valkey:8.0-alpine
     ports:
       - "6379:6379"
   valkeylock:
-    image: valkey/valkey:7.2-alpine
+    image: valkey/valkey:8.0-alpine
     ports:
       - "6376:6379"
   redis5:
@@ -30,7 +30,7 @@ services:
     ports:
       - "6377:6379"
   compat:
-    image: redis/redis-stack:7.2.0-v3
+    image: redis/redis-stack:7.4.0-v0
     ports:
       - "6378:6379"
   compat5:
@@ -38,7 +38,7 @@ services:
     ports:
       - "6356:6379"
   sentinel:
-    image: valkey/valkey:7.2-alpine
+    image: valkey/valkey:8.0-alpine
     entrypoint:
       - /bin/sh
       - -c
@@ -62,7 +62,7 @@ services:
       - "6385:6385"
       - "26355:26379"
   cluster:
-    image: valkey/valkey:7.2-alpine
+    image: valkey/valkey:8.0-alpine
     entrypoint:
       - /bin/sh
       - -c
@@ -107,7 +107,7 @@ services:
       - "7008:7008"
       - "7009:7009"
   clusteradapter:
-    image: valkey/valkey:7.2-alpine
+    image: valkey/valkey:8.0-alpine
     entrypoint:
       - /bin/sh
       - -c
