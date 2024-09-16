@@ -655,7 +655,7 @@ func testPubSub(t *testing.T, client Client) {
 		for _, resp := range c.DoMulti(context.Background(),
 			client.B().Unsubscribe().Channel("ch1").Build(),
 			client.B().Punsubscribe().Pattern("pat*").Build()) {
-			if err := resp.Error(); err != nil {
+			if err := resp.NonValkeyError(); err != nil { // valkey can return -NOSUB error here. We should ignore it.
 				t.Fatal(err)
 			}
 		}
