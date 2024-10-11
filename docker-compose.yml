@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   valkey:
     image: valkey/valkey:8.0-alpine
