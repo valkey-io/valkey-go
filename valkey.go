@@ -46,6 +46,8 @@ var (
 	ErrNoCache = errors.New("ClientOption.DisableCache must be true for valkey not supporting client-side caching or not supporting RESP3")
 	// ErrRESP2PubSubMixed means your valkey does not support RESP3 and valkey can't handle SUBSCRIBE/PSUBSCRIBE/SSUBSCRIBE in mixed case
 	ErrRESP2PubSubMixed = errors.New("valkey does not support SUBSCRIBE/PSUBSCRIBE/SSUBSCRIBE mixed with other commands in RESP2")
+	// ErrBlockingPubSubMixed valkey can't handle SUBSCRIBE/PSUBSCRIBE/SSUBSCRIBE mixed with other blocking commands
+	ErrBlockingPubSubMixed = errors.New("valkey does not support SUBSCRIBE/PSUBSCRIBE/SSUBSCRIBE mixed with other blocking commands")
 	// ErrDoCacheAborted means valkey abort EXEC request or connection closed
 	ErrDoCacheAborted = errors.New("failed to fetch the cache because EXEC was aborted by valkey or connection closed")
 	// ErrReplicaOnlyNotSupported means ReplicaOnly flag is not supported by
@@ -171,6 +173,8 @@ type ClientOption struct {
 	RetryDelay RetryDelayFn
 	// DisableCache falls back Client.DoCache/Client.DoMultiCache to Client.Do/Client.DoMulti
 	DisableCache bool
+	// DisableAutoPipelining makes valkey.Client always pick a connection from the BlockingPool to serve each request.
+	DisableAutoPipelining bool
 	// AlwaysPipelining makes valkey.Client always pipeline valkey commands even if they are not issued concurrently.
 	AlwaysPipelining bool
 	// AlwaysRESP2 makes valkey.Client always uses RESP2, otherwise it will try using RESP3 first.
@@ -357,6 +361,9 @@ func NewClient(option ClientOption) (client Client, err error) {
 	}
 	if option.BlockingPipeline == 0 {
 		option.BlockingPipeline = DefaultBlockingPipeline
+	}
+	if option.DisableAutoPipelining {
+		option.AlwaysPipelining = false
 	}
 	if option.ShuffleInit {
 		util.Shuffle(len(option.InitAddress), func(i, j int) {
