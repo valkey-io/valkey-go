@@ -272,7 +272,7 @@ func TestNewHashRepository(t *testing.T) {
 			}
 			err = repo.AlterIndex(ctx, func(alter FtAlterIndex) valkey.Completed {
 				return alter.
-					Schema().Add().Field("JSON").Options("TEXT").
+					Schema().Add().Field("JSON").Options("TEXT", "SORTABLE").
 					Build()
 			})
 			if err != nil {
