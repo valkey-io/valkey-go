@@ -232,7 +232,7 @@ var shardsResp = newResult(ValkeyMessage{typ: typeArray, values: []ValkeyMessage
 				{typ: typeInteger, integer: 72156},
 
 				{typ: typeBlobString, string: "health"},
-				{typ: typeBlobString, string: "failed"},
+				{typ: typeBlobString, string: "fail"},
 			}},
 			{typ: typeMap, values: []ValkeyMessage{ // master
 				{typ: typeBlobString, string: "id"},
@@ -336,7 +336,7 @@ var shardsRespTls = newResult(ValkeyMessage{typ: typeArray, values: []ValkeyMess
 				{typ: typeInteger, integer: 72156},
 
 				{typ: typeBlobString, string: "health"},
-				{typ: typeBlobString, string: "failed"},
+				{typ: typeBlobString, string: "fail"},
 			}},
 			{typ: typeMap, values: []ValkeyMessage{ // master, tls + port
 				{typ: typeBlobString, string: "id"},
@@ -418,7 +418,7 @@ var shardsMultiResp = newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 				{typ: typeInteger, integer: 72156},
 
 				{typ: typeBlobString, string: "health"},
-				{typ: typeBlobString, string: "failed"},
+				{typ: typeBlobString, string: "fail"},
 			}},
 			{typ: typeMap, values: []ValkeyMessage{ // master
 				{typ: typeBlobString, string: "id"},
@@ -494,7 +494,7 @@ var shardsMultiResp = newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage{
 				{typ: typeInteger, integer: 72156},
 
 				{typ: typeBlobString, string: "health"},
-				{typ: typeBlobString, string: "failed"},
+				{typ: typeBlobString, string: "fail"},
 			}},
 			{typ: typeMap, values: []ValkeyMessage{ // master
 				{typ: typeBlobString, string: "id"},
@@ -573,7 +573,7 @@ var singleShardResp2 = newResult(ValkeyMessage{typ: '*', values: []ValkeyMessage
 				{typ: typeInteger, integer: 72156},
 
 				{typ: typeBlobString, string: "health"},
-				{typ: typeBlobString, string: "failed"},
+				{typ: typeBlobString, string: "fail"},
 			}},
 			{typ: typeMap, values: []ValkeyMessage{ // master
 				{typ: typeBlobString, string: "id"},
@@ -630,7 +630,7 @@ var singleShardWithoutIP = newResult(ValkeyMessage{typ: typeArray, values: []Val
 				{typ: typeInteger, integer: 72156},
 
 				{typ: typeBlobString, string: "health"},
-				{typ: typeBlobString, string: "failed"},
+				{typ: typeBlobString, string: "fail"},
 			}},
 			{typ: typeMap, values: []ValkeyMessage{ // master
 				{typ: typeBlobString, string: "id"},
