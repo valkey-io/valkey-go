@@ -92,6 +92,11 @@ func (r *ValkeyError) IsTryAgain() bool {
 	return strings.HasPrefix(r.string, "TRYAGAIN")
 }
 
+// IsLoading checks if it is a valkey LOADING message
+func (r *ValkeyError) IsLoading() bool {
+	return strings.HasPrefix(r.string, "LOADING")
+}
+
 // IsClusterDown checks if it is a valkey CLUSTERDOWN message and returns ask address.
 func (r *ValkeyError) IsClusterDown() bool {
 	return strings.HasPrefix(r.string, "CLUSTERDOWN")
