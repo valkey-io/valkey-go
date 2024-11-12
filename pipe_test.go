@@ -4038,7 +4038,7 @@ func TestWriteDeadlineIsNoShorterThanContextDeadlineInSyncMode_DoBlocked(t *test
 	defer cancel()
 
 	startTime := time.Now()
-	if err := p.Do(ctx, cmds.NewBlockingCompleted([]string{"BLPOP", "a"})).NonRedisError(); !errors.Is(err, context.DeadlineExceeded) {
+	if err := p.Do(ctx, cmds.NewBlockingCompleted([]string{"BLPOP", "a"})).NonValkeyError(); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("unexpected err %v", err)
 	}
 
@@ -4103,7 +4103,7 @@ func TestWriteDeadlineIsNoShorterThanContextDeadlineInSyncMode_DoMultiBlocked(t 
 	defer cancel()
 
 	startTime := time.Now()
-	if err := p.DoMulti(ctx, cmds.NewBlockingCompleted([]string{"BLPOP", "a"})).s[0].NonRedisError(); !errors.Is(err, context.DeadlineExceeded) {
+	if err := p.DoMulti(ctx, cmds.NewBlockingCompleted([]string{"BLPOP", "a"})).s[0].NonValkeyError(); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("unexpected err %v", err)
 	}
 
