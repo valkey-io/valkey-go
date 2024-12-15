@@ -1,6 +1,8 @@
 package valkey
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -529,7 +531,105 @@ type ValkeyMessage struct {
 	ttl     [7]byte
 }
 
-// IsNil check if message is a valkey nil response
+func (m *ValkeyMessage) cachesize() int {
+	n := 9 // typ (1) + length (8) TODO: can we use VarInt instead of fixed 8 bytes for length?
+	switch m.typ {
+	case typeInteger, typeNull, typeBool:
+	case typeArray, typeMap, typeSet:
+		for _, val := range m.values {
+			n += val.cachesize()
+		}
+	default:
+		n += len(m.string)
+	}
+	return n
+}
+
+func (m *ValkeyMessage) serialize(o *bytes.Buffer) {
+	var buf [8]byte // TODO: can we use VarInt instead of fixed 8 bytes for length?
+	o.WriteByte(m.typ)
+	switch m.typ {
+	case typeInteger, typeNull, typeBool:
+		binary.BigEndian.PutUint64(buf[:], uint64(m.integer))
+		o.Write(buf[:])
+	case typeArray, typeMap, typeSet:
+		binary.BigEndian.PutUint64(buf[:], uint64(len(m.values)))
+		o.Write(buf[:])
+		for _, val := range m.values {
+			val.serialize(o)
+		}
+	default:
+		binary.BigEndian.PutUint64(buf[:], uint64(len(m.string)))
+		o.Write(buf[:])
+		o.WriteString(m.string)
+	}
+}
+
+var ErrCacheUnmarshal = errors.New("cache unmarshal error")
+
+func (m *ValkeyMessage) unmarshalView(c int64, buf []byte) (int64, error) {
+	var err error
+	if int64(len(buf)) < c+9 {
+		return 0, ErrCacheUnmarshal
+	}
+	m.typ = buf[c]
+	c += 1
+	m.integer = int64(binary.BigEndian.Uint64(buf[c : c+8]))
+	c += 8 // TODO: can we use VarInt instead of fixed 8 bytes for length?
+	switch m.typ {
+	case typeInteger, typeNull, typeBool:
+	case typeArray, typeMap, typeSet:
+		m.values = make([]ValkeyMessage, m.integer)
+		m.integer = 0
+		for i := range m.values {
+			if c, err = m.values[i].unmarshalView(c, buf); err != nil {
+				break
+			}
+		}
+	default:
+		if int64(len(buf)) < c+m.integer {
+			return 0, ErrCacheUnmarshal
+		}
+		m.string = BinaryString(buf[c : c+m.integer])
+		c += m.integer
+		m.integer = 0
+	}
+	return c, err
+}
+
+// CacheSize returns the buffer size needed by the CacheMarshal.
+func (m *ValkeyMessage) CacheSize() int {
+	return m.cachesize() + 7 // 7 for ttl
+}
+
+// CacheMarshal writes serialized ValkeyMessage to the provided buffer.
+// If the provided buffer is nil, CacheMarshal will allocate one.
+// Note that output format is not compatible with different client versions.
+func (m *ValkeyMessage) CacheMarshal(buf []byte) []byte {
+	if buf == nil {
+		buf = make([]byte, 0, m.CacheSize())
+	}
+	o := bytes.NewBuffer(buf)
+	o.Write(m.ttl[:7])
+	m.serialize(o)
+	return o.Bytes()
+}
+
+// CacheUnmarshalView construct the ValkeyMessage from the buffer produced by CacheMarshal.
+// Note that the buffer can't be reused after CacheUnmarshalView since it uses unsafe.String on top of the buffer.
+func (m *ValkeyMessage) CacheUnmarshalView(buf []byte) error {
+	if len(buf) < 7 {
+		return ErrCacheUnmarshal
+	}
+	copy(m.ttl[:7], buf[:7])
+	if _, err := m.unmarshalView(7, buf); err != nil {
+		return err
+	}
+	m.attrs = cacheMark
+	return nil
+}
+
+// IsNil check if message is a redis nil response
 func (m *ValkeyMessage) IsNil() bool {
 	return m.typ == typeNull
 }
