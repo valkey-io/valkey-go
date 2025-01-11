@@ -12,7 +12,7 @@ import (
 
 var (
 	ErrInvalidTokens   = errors.New("number of tokens must be non-negative")
-	ErrInvalidResponse = errors.New("invalid response from Redis")
+	ErrInvalidResponse = errors.New("invalid response from Valkey")
 )
 
 type Result struct {

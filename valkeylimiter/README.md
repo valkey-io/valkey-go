@@ -1,13 +1,13 @@
 
 # valkeylimiter
 
-This module provides an interface for token bucket rate limiting with precise control over limits and time windows. Inspired by GitHub's approach to scaling their API with a sharded, replicated rate limiter in Redis ([github.blog](https://github.blog/engineering/infrastructure/how-we-scaled-github-api-sharded-replicated-rate-limiter-redis/)).
+This module provides an interface for token bucket rate limiting with precise control over limits and time windows. Inspired by GitHub's approach to scaling their API with a sharded, replicated rate limiter in Valkey ([github.blog](https://github.blog/engineering/infrastructure/how-we-scaled-github-api-sharded-replicated-rate-limiter-redis/)).
 
 ## Features
 
 - **Token Bucket Algorithm**: Implements a token bucket algorithm to control the number of actions (e.g., API requests) a user can perform within a specified time window.
 - **Customizable Limits**: Allows configuration of request limits and time windows to suit various application requirements.
-- **Distributed Rate Limiting**: Leverages Redis to maintain rate limit counters, ensuring consistency across distributed environments.
+- **Distributed Rate Limiting**: Leverages Valkey to maintain rate limit counters, ensuring consistency across distributed environments.
 - **Reset Information**: Provides `ResetAtMs` timestamps to inform clients when they can retry requests.
 
 ## Installation
@@ -86,8 +86,8 @@ func main() {
 
 Creates a new rate limiter with the specified options:
 
-- `ClientOption`: Options to connect to Redis.
-- `KeyPrefix`: Prefix for Redis keys used by this limiter.
+- `ClientOption`: Options to connect to Valkey.
+- `KeyPrefix`: Prefix for Valkey keys used by this limiter.
 - `Limit`: Maximum number of allowed requests per window.
 - `Window`: Time window duration for rate limiting. Must be greater than 1 millisecond.
 
@@ -134,8 +134,8 @@ result, err := limiter.AllowN(ctx, "user_identifier", 3)
 
 ## Implementation Details
 
-The `valkeylimiter` module employs Lua scripts executed within Redis to ensure atomic operations for checking and updating rate limits. This approach minimizes race conditions and maintains consistency across distributed systems.
+The `valkeylimiter` module employs Lua scripts executed within Valkey to ensure atomic operations for checking and updating rate limits. This approach minimizes race conditions and maintains consistency across distributed systems.
 
-By utilizing Redis's expiration capabilities, the module automatically resets rate limits after the specified time window, ensuring efficient memory usage and accurate rate limiting behavior.
+By utilizing Valkey's expiration capabilities, the module automatically resets rate limits after the specified time window, ensuring efficient memory usage and accurate rate limiting behavior.
 
-For more information on the design and implementation of Redis-based rate limiters, refer to GitHub's detailed account of scaling their API with a sharded, replicated rate limiter in Redis ([github.blog](https://github.blog/engineering/infrastructure/how-we-scaled-github-api-sharded-replicated-rate-limiter-redis/)).
+For more information on the design and implementation of Valkey-based rate limiters, refer to GitHub's detailed account of scaling their API with a sharded, replicated rate limiter in Valkey ([github.blog](https://github.blog/engineering/infrastructure/how-we-scaled-github-api-sharded-replicated-rate-limiter-redis/)).
