@@ -21,6 +21,7 @@ A fast Golang Valkey client that does auto pipelining and supports server-assist
 * Pub/Sub, Sharded Pub/Sub, Streams
 * Valkey Cluster, Sentinel, RedisJSON, RedisBloom, RediSearch, RedisTimeseries, etc.
 * [Probabilistic Data Structures without Redis Stack](./valkeyprob)
+* [Availability zone affinity routing](#availability-zone-affinity-routing)
 
 ---
 
@@ -411,6 +412,26 @@ client, err = valkey.NewClient(valkey.MustParseURL("redis://127.0.0.1:6379/0"))
 client, err = valkey.NewClient(valkey.MustParseURL("redis://127.0.0.1:26379/0?master_set=my_master"))
 ```
 
+### Availability Zone Affinity Routing
+
+Starting from Valkey 8.1, Valkey server provides the `availability-zone` information for clients to know where the server is located.
+For using this information to route requests to the replica located in the same availability zone,
+set the `EnableReplicaAZInfo` option and your `ReplicaSelector` function. For example:
+
+```go
+client, err := valkey.NewClient(valkey.ClientOption{
+	InitAddress:         []string{"address.example.com:6379"},
+	EnableReplicaAZInfo: true,
+	ReplicaSelector: func(slot uint16, replicas []valkey.ReplicaInfo) int {
+		for i, replica := range replicas {
+			if replica.AZ == "us-east-1a" {
+				return i // return the index of the replica.
+			}
+		}
+		return -1 // send to the primary.
+	},
+})
+```
 
 ## Arbitrary Command
 
