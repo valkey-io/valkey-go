@@ -5063,18 +5063,9 @@
             "token": "XX"
           },
           {
-            "type": "block",
-            "arguments": [
-              {
-                "name": "ifeq",
-                "type": "pure-token",
-                "token": "IFEQ"
-              },
-              {
-                "name": "comparison-value",
-                "type": "string"
-              }
-            ]
+            "name": "ifeq",
+            "type": "string",
+            "token": "IFEQ"
           }
         ],
         "optional": true
