@@ -595,6 +595,12 @@ if err := valkey.DecodeSliceOfJSON(client.Do(ctx, client.B().Mget().Key("user1")
 Contributions are welcome, including [issues](https://github.com/valkey-io/valkey-go/issues), [pull requests](https://github.com/valkey-io/valkey-go/pulls), and [discussions](https://github.com/valkey-io/valkey-go/discussions).
 Contributions mean a lot to us and help us improve this library and the community!
 
+Thanks to all the people who already contributed!
+
+<a href="https://github.com/valkey-io/valkey-go/graphs/contributors">
+  <img src="https://contributors-img.web.app/image?repo=valkey-io/valkey-go" />
+</a>
+
 ### Generate Command Builders
 
 Command builders are generated based on the definitions in [./hack/cmds](./hack/cmds) by running:
