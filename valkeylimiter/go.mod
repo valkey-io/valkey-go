@@ -1,6 +1,6 @@
 module github.com/valkey-io/valkey-go/valkeylimiter
 
-go 1.21
+go 1.22.0
 
 replace github.com/valkey-io/valkey-go => ../
 
