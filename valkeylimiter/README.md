@@ -37,13 +37,6 @@ import (
 )
 
 func main() {
-	client, err := valkey.NewClient(valkey.ClientOption{
-		InitAddress: []string{"localhost:6379"},
-	})
-	if err != nil {
-		panic(err)
-	}
-
 	// Initialize a new rate limiter with a limit of 5 requests per minute
 	limiter, err := valkeylimiter.NewRateLimiter(valkeylimiter.RateLimiterOption{
 		ClientOption: valkey.ClientOption{InitAddress: []string{"localhost:6379"}},
