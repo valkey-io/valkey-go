@@ -153,6 +153,10 @@ type CountingBloomFilter interface {
 type countingBloomFilter struct {
 	client valkey.Client
 
+	addMultiScript *valkey.Lua
+
+	removeMultiScript *valkey.Lua
+
 	// name is the name of the Counting Bloom Filter.
 	// It is used as a key in the Valkey.
 	name string
@@ -160,18 +164,17 @@ type countingBloomFilter struct {
 	// counter is the name of the counter.
 	counter string
 
-	// hashIterations is the number of hash functions to use.
-	hashIterations      uint
 	hashIterationString string
+
+	addMultiKeys []string
+
+	removeMultiKeys []string
+
+	// hashIterations is the number of hash functions to use.
+	hashIterations uint
 
 	// size is the number of bits to use.
 	size uint
-
-	addMultiScript *valkey.Lua
-	addMultiKeys   []string
-
-	removeMultiScript *valkey.Lua
-	removeMultiKeys   []string
 }
 
 // NewCountingBloomFilter creates a new Counting Bloom Filter.

@@ -37,8 +37,8 @@ type rateLimiter struct {
 
 type RateLimiterOption struct {
 	ClientBuilder func(option valkey.ClientOption) (valkey.Client, error)
-	ClientOption  valkey.ClientOption
 	KeyPrefix     string
+	ClientOption  valkey.ClientOption
 	Limit         int
 	Window        time.Duration
 }

@@ -159,6 +159,10 @@ type BloomFilter interface {
 type bloomFilter struct {
 	client valkey.Client
 
+	addMultiScript *valkey.Lua
+
+	existsMultiScript *valkey.Lua
+
 	// name is the name of the Bloom filter.
 	// It is used as a key in the Valkey.
 	name string
@@ -166,18 +170,17 @@ type bloomFilter struct {
 	// counter is the name of the counter.
 	counter string
 
-	// hashIterations is the number of hash functions to use.
-	hashIterations      uint
 	hashIterationString string
+
+	addMultiKeys []string
+
+	existsMultiKeys []string
+
+	// hashIterations is the number of hash functions to use.
+	hashIterations uint
 
 	// size is the number of bits to use.
 	size uint
-
-	addMultiScript *valkey.Lua
-	addMultiKeys   []string
-
-	existsMultiScript *valkey.Lua
-	existsMultiKeys   []string
 }
 
 // NewBloomFilter creates a new Bloom filter.

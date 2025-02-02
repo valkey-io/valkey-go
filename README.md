@@ -133,7 +133,7 @@ client.DoMultiCache(ctx,
     valkey.CT(client.B().Get().Key("k2").Cache(), 2*time.Minute))
 ```
 
-Cached responses, including Redis Nils, will be invalidated either when being notified by valkey servers or when their client-side TTLs are reached. See https://github.com/redis/rueidis/issues/534 for more details.
+Cached responses, including Valkey Nils, will be invalidated either when being notified by valkey servers or when their client-side TTLs are reached. See https://github.com/redis/rueidis/issues/534 for more details.
 
 ### Benchmark
 

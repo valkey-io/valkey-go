@@ -36,16 +36,16 @@ import (
 	"github.com/valkey-io/valkey-go"
 )
 
-// Pipeliner is a mechanism to realise Redis Pipeline technique.
+// Pipeliner is a mechanism to realise Valkey Pipeline technique.
 //
 // Pipelining is a technique to extremely speed up processing by packing
-// operations to batches, send them at once to Redis and read a replies in a
+// operations to batches, send them at once to Valkey and read a replies in a
 // single step.
-// See https://redis.io/topics/pipelining
+// See https://valkey.io/topics/pipelining
 //
 // Pay attention, that Pipeline is not a transaction, so you can get unexpected
 // results in case of big pipelines and small read/write timeouts.
-// Redis client has retransmission logic in case of timeouts, pipeline
+// Valkey client has retransmission logic in case of timeouts, pipeline
 // can be retransmitted and commands can be executed more then once.
 // To avoid this: it is good idea to use reasonable bigger read/write timeouts
 // depends on your batch size and/or use TxPipeline.
@@ -56,7 +56,7 @@ type Pipeliner interface {
 	Len() int
 
 	// Do is an API for executing any command.
-	// If a certain Redis command is not yet supported, you can use Do to execute it.
+	// If a certain Valkey command is not yet supported, you can use Do to execute it.
 	Do(ctx context.Context, args ...interface{}) *Cmd
 
 	// Discard is to discard all commands in the cache that have not yet been executed.

@@ -629,7 +629,7 @@ func (m *ValkeyMessage) CacheUnmarshalView(buf []byte) error {
 	return nil
 }
 
-// IsNil check if message is a redis nil response
+// IsNil check if message is a valkey nil response
 func (m *ValkeyMessage) IsNil() bool {
 	return m.typ == typeNull
 }

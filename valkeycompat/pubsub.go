@@ -114,8 +114,6 @@ func newPubSub(client valkey.Client) *pubsub {
 }
 
 type pubsub struct {
-	mu sync.Mutex
-
 	rc      valkey.Client
 	mc      valkey.DedicatedClient
 	mcancel func()
@@ -126,6 +124,7 @@ type pubsub struct {
 
 	allCh chan any
 	msgCh chan *Message
+	mu    sync.Mutex
 }
 
 func (p *pubsub) mconn() valkey.DedicatedClient {

@@ -63,11 +63,11 @@ Please note that when the client-side caching is disabled, valkeylock will only 
 ▶ go test -bench=. -benchmem -run=.
 goos: darwin
 goarch: arm64
-pkg: rueidis-benchmark/locker
-Benchmark/rueidislock-10         	   20103	     57842 ns/op	    1849 B/op	      29 allocs/op
+pkg: valkey-benchmark/locker
+Benchmark/valkeylock-10         	   20103	     57842 ns/op	    1849 B/op	      29 allocs/op
 Benchmark/redislock-10           	   13209	     86285 ns/op	    8083 B/op	     225 allocs/op
 PASS
-ok  	rueidis-benchmark/locker	3.782s
+ok  	valkey-benchmark/locker	3.782s
 ```
 
 ```go
@@ -80,14 +80,14 @@ import (
 
 	"github.com/bsm/redislock"
 	"github.com/redis/go-redis/v9"
-	"github.com/redis/rueidis"
-	"github.com/redis/rueidis/rueidislock"
+	"github.com/valkey-io/valkey-go"
+	"github.com/valkey-io/valkey-go/valkeylock"
 )
 
 func Benchmark(b *testing.B) {
-	b.Run("rueidislock", func(b *testing.B) {
-		l, _ := rueidislock.NewLocker(rueidislock.LockerOption{
-			ClientOption:   rueidis.ClientOption{InitAddress: []string{"127.0.0.1:6379"}},
+	b.Run("valkeylock", func(b *testing.B) {
+		l, _ := valkeylock.NewLocker(valkeylock.LockerOption{
+			ClientOption:   valkey.ClientOption{InitAddress: []string{"127.0.0.1:6379"}},
 			KeyMajority:    1,
 			NoLoopTracking: true,
 		})
