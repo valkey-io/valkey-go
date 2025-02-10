@@ -21,6 +21,9 @@ type RetryDelayFn func(attempts int, cmd Completed, err error) time.Duration
 // max delay is 1 second.
 // This "Equal Jitter" delay produced by this implementation is not monotonic increasing. ref: https://aws.amazon.com/ko/blogs/architecture/exponential-backoff-and-jitter/
 func defaultRetryDelayFn(attempts int, _ Completed, _ error) time.Duration {
+	if attempts >= defaultMaxRetries{
+		return -1	
+	}
 	base := 1 << min(defaultMaxRetries, attempts)
 	jitter := util.FastRand(base)
 	return min(defaultMaxRetryDelay, time.Duration(base+jitter)*time.Microsecond)
