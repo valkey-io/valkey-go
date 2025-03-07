@@ -60,6 +60,10 @@ func (m *Client) B() valkey.Builder {
 	return cmds.NewBuilder(m.slot)
 }
 
+func (m *Client) Mode() valkey.ClientMode {
+	return valkey.ClientModeStandalone
+}
+
 // Close mocks base method.
 func (m *Client) Close() {
 	m.ctrl.T.Helper()

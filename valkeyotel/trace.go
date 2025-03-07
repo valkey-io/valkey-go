@@ -203,6 +203,10 @@ func (o *otelclient) Nodes() map[string]valkey.Client {
 	return nodes
 }
 
+func (o *otelclient) Mode() valkey.ClientMode {
+	return o.client.Mode()
+}
+
 func (o *otelclient) Close() {
 	o.client.Close()
 }

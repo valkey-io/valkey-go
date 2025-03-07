@@ -82,6 +82,10 @@ func (c *hookclient) Nodes() map[string]valkey.Client {
 	return nodes
 }
 
+func (c *hookclient) Mode() valkey.ClientMode {
+	return c.client.Mode()
+}
+
 func (c *hookclient) Close() {
 	c.client.Close()
 }
@@ -148,6 +152,10 @@ func (e *extended) Dedicate() (client valkey.DedicatedClient, cancel func()) {
 
 func (e *extended) Nodes() map[string]valkey.Client {
 	panic("Nodes() is not allowed with valkey.DedicatedClient")
+}
+
+func (e *extended) Mode() valkey.ClientMode {
+	panic("Mode() is not allowed with valkey.DedicatedClient")
 }
 
 type result struct {
