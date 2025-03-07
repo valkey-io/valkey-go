@@ -114,6 +114,10 @@ func TestWithClient(t *testing.T) {
 func testWithClient(t *testing.T, client valkey.Client, exp *tracetest.InMemoryExporter, mxp metric.Reader) {
 	ctx := context.Background()
 
+	if client.Mode() != valkey.ClientModeStandalone {
+		t.Fatalf("client mode is not standalone")
+	}
+
 	// test empty trace
 	var emptyCompletedArr []valkey.Completed
 	resps := client.DoMulti(ctx, emptyCompletedArr...)

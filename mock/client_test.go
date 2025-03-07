@@ -18,6 +18,12 @@ func TestNewClient(t *testing.T) {
 	ctx := context.Background()
 	client := NewClient(ctrl)
 	{
+		client.EXPECT().Mode().Return(valkey.ClientModeStandalone)
+		if mode := client.Mode(); mode != valkey.ClientModeStandalone {
+			t.Fatalf("unexpected val %v", mode)
+		}
+	}
+	{
 		client.EXPECT().Do(ctx, Match("GET", "a")).Return(Result(ValkeyNil()))
 		if err := client.Do(ctx, client.B().Get().Key("a").Build()).Error(); !valkey.IsValkeyNil(err) {
 			t.Fatalf("unexpected err %v", err)

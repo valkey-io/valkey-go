@@ -78,6 +78,12 @@ func (w *wronghook) DoMultiStream(client valkey.Client, ctx context.Context, mul
 func testHooked(t *testing.T, hooked valkey.Client, mocked *mock.Client) {
 	ctx := context.Background()
 	{
+		mocked.EXPECT().Mode().Return(valkey.ClientModeStandalone)
+		if mode := hooked.Mode(); mode != valkey.ClientModeStandalone {
+			t.Fatalf("unexpected mode %v", mode)
+		}
+	}
+	{
 		mocked.EXPECT().Do(ctx, mock.Match("GET", "a")).Return(mock.Result(mock.ValkeyNil()))
 		if err := hooked.Do(ctx, hooked.B().Get().Key("a").Build()).Error(); !valkey.IsValkeyNil(err) {
 			t.Fatalf("unexpected err %v", err)
@@ -247,6 +253,12 @@ func TestForbiddenMethodForDedicatedClient(t *testing.T) {
 		fn  func(client valkey.Client)
 		msg string
 	}{
+		{
+			fn: func(client valkey.Client) {
+				client.Mode()
+			},
+			msg: "Mode() is not allowed with valkey.DedicatedClient",
+		},
 		{
 			fn: func(client valkey.Client) {
 				client.DoCache(context.Background(), client.B().Get().Key("").Cache(), time.Second)
