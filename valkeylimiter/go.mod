@@ -2,8 +2,6 @@ module github.com/valkey-io/valkey-go/valkeylimiter
 
 go 1.22.0
 
-toolchain go1.24.1
-
 replace github.com/valkey-io/valkey-go => ../
 
 replace github.com/valkey-io/valkey-go/mock => ../mock
