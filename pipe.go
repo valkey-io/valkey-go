@@ -90,7 +90,7 @@ type pipe struct {
 	recvs           int32
 	r2ps            bool // identify this pipe is used for resp2 pubsub or not
 	noNoDelay       bool
-	optin           bool
+	optIn           bool
 }
 
 type pipeFn func(ctx context.Context, connFn func(ctx context.Context) (net.Conn, error), option *ClientOption) (p *pipe, err error)
@@ -119,7 +119,7 @@ func _newPipe(ctx context.Context, connFn func(context.Context) (net.Conn, error
 		noNoDelay:     option.DisableTCPNoDelay,
 
 		r2ps:  r2ps,
-		optin: isOptIn(option.ClientTrackingOptions),
+		optIn: isOptIn(option.ClientTrackingOptions),
 	}
 	if !nobg {
 		p.queue = newRing(option.RingScaleEachConn)
@@ -637,8 +637,8 @@ func (p *pipe) backgroundPing() {
 		var err error
 		recv = atomic.LoadInt32(&p.recvs)
 		defer func() {
-			prev = atomic.LoadInt32(&p.recvs)
 			if err == nil {
+				prev = atomic.LoadInt32(&p.recvs)
 				p.pingTimer.Reset(p.pinggap)
 			}
 		}()
@@ -1302,7 +1302,7 @@ next:
 }
 
 func (p *pipe) optInCmd() cmds.Completed {
-	if p.optin {
+	if p.optIn {
 		return cmds.OptInCmd
 	}
 	return cmds.OptInNopCmd
