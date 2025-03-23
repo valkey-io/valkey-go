@@ -416,6 +416,9 @@ func NewClient(option ClientOption) (client Client, err error) {
 	if option.ConnWriteTimeout == 0 {
 		option.ConnWriteTimeout = max(DefaultTCPKeepAlive, option.Dialer.KeepAlive) * 10
 	}
+	if option.BlockingPoolTimeout == 0 {
+		option.BlockingPoolTimeout = option.ConnWriteTimeout + 1*time.Second
+	}
 	if option.BlockingPipeline == 0 {
 		option.BlockingPipeline = DefaultBlockingPipeline
 	}
