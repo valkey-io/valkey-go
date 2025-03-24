@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 )
 
 type wrapped struct {
@@ -85,7 +86,7 @@ func TestValkeyErrorIsMoved(t *testing.T) {
 		{err: "MOVED 1 [::1]:1", addr: "[::1]:1"},
 		{err: "MOVED 1 ::1:1", addr: "[::1]:1"},
 	} {
-		e := ValkeyError{typ: '-', string: c.err}
+		e := ValkeyError(strmsg('-', c.err))
 		if addr, ok := e.IsMoved(); !ok || addr != c.addr {
 			t.Fail()
 		}
@@ -101,7 +102,7 @@ func TestValkeyErrorIsAsk(t *testing.T) {
 		{err: "ASK 1 [::1]:1", addr: "[::1]:1"},
 		{err: "ASK 1 ::1:1", addr: "[::1]:1"},
 	} {
-		e := ValkeyError{typ: '-', string: c.err}
+		e := ValkeyError(strmsg('-', c.err))
 		if addr, ok := e.IsAsk(); !ok || addr != c.addr {
 			t.Fail()
 		}
@@ -114,7 +115,8 @@ func TestIsValkeyBusyGroup(t *testing.T) {
 		t.Fatal("TestIsValkeyBusyGroup fail")
 	}
 
-	err = &ValkeyError{string: "BUSYGROUP Consumer Group name already exists"}
+	valkeyErr := ValkeyError(strmsg('-', "BUSYGROUP Consumer Group name already exists"))
+	err = &valkeyErr
 	if !IsValkeyBusyGroup(err) {
 		t.Fatal("TestIsValkeyBusyGroup fail")
 	}
@@ -132,7 +134,7 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).ToInt64(); err == nil {
 			t.Fatal("ToInt64 not failed as expected")
 		}
-		if v, _ := (ValkeyResult{val: ValkeyMessage{typ: ':', integer: 1}}).ToInt64(); v != 1 {
+		if v, _ := (ValkeyResult{val: ValkeyMessage{typ: ':', intlen: 1}}).ToInt64(); v != 1 {
 			t.Fatal("ToInt64 not get value as expected")
 		}
 	})
@@ -144,7 +146,7 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).ToBool(); err == nil {
 			t.Fatal("ToBool not failed as expected")
 		}
-		if v, _ := (ValkeyResult{val: ValkeyMessage{typ: '#', integer: 1}}).ToBool(); !v {
+		if v, _ := (ValkeyResult{val: ValkeyMessage{typ: '#', intlen: 1}}).ToBool(); !v {
 			t.Fatal("ToBool not get value as expected")
 		}
 	})
@@ -156,16 +158,16 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsBool(); err == nil {
 			t.Fatal("ToBool not failed as expected")
 		}
-		if v, _ := (ValkeyResult{val: ValkeyMessage{typ: '#', integer: 1}}).AsBool(); !v {
+		if v, _ := (ValkeyResult{val: ValkeyMessage{typ: '#', intlen: 1}}).AsBool(); !v {
 			t.Fatal("ToBool not get value as expected")
 		}
-		if v, _ := (ValkeyResult{val: ValkeyMessage{typ: ':', integer: 1}}).AsBool(); !v {
+		if v, _ := (ValkeyResult{val: ValkeyMessage{typ: ':', intlen: 1}}).AsBool(); !v {
 			t.Fatal("ToBool not get value as expected")
 		}
-		if v, _ := (ValkeyResult{val: ValkeyMessage{typ: '+', string: "OK"}}).AsBool(); !v {
+		if v, _ := (ValkeyResult{val: strmsg('+', "OK")}).AsBool(); !v {
 			t.Fatal("ToBool not get value as expected")
 		}
-		if v, _ := (ValkeyResult{val: ValkeyMessage{typ: '$', string: "OK"}}).AsBool(); !v {
+		if v, _ := (ValkeyResult{val: strmsg('$', "OK")}).AsBool(); !v {
 			t.Fatal("ToBool not get value as expected")
 		}
 	})
@@ -177,7 +179,7 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).ToFloat64(); err == nil {
 			t.Fatal("ToFloat64 not failed as expected")
 		}
-		if v, _ := (ValkeyResult{val: ValkeyMessage{typ: ',', string: "0.1"}}).ToFloat64(); v != 0.1 {
+		if v, _ := (ValkeyResult{val: strmsg(',', "0.1")}).ToFloat64(); v != 0.1 {
 			t.Fatal("ToFloat64 not get value as expected")
 		}
 	})
@@ -189,7 +191,7 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).ToString(); err == nil {
 			t.Fatal("ToString not failed as expected")
 		}
-		if v, _ := (ValkeyResult{val: ValkeyMessage{typ: '+', string: "0.1"}}).ToString(); v != "0.1" {
+		if v, _ := (ValkeyResult{val: strmsg('+', "0.1")}).ToString(); v != "0.1" {
 			t.Fatal("ToString not get value as expected")
 		}
 	})
@@ -201,7 +203,7 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsReader(); err == nil {
 			t.Fatal("AsReader not failed as expected")
 		}
-		r, _ := (ValkeyResult{val: ValkeyMessage{typ: '+', string: "0.1"}}).AsReader()
+		r, _ := (ValkeyResult{val: strmsg('+', "0.1")}).AsReader()
 		bs, _ := io.ReadAll(r)
 		if !bytes.Equal(bs, []byte("0.1")) {
 			t.Fatalf("AsReader not get value as expected %v", bs)
@@ -215,7 +217,7 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsBytes(); err == nil {
 			t.Fatal("AsBytes not failed as expected")
 		}
-		bs, _ := (ValkeyResult{val: ValkeyMessage{typ: '+', string: "0.1"}}).AsBytes()
+		bs, _ := (ValkeyResult{val: strmsg('+', "0.1")}).AsBytes()
 		if !bytes.Equal(bs, []byte("0.1")) {
 			t.Fatalf("AsBytes not get value as expected %v", bs)
 		}
@@ -229,7 +231,7 @@ func TestValkeyResult(t *testing.T) {
 		if err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).DecodeJSON(&v); err == nil {
 			t.Fatal("DecodeJSON not failed as expected")
 		}
-		if _ = (ValkeyResult{val: ValkeyMessage{typ: '+', string: `{"k":"v"}`}}).DecodeJSON(&v); v["k"] != "v" {
+		if _ = (ValkeyResult{val: strmsg('+', `{"k":"v"}`)}).DecodeJSON(&v); v["k"] != "v" {
 			t.Fatalf("DecodeJSON not get value as expected %v", v)
 		}
 	})
@@ -241,10 +243,10 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsInt64(); err == nil {
 			t.Fatal("AsInt64 not failed as expected")
 		}
-		if v, _ := (ValkeyResult{val: ValkeyMessage{typ: '+', string: "1"}}).AsInt64(); v != 1 {
+		if v, _ := (ValkeyResult{val: strmsg('+', "1")}).AsInt64(); v != 1 {
 			t.Fatal("AsInt64 not get value as expected")
 		}
-		if v, _ := (ValkeyResult{val: ValkeyMessage{typ: ':', integer: 2}}).AsInt64(); v != 2 {
+		if v, _ := (ValkeyResult{val: ValkeyMessage{typ: ':', intlen: 2}}).AsInt64(); v != 2 {
 			t.Fatal("AsInt64 not get value as expected")
 		}
 	})
@@ -256,10 +258,10 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsUint64(); err == nil {
 			t.Fatal("AsUint64 not failed as expected")
 		}
-		if v, _ := (ValkeyResult{val: ValkeyMessage{typ: '+', string: "1"}}).AsUint64(); v != 1 {
+		if v, _ := (ValkeyResult{val: strmsg('+', "1")}).AsUint64(); v != 1 {
 			t.Fatal("AsUint64 not get value as expected")
 		}
-		if v, _ := (ValkeyResult{val: ValkeyMessage{typ: ':', integer: 2}}).AsUint64(); v != 2 {
+		if v, _ := (ValkeyResult{val: ValkeyMessage{typ: ':', intlen: 2}}).AsUint64(); v != 2 {
 			t.Fatal("AsUint64 not get value as expected")
 		}
 	})
@@ -271,10 +273,10 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsFloat64(); err == nil {
 			t.Fatal("AsFloat64 not failed as expected")
 		}
-		if v, _ := (ValkeyResult{val: ValkeyMessage{typ: '+', string: "1.1"}}).AsFloat64(); v != 1.1 {
+		if v, _ := (ValkeyResult{val: strmsg('+', "1.1")}).AsFloat64(); v != 1.1 {
 			t.Fatal("AsFloat64 not get value as expected")
 		}
-		if v, _ := (ValkeyResult{val: ValkeyMessage{typ: ',', string: "2.2"}}).AsFloat64(); v != 2.2 {
+		if v, _ := (ValkeyResult{val: strmsg(',', "2.2")}).AsFloat64(); v != 2.2 {
 			t.Fatal("AsFloat64 not get value as expected")
 		}
 	})
@@ -286,8 +288,8 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).ToArray(); err == nil {
 			t.Fatal("ToArray not failed as expected")
 		}
-		values := []ValkeyMessage{{string: "item", typ: '+'}}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: values}}).ToArray(); !reflect.DeepEqual(ret, values) {
+		values := []ValkeyMessage{strmsg('+', "item")}
+		if ret, _ := (ValkeyResult{val: slicemsg('*', values)}).ToArray(); !reflect.DeepEqual(ret, values) {
 			t.Fatal("ToArray not get value as expected")
 		}
 	})
@@ -299,8 +301,8 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsStrSlice(); err == nil {
 			t.Fatal("AsStrSlice not failed as expected")
 		}
-		values := []ValkeyMessage{{string: "item", typ: '+'}}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: values}}).AsStrSlice(); !reflect.DeepEqual(ret, []string{"item"}) {
+		values := []ValkeyMessage{strmsg('+', "item")}
+		if ret, _ := (ValkeyResult{val: slicemsg('*', values)}).AsStrSlice(); !reflect.DeepEqual(ret, []string{"item"}) {
 			t.Fatal("AsStrSlice not get value as expected")
 		}
 	})
@@ -312,16 +314,16 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsIntSlice(); err == nil {
 			t.Fatal("AsIntSlice not failed as expected")
 		}
-		values := []ValkeyMessage{{integer: 2, typ: ':'}}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: values}}).AsIntSlice(); !reflect.DeepEqual(ret, []int64{2}) {
+		values := []ValkeyMessage{{intlen: 2, typ: ':'}}
+		if ret, _ := (ValkeyResult{val: slicemsg('*', values)}).AsIntSlice(); !reflect.DeepEqual(ret, []int64{2}) {
 			t.Fatal("AsIntSlice not get value as expected")
 		}
-		values = []ValkeyMessage{{string: "3", typ: '+'}}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: values}}).AsIntSlice(); !reflect.DeepEqual(ret, []int64{3}) {
+		values = []ValkeyMessage{strmsg('+', "3")}
+		if ret, _ := (ValkeyResult{val: slicemsg('*', values)}).AsIntSlice(); !reflect.DeepEqual(ret, []int64{3}) {
 			t.Fatal("AsIntSlice not get value as expected")
 		}
-		values = []ValkeyMessage{{string: "ab", typ: '+'}}
-		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '*', values: values}}).AsIntSlice(); err == nil {
+		values = []ValkeyMessage{strmsg('+', "ab")}
+		if _, err := (ValkeyResult{val: slicemsg('*', values)}).AsIntSlice(); err == nil {
 			t.Fatal("AsIntSlice not failed as expected")
 		}
 	})
@@ -333,11 +335,11 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsFloatSlice(); err == nil {
 			t.Fatal("AsFloatSlice not failed as expected")
 		}
-		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{{string: "fff", typ: ','}}}}).AsFloatSlice(); err == nil {
+		if _, err := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg(',', "fff")})}).AsFloatSlice(); err == nil {
 			t.Fatal("AsFloatSlice not failed as expected")
 		}
-		values := []ValkeyMessage{{integer: 1, typ: ':'}, {string: "2", typ: '+'}, {string: "3", typ: '$'}, {string: "4", typ: ','}}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: values}}).AsFloatSlice(); !reflect.DeepEqual(ret, []float64{1, 2, 3, 4}) {
+		values := []ValkeyMessage{{intlen: 1, typ: ':'}, strmsg('+', "2"), strmsg('$', "3"), strmsg(',', "4")}
+		if ret, _ := (ValkeyResult{val: slicemsg('*', values)}).AsFloatSlice(); !reflect.DeepEqual(ret, []float64{1, 2, 3, 4}) {
 			t.Fatal("AsFloatSlice not get value as expected")
 		}
 	})
@@ -349,8 +351,8 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsBoolSlice(); err == nil {
 			t.Fatal("AsBoolSlice not failed as expected")
 		}
-		values := []ValkeyMessage{{integer: 1, typ: ':'}, {string: "0", typ: '+'}, {integer: 1, typ: typeBool}}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: values}}).AsBoolSlice(); !reflect.DeepEqual(ret, []bool{true, false, true}) {
+		values := []ValkeyMessage{{intlen: 1, typ: ':'}, strmsg('+', "0"), {intlen: 1, typ: typeBool}}
+		if ret, _ := (ValkeyResult{val: slicemsg('*', values)}).AsBoolSlice(); !reflect.DeepEqual(ret, []bool{true, false, true}) {
 			t.Fatal("AsBoolSlice not get value as expected")
 		}
 	})
@@ -362,9 +364,9 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsMap(); err == nil {
 			t.Fatal("AsMap not failed as expected")
 		}
-		values := []ValkeyMessage{{string: "key", typ: '+'}, {string: "value", typ: '+'}}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: values}}).AsMap(); !reflect.DeepEqual(map[string]ValkeyMessage{
-			values[0].string: values[1],
+		values := []ValkeyMessage{strmsg('+', "key"), strmsg('+', "value")}
+		if ret, _ := (ValkeyResult{val: slicemsg('*', values)}).AsMap(); !reflect.DeepEqual(map[string]ValkeyMessage{
+			values[0].string(): values[1],
 		}, ret) {
 			t.Fatal("AsMap not get value as expected")
 		}
@@ -377,9 +379,9 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsStrMap(); err == nil {
 			t.Fatal("AsStrMap not failed as expected")
 		}
-		values := []ValkeyMessage{{string: "key", typ: '+'}, {string: "value", typ: '+'}}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: values}}).AsStrMap(); !reflect.DeepEqual(map[string]string{
-			values[0].string: values[1].string,
+		values := []ValkeyMessage{strmsg('+', "key"), strmsg('+', "value")}
+		if ret, _ := (ValkeyResult{val: slicemsg('*', values)}).AsStrMap(); !reflect.DeepEqual(map[string]string{
+			values[0].string(): values[1].string(),
 		}, ret) {
 			t.Fatal("AsStrMap not get value as expected")
 		}
@@ -392,11 +394,11 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsIntMap(); err == nil {
 			t.Fatal("AsIntMap not failed as expected")
 		}
-		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{{string: "key", typ: '+'}, {string: "value", typ: '+'}}}}).AsIntMap(); err == nil {
+		if _, err := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "key"), strmsg('+', "value")})}).AsIntMap(); err == nil {
 			t.Fatal("AsIntMap not failed as expected")
 		}
-		values := []ValkeyMessage{{string: "k1", typ: '+'}, {string: "1", typ: '+'}, {string: "k2", typ: '+'}, {integer: 2, typ: ':'}}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: values}}).AsIntMap(); !reflect.DeepEqual(map[string]int64{
+		values := []ValkeyMessage{strmsg('+', "k1"), strmsg('+', "1"), strmsg('+', "k2"), {intlen: 2, typ: ':'}}
+		if ret, _ := (ValkeyResult{val: slicemsg('*', values)}).AsIntMap(); !reflect.DeepEqual(map[string]int64{
 			"k1": 1,
 			"k2": 2,
 		}, ret) {
@@ -411,9 +413,9 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).ToMap(); err == nil {
 			t.Fatal("ToMap not failed as expected")
 		}
-		values := []ValkeyMessage{{string: "key", typ: '+'}, {string: "value", typ: '+'}}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '%', values: values}}).ToMap(); !reflect.DeepEqual(map[string]ValkeyMessage{
-			values[0].string: values[1],
+		values := []ValkeyMessage{strmsg('+', "key"), strmsg('+', "value")}
+		if ret, _ := (ValkeyResult{val: slicemsg('%', values)}).ToMap(); !reflect.DeepEqual(map[string]ValkeyMessage{
+			values[0].string(): values[1],
 		}, ret) {
 			t.Fatal("ToMap not get value as expected")
 		}
@@ -426,23 +428,24 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).ToAny(); err == nil {
 			t.Fatal("ToAny not failed as expected")
 		}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '%', values: []ValkeyMessage{{typ: '+', string: "key"}, {typ: ':', integer: 1}}},
-			{typ: '%', values: []ValkeyMessage{{typ: '+', string: "nil"}, {typ: '_'}}},
-			{typ: '%', values: []ValkeyMessage{{typ: '+', string: "err"}, {typ: '-', string: "err"}}},
-			{typ: ',', string: "1.2"},
-			{typ: '+', string: "str"},
-			{typ: '#', integer: 0},
-			{typ: '-', string: "err"},
+		valkeyErr := ValkeyError(strmsg('-', "err"))
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			slicemsg('%', []ValkeyMessage{strmsg('+', "key"), {typ: ':', intlen: 1}}),
+			slicemsg('%', []ValkeyMessage{strmsg('+', "nil"), {typ: '_'}}),
+			slicemsg('%', []ValkeyMessage{strmsg('+', "err"), strmsg('-', "err")}),
+			strmsg(',', "1.2"),
+			strmsg('+', "str"),
+			{typ: '#', intlen: 0},
+			strmsg('-', "err"),
 			{typ: '_'},
-		}}}).ToAny(); !reflect.DeepEqual([]any{
+		})}).ToAny(); !reflect.DeepEqual([]any{
 			map[string]any{"key": int64(1)},
 			map[string]any{"nil": nil},
-			map[string]any{"err": &ValkeyError{typ: '-', string: "err"}},
+			map[string]any{"err": &valkeyErr},
 			1.2,
 			"str",
 			false,
-			&ValkeyError{typ: '-', string: "err"},
+			&valkeyErr,
 			nil,
 		}, ret) {
 			t.Fatal("ToAny not get value as expected")
@@ -456,13 +459,13 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsXRangeEntry(); err == nil {
 			t.Fatal("AsXRangeEntry not failed as expected")
 		}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{{string: "id", typ: '+'}, {typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}, {typ: '+', string: "b"}}}}}}).AsXRangeEntry(); !reflect.DeepEqual(XRangeEntry{
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "id"), slicemsg('*', []ValkeyMessage{strmsg('+', "a"), strmsg('+', "b")})})}).AsXRangeEntry(); !reflect.DeepEqual(XRangeEntry{
 			ID:          "id",
 			FieldValues: map[string]string{"a": "b"},
 		}, ret) {
 			t.Fatal("AsXRangeEntry not get value as expected")
 		}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{{string: "id", typ: '+'}, {typ: '_'}}}}).AsXRangeEntry(); !reflect.DeepEqual(XRangeEntry{
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "id"), {typ: '_'}})}).AsXRangeEntry(); !reflect.DeepEqual(XRangeEntry{
 			ID:          "id",
 			FieldValues: nil,
 		}, ret) {
@@ -477,10 +480,10 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsXRange(); err == nil {
 			t.Fatal("AsXRange not failed as expected")
 		}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '*', values: []ValkeyMessage{{string: "id1", typ: '+'}, {typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}, {typ: '+', string: "b"}}}}},
-			{typ: '*', values: []ValkeyMessage{{string: "id2", typ: '+'}, {typ: '_'}}},
-		}}}).AsXRange(); !reflect.DeepEqual([]XRangeEntry{{
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			slicemsg('*', []ValkeyMessage{strmsg('+', "id1"), slicemsg('*', []ValkeyMessage{strmsg('+', "a"), strmsg('+', "b")})}),
+			slicemsg('*', []ValkeyMessage{strmsg('+', "id2"), {typ: '_'}}),
+		})}).AsXRange(); !reflect.DeepEqual([]XRangeEntry{{
 			ID:          "id1",
 			FieldValues: map[string]string{"a": "b"},
 		}, {
@@ -498,17 +501,17 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsXRead(); err == nil {
 			t.Fatal("AsXRead not failed as expected")
 		}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '%', values: []ValkeyMessage{
-			{typ: '+', string: "stream1"},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '*', values: []ValkeyMessage{{string: "id1", typ: '+'}, {typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}, {typ: '+', string: "b"}}}}},
-				{typ: '*', values: []ValkeyMessage{{string: "id2", typ: '+'}, {typ: '_'}}},
-			}},
-			{typ: '+', string: "stream2"},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '*', values: []ValkeyMessage{{string: "id3", typ: '+'}, {typ: '*', values: []ValkeyMessage{{typ: '+', string: "c"}, {typ: '+', string: "d"}}}}},
-			}},
-		}}}).AsXRead(); !reflect.DeepEqual(map[string][]XRangeEntry{
+		if ret, _ := (ValkeyResult{val: slicemsg('%', []ValkeyMessage{
+			strmsg('+', "stream1"),
+			slicemsg('*', []ValkeyMessage{
+				slicemsg('*', []ValkeyMessage{strmsg('+', "id1"), slicemsg('*', []ValkeyMessage{strmsg('+', "a"), strmsg('+', "b")})}),
+				slicemsg('*', []ValkeyMessage{strmsg('+', "id2"), {typ: '_'}}),
+			}),
+			strmsg('+', "stream2"),
+			slicemsg('*', []ValkeyMessage{
+				slicemsg('*', []ValkeyMessage{strmsg('+', "id3"), slicemsg('*', []ValkeyMessage{strmsg('+', "c"), strmsg('+', "d")})}),
+			}),
+		})}).AsXRead(); !reflect.DeepEqual(map[string][]XRangeEntry{
 			"stream1": {
 				{ID: "id1", FieldValues: map[string]string{"a": "b"}},
 				{ID: "id2", FieldValues: nil}},
@@ -518,21 +521,21 @@ func TestValkeyResult(t *testing.T) {
 		}, ret) {
 			t.Fatal("AsXRead not get value as expected")
 		}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '+', string: "stream1"},
-				{typ: '*', values: []ValkeyMessage{
-					{typ: '*', values: []ValkeyMessage{{string: "id1", typ: '+'}, {typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}, {typ: '+', string: "b"}}}}},
-					{typ: '*', values: []ValkeyMessage{{string: "id2", typ: '+'}, {typ: '_'}}},
-				}},
-			}},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '+', string: "stream2"},
-				{typ: '*', values: []ValkeyMessage{
-					{typ: '*', values: []ValkeyMessage{{string: "id3", typ: '+'}, {typ: '*', values: []ValkeyMessage{{typ: '+', string: "c"}, {typ: '+', string: "d"}}}}},
-				}},
-			}},
-		}}}).AsXRead(); !reflect.DeepEqual(map[string][]XRangeEntry{
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			slicemsg('*', []ValkeyMessage{
+				strmsg('+', "stream1"),
+				slicemsg('*', []ValkeyMessage{
+					slicemsg('*', []ValkeyMessage{strmsg('+', "id1"), slicemsg('*', []ValkeyMessage{strmsg('+', "a"), strmsg('+', "b")})}),
+					slicemsg('*', []ValkeyMessage{strmsg('+', "id2"), {typ: '_'}}),
+				}),
+			}),
+			slicemsg('*', []ValkeyMessage{
+				strmsg('+', "stream2"),
+				slicemsg('*', []ValkeyMessage{
+					slicemsg('*', []ValkeyMessage{strmsg('+', "id3"), slicemsg('*', []ValkeyMessage{strmsg('+', "c"), strmsg('+', "d")})}),
+				}),
+			}),
+		})}).AsXRead(); !reflect.DeepEqual(map[string][]XRangeEntry{
 			"stream1": {
 				{ID: "id1", FieldValues: map[string]string{"a": "b"}},
 				{ID: "id2", FieldValues: nil}},
@@ -551,16 +554,16 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsZScore(); err == nil {
 			t.Fatal("AsZScore not failed as expected")
 		}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '+', string: "m1"},
-			{typ: '+', string: "1"},
-		}}}).AsZScore(); !reflect.DeepEqual(ZScore{Member: "m1", Score: 1}, ret) {
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			strmsg('+', "m1"),
+			strmsg('+', "1"),
+		})}).AsZScore(); !reflect.DeepEqual(ZScore{Member: "m1", Score: 1}, ret) {
 			t.Fatal("AsZScore not get value as expected")
 		}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '+', string: "m1"},
-			{typ: ',', string: "1"},
-		}}}).AsZScore(); !reflect.DeepEqual(ZScore{Member: "m1", Score: 1}, ret) {
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			strmsg('+', "m1"),
+			strmsg(',', "1"),
+		})}).AsZScore(); !reflect.DeepEqual(ZScore{Member: "m1", Score: 1}, ret) {
 			t.Fatal("AsZScore not get value as expected")
 		}
 	})
@@ -572,27 +575,27 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsZScores(); err == nil {
 			t.Fatal("AsZScores not failed as expected")
 		}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '+', string: "m1"},
-			{typ: '+', string: "1"},
-			{typ: '+', string: "m2"},
-			{typ: '+', string: "2"},
-		}}}).AsZScores(); !reflect.DeepEqual([]ZScore{
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			strmsg('+', "m1"),
+			strmsg('+', "1"),
+			strmsg('+', "m2"),
+			strmsg('+', "2"),
+		})}).AsZScores(); !reflect.DeepEqual([]ZScore{
 			{Member: "m1", Score: 1},
 			{Member: "m2", Score: 2},
 		}, ret) {
 			t.Fatal("AsZScores not get value as expected")
 		}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '+', string: "m1"},
-				{typ: ',', string: "1"},
-			}},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '+', string: "m2"},
-				{typ: ',', string: "2"},
-			}},
-		}}}).AsZScores(); !reflect.DeepEqual([]ZScore{
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			slicemsg('*', []ValkeyMessage{
+				strmsg('+', "m1"),
+				strmsg(',', "1"),
+			}),
+			slicemsg('*', []ValkeyMessage{
+				strmsg('+', "m2"),
+				strmsg(',', "2"),
+			}),
+		})}).AsZScores(); !reflect.DeepEqual([]ZScore{
 			{Member: "m1", Score: 1},
 			{Member: "m2", Score: 2},
 		}, ret) {
@@ -607,13 +610,13 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsLMPop(); err == nil {
 			t.Fatal("AsLMPop not failed as expected")
 		}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '+', string: "k"},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '+', string: "1"},
-				{typ: '+', string: "2"},
-			}},
-		}}}).AsLMPop(); !reflect.DeepEqual(KeyValues{
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			strmsg('+', "k"),
+			slicemsg('*', []ValkeyMessage{
+				strmsg('+', "1"),
+				strmsg('+', "2"),
+			}),
+		})}).AsLMPop(); !reflect.DeepEqual(KeyValues{
 			Key:    "k",
 			Values: []string{"1", "2"},
 		}, ret) {
@@ -628,19 +631,19 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsZMPop(); err == nil {
 			t.Fatal("AsZMPop not failed as expected")
 		}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '+', string: "k"},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '*', values: []ValkeyMessage{
-					{typ: '+', string: "1"},
-					{typ: ',', string: "1"},
-				}},
-				{typ: '*', values: []ValkeyMessage{
-					{typ: '+', string: "2"},
-					{typ: ',', string: "2"},
-				}},
-			}},
-		}}}).AsZMPop(); !reflect.DeepEqual(KeyZScores{
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			strmsg('+', "k"),
+			slicemsg('*', []ValkeyMessage{
+				slicemsg('*', []ValkeyMessage{
+					strmsg('+', "1"),
+					strmsg(',', "1"),
+				}),
+				slicemsg('*', []ValkeyMessage{
+					strmsg('+', "2"),
+					strmsg(',', "2"),
+				}),
+			}),
+		})}).AsZMPop(); !reflect.DeepEqual(KeyZScores{
 			Key: "k",
 			Values: []ZScore{
 				{Member: "1", Score: 1},
@@ -658,168 +661,168 @@ func TestValkeyResult(t *testing.T) {
 		if _, _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsFtSearch(); err == nil {
 			t.Fatal("AsFtSearch not failed as expected")
 		}
-		if n, ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: ':', integer: 3},
-			{typ: '+', string: "a"},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '+', string: "k1"},
-				{typ: '+', string: "v1"},
-				{typ: '+', string: "kk"},
-				{typ: '+', string: "vv"},
-			}},
-			{typ: '+', string: "b"},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '+', string: "k2"},
-				{typ: '+', string: "v2"},
-				{typ: '+', string: "kk"},
-				{typ: '+', string: "vv"},
-			}},
-		}}}).AsFtSearch(); n != 3 || !reflect.DeepEqual([]FtSearchDoc{
+		if n, ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			{typ: ':', intlen: 3},
+			strmsg('+', "a"),
+			slicemsg('*', []ValkeyMessage{
+				strmsg('+', "k1"),
+				strmsg('+', "v1"),
+				strmsg('+', "kk"),
+				strmsg('+', "vv"),
+			}),
+			strmsg('+', "b"),
+			slicemsg('*', []ValkeyMessage{
+				strmsg('+', "k2"),
+				strmsg('+', "v2"),
+				strmsg('+', "kk"),
+				strmsg('+', "vv"),
+			}),
+		})}).AsFtSearch(); n != 3 || !reflect.DeepEqual([]FtSearchDoc{
 			{Key: "a", Doc: map[string]string{"k1": "v1", "kk": "vv"}},
 			{Key: "b", Doc: map[string]string{"k2": "v2", "kk": "vv"}},
 		}, ret) {
 			t.Fatal("AsFtSearch not get value as expected")
 		}
-		if n, ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: ':', integer: 3},
-			{typ: '+', string: "a"},
-			{typ: '+', string: "1"},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '+', string: "k1"},
-				{typ: '+', string: "v1"},
-			}},
-			{typ: '+', string: "b"},
-			{typ: '+', string: "2"},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '+', string: "k2"},
-				{typ: '+', string: "v2"},
-			}},
-		}}}).AsFtSearch(); n != 3 || !reflect.DeepEqual([]FtSearchDoc{
+		if n, ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			{typ: ':', intlen: 3},
+			strmsg('+', "a"),
+			strmsg('+', "1"),
+			slicemsg('*', []ValkeyMessage{
+				strmsg('+', "k1"),
+				strmsg('+', "v1"),
+			}),
+			strmsg('+', "b"),
+			strmsg('+', "2"),
+			slicemsg('*', []ValkeyMessage{
+				strmsg('+', "k2"),
+				strmsg('+', "v2"),
+			}),
+		})}).AsFtSearch(); n != 3 || !reflect.DeepEqual([]FtSearchDoc{
 			{Key: "a", Doc: map[string]string{"k1": "v1"}, Score: 1},
 			{Key: "b", Doc: map[string]string{"k2": "v2"}, Score: 2},
 		}, ret) {
 			t.Fatal("AsFtSearch not get value as expected")
 		}
-		if n, ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: ':', integer: 3},
-			{typ: '+', string: "a"},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '+', string: "k1"},
-				{typ: '+', string: "v1"},
-				{typ: '+', string: "kk"},
-				{typ: '+', string: "vv"},
-			}},
-		}}}).AsFtSearch(); n != 3 || !reflect.DeepEqual([]FtSearchDoc{
+		if n, ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			{typ: ':', intlen: 3},
+			strmsg('+', "a"),
+			slicemsg('*', []ValkeyMessage{
+				strmsg('+', "k1"),
+				strmsg('+', "v1"),
+				strmsg('+', "kk"),
+				strmsg('+', "vv"),
+			}),
+		})}).AsFtSearch(); n != 3 || !reflect.DeepEqual([]FtSearchDoc{
 			{Key: "a", Doc: map[string]string{"k1": "v1", "kk": "vv"}},
 		}, ret) {
 			t.Fatal("AsFtSearch not get value as expected")
 		}
-		if n, ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: ':', integer: 3},
-			{typ: '+', string: "a"},
-			{typ: '+', string: "b"},
-		}}}).AsFtSearch(); n != 3 || !reflect.DeepEqual([]FtSearchDoc{
+		if n, ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			{typ: ':', intlen: 3},
+			strmsg('+', "a"),
+			strmsg('+', "b"),
+		})}).AsFtSearch(); n != 3 || !reflect.DeepEqual([]FtSearchDoc{
 			{Key: "a", Doc: nil},
 			{Key: "b", Doc: nil},
 		}, ret) {
 			t.Fatal("AsFtSearch not get value as expected")
 		}
-		if n, ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: ':', integer: 3},
-			{typ: '+', string: "a"},
-			{typ: '+', string: "1"},
-			{typ: '+', string: "b"},
-			{typ: '+', string: "2"},
-		}}}).AsFtSearch(); n != 3 || !reflect.DeepEqual([]FtSearchDoc{
+		if n, ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			{typ: ':', intlen: 3},
+			strmsg('+', "a"),
+			strmsg('+', "1"),
+			strmsg('+', "b"),
+			strmsg('+', "2"),
+		})}).AsFtSearch(); n != 3 || !reflect.DeepEqual([]FtSearchDoc{
 			{Key: "a", Doc: nil, Score: 1},
 			{Key: "b", Doc: nil, Score: 2},
 		}, ret) {
 			t.Fatal("AsFtSearch not get value as expected")
 		}
-		if n, ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: ':', integer: 3},
-			{typ: '+', string: "1"},
-			{typ: '+', string: "2"},
-		}}}).AsFtSearch(); n != 3 || !reflect.DeepEqual([]FtSearchDoc{
+		if n, ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			{typ: ':', intlen: 3},
+			strmsg('+', "1"),
+			strmsg('+', "2"),
+		})}).AsFtSearch(); n != 3 || !reflect.DeepEqual([]FtSearchDoc{
 			{Key: "1", Doc: nil},
 			{Key: "2", Doc: nil},
 		}, ret) {
 			t.Fatal("AsFtSearch not get value as expected")
 		}
-		if n, ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: ':', integer: 3},
-			{typ: '+', string: "a"},
-		}}}).AsFtSearch(); n != 3 || !reflect.DeepEqual([]FtSearchDoc{
+		if n, ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			{typ: ':', intlen: 3},
+			strmsg('+', "a"),
+		})}).AsFtSearch(); n != 3 || !reflect.DeepEqual([]FtSearchDoc{
 			{Key: "a", Doc: nil},
 		}, ret) {
 			t.Fatal("AsFtSearch not get value as expected")
 		}
-		if n, ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: ':', integer: 3},
-		}}}).AsFtSearch(); n != 3 || !reflect.DeepEqual([]FtSearchDoc{}, ret) {
+		if n, ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			{typ: ':', intlen: 3},
+		})}).AsFtSearch(); n != 3 || !reflect.DeepEqual([]FtSearchDoc{}, ret) {
 			t.Fatal("AsFtSearch not get value as expected")
 		}
 	})
 
 	t.Run("AsFtSearch RESP3", func(t *testing.T) {
-		if n, ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '%', values: []ValkeyMessage{
-			{typ: '+', string: "total_results"},
-			{typ: ':', integer: 3},
-			{typ: '+', string: "results"},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '%', values: []ValkeyMessage{
-					{typ: '+', string: "id"},
-					{typ: '+', string: "1"},
-					{typ: '+', string: "extra_attributes"},
-					{typ: '%', values: []ValkeyMessage{
-						{typ: '+', string: "$"},
-						{typ: '+', string: "1"},
-					}},
-					{typ: '+', string: "score"},
-					{typ: ',', string: "1"},
-				}},
-				{typ: '%', values: []ValkeyMessage{
-					{typ: '+', string: "id"},
-					{typ: '+', string: "2"},
-					{typ: '+', string: "extra_attributes"},
-					{typ: '%', values: []ValkeyMessage{
-						{typ: '+', string: "$"},
-						{typ: '+', string: "2"},
-					}},
-					{typ: '+', string: "score"},
-					{typ: ',', string: "2"},
-				}},
-			}},
-			{typ: '+', string: "error"},
-			{typ: '*', values: []ValkeyMessage{}},
-		}}}).AsFtSearch(); n != 3 || !reflect.DeepEqual([]FtSearchDoc{
+		if n, ret, _ := (ValkeyResult{val: slicemsg('%', []ValkeyMessage{
+			strmsg('+', "total_results"),
+			{typ: ':', intlen: 3},
+			strmsg('+', "results"),
+			slicemsg('*', []ValkeyMessage{
+				slicemsg('%', []ValkeyMessage{
+					strmsg('+', "id"),
+					strmsg('+', "1"),
+					strmsg('+', "extra_attributes"),
+					slicemsg('%', []ValkeyMessage{
+						strmsg('+', "$"),
+						strmsg('+', "1"),
+					}),
+					strmsg('+', "score"),
+					strmsg(',', "1"),
+				}),
+				slicemsg('%', []ValkeyMessage{
+					strmsg('+', "id"),
+					strmsg('+', "2"),
+					strmsg('+', "extra_attributes"),
+					slicemsg('%', []ValkeyMessage{
+						strmsg('+', "$"),
+						strmsg('+', "2"),
+					}),
+					strmsg('+', "score"),
+					strmsg(',', "2"),
+				}),
+			}),
+			strmsg('+', "error"),
+			slicemsg('*', []ValkeyMessage{}),
+		})}).AsFtSearch(); n != 3 || !reflect.DeepEqual([]FtSearchDoc{
 			{Key: "1", Doc: map[string]string{"$": "1"}, Score: 1},
 			{Key: "2", Doc: map[string]string{"$": "2"}, Score: 2},
 		}, ret) {
 			t.Fatal("AsFtSearch not get value as expected")
 		}
-		if _, _, err := (ValkeyResult{val: ValkeyMessage{typ: '%', values: []ValkeyMessage{
-			{typ: '+', string: "total_results"},
-			{typ: ':', integer: 3},
-			{typ: '+', string: "results"},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '%', values: []ValkeyMessage{
-					{typ: '+', string: "id"},
-					{typ: '+', string: "1"},
-					{typ: '+', string: "extra_attributes"},
-					{typ: '%', values: []ValkeyMessage{
-						{typ: '+', string: "$"},
-						{typ: '+', string: "1"},
-					}},
-					{typ: '+', string: "score"},
-					{typ: ',', string: "1"},
-				}},
-			}},
-			{typ: '+', string: "error"},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '+', string: "mytimeout"},
-			}},
-		}}}).AsFtSearch(); err == nil || err.Error() != "mytimeout" {
+		if _, _, err := (ValkeyResult{val: slicemsg('%', []ValkeyMessage{
+			strmsg('+', "total_results"),
+			{typ: ':', intlen: 3},
+			strmsg('+', "results"),
+			slicemsg('*', []ValkeyMessage{
+				slicemsg('%', []ValkeyMessage{
+					strmsg('+', "id"),
+					strmsg('+', "1"),
+					strmsg('+', "extra_attributes"),
+					slicemsg('%', []ValkeyMessage{
+						strmsg('+', "$"),
+						strmsg('+', "1"),
+					}),
+					strmsg('+', "score"),
+					strmsg(',', "1"),
+				}),
+			}),
+			strmsg('+', "error"),
+			slicemsg('*', []ValkeyMessage{
+				strmsg('+', "mytimeout"),
+			}),
+		})}).AsFtSearch(); err == nil || err.Error() != "mytimeout" {
 			t.Fatal("AsFtSearch not get value as expected")
 		}
 	})
@@ -831,93 +834,93 @@ func TestValkeyResult(t *testing.T) {
 		if _, _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsFtAggregate(); err == nil {
 			t.Fatal("AsFtAggregate not failed as expected")
 		}
-		if n, ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: ':', integer: 3},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '+', string: "k1"},
-				{typ: '+', string: "v1"},
-				{typ: '+', string: "kk"},
-				{typ: '+', string: "vv"},
-			}},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '+', string: "k2"},
-				{typ: '+', string: "v2"},
-				{typ: '+', string: "kk"},
-				{typ: '+', string: "vv"},
-			}},
-		}}}).AsFtAggregate(); n != 3 || !reflect.DeepEqual([]map[string]string{
+		if n, ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			{typ: ':', intlen: 3},
+			slicemsg('*', []ValkeyMessage{
+				strmsg('+', "k1"),
+				strmsg('+', "v1"),
+				strmsg('+', "kk"),
+				strmsg('+', "vv"),
+			}),
+			slicemsg('*', []ValkeyMessage{
+				strmsg('+', "k2"),
+				strmsg('+', "v2"),
+				strmsg('+', "kk"),
+				strmsg('+', "vv"),
+			}),
+		})}).AsFtAggregate(); n != 3 || !reflect.DeepEqual([]map[string]string{
 			{"k1": "v1", "kk": "vv"},
 			{"k2": "v2", "kk": "vv"},
 		}, ret) {
 			t.Fatal("AsFtAggregate not get value as expected")
 		}
-		if n, ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: ':', integer: 3},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '+', string: "k1"},
-				{typ: '+', string: "v1"},
-				{typ: '+', string: "kk"},
-				{typ: '+', string: "vv"},
-			}},
-		}}}).AsFtAggregate(); n != 3 || !reflect.DeepEqual([]map[string]string{
+		if n, ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			{typ: ':', intlen: 3},
+			slicemsg('*', []ValkeyMessage{
+				strmsg('+', "k1"),
+				strmsg('+', "v1"),
+				strmsg('+', "kk"),
+				strmsg('+', "vv"),
+			}),
+		})}).AsFtAggregate(); n != 3 || !reflect.DeepEqual([]map[string]string{
 			{"k1": "v1", "kk": "vv"},
 		}, ret) {
 			t.Fatal("AsFtAggregate not get value as expected")
 		}
-		if n, ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: ':', integer: 3},
-		}}}).AsFtAggregate(); n != 3 || !reflect.DeepEqual([]map[string]string{}, ret) {
+		if n, ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			{typ: ':', intlen: 3},
+		})}).AsFtAggregate(); n != 3 || !reflect.DeepEqual([]map[string]string{}, ret) {
 			t.Fatal("AsFtAggregate not get value as expected")
 		}
 	})
 
 	t.Run("AsFtAggregate RESP3", func(t *testing.T) {
-		if n, ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '%', values: []ValkeyMessage{
-			{typ: '+', string: "total_results"},
-			{typ: ':', integer: 3},
-			{typ: '+', string: "results"},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '%', values: []ValkeyMessage{
-					{typ: '+', string: "extra_attributes"},
-					{typ: '%', values: []ValkeyMessage{
-						{typ: '+', string: "$"},
-						{typ: '+', string: "1"},
-					}},
-				}},
-				{typ: '%', values: []ValkeyMessage{
-					{typ: '+', string: "extra_attributes"},
-					{typ: '%', values: []ValkeyMessage{
-						{typ: '+', string: "$"},
-						{typ: '+', string: "2"},
-					}},
-				}},
-			}},
-			{typ: '+', string: "error"},
-			{typ: '*', values: []ValkeyMessage{}},
-		}}}).AsFtAggregate(); n != 3 || !reflect.DeepEqual([]map[string]string{
+		if n, ret, _ := (ValkeyResult{val: slicemsg('%', []ValkeyMessage{
+			strmsg('+', "total_results"),
+			{typ: ':', intlen: 3},
+			strmsg('+', "results"),
+			slicemsg('*', []ValkeyMessage{
+				slicemsg('%', []ValkeyMessage{
+					strmsg('+', "extra_attributes"),
+					slicemsg('%', []ValkeyMessage{
+						strmsg('+', "$"),
+						strmsg('+', "1"),
+					}),
+				}),
+				slicemsg('%', []ValkeyMessage{
+					strmsg('+', "extra_attributes"),
+					slicemsg('%', []ValkeyMessage{
+						strmsg('+', "$"),
+						strmsg('+', "2"),
+					}),
+				}),
+			}),
+			strmsg('+', "error"),
+			slicemsg('*', []ValkeyMessage{}),
+		})}).AsFtAggregate(); n != 3 || !reflect.DeepEqual([]map[string]string{
 			{"$": "1"},
 			{"$": "2"},
 		}, ret) {
 			t.Fatal("AsFtAggregate not get value as expected")
 		}
-		if _, _, err := (ValkeyResult{val: ValkeyMessage{typ: '%', values: []ValkeyMessage{
-			{typ: '+', string: "total_results"},
-			{typ: ':', integer: 3},
-			{typ: '+', string: "results"},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '%', values: []ValkeyMessage{
-					{typ: '+', string: "extra_attributes"},
-					{typ: '%', values: []ValkeyMessage{
-						{typ: '+', string: "$"},
-						{typ: '+', string: "1"},
-					}},
-				}},
-			}},
-			{typ: '+', string: "error"},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '+', string: "mytimeout"},
-			}},
-		}}}).AsFtAggregate(); err == nil || err.Error() != "mytimeout" {
+		if _, _, err := (ValkeyResult{val: slicemsg('%', []ValkeyMessage{
+			strmsg('+', "total_results"),
+			{typ: ':', intlen: 3},
+			strmsg('+', "results"),
+			slicemsg('*', []ValkeyMessage{
+				slicemsg('%', []ValkeyMessage{
+					strmsg('+', "extra_attributes"),
+					slicemsg('%', []ValkeyMessage{
+						strmsg('+', "$"),
+						strmsg('+', "1"),
+					}),
+				}),
+			}),
+			strmsg('+', "error"),
+			slicemsg('*', []ValkeyMessage{
+				strmsg('+', "mytimeout"),
+			}),
+		})}).AsFtAggregate(); err == nil || err.Error() != "mytimeout" {
 			t.Fatal("AsFtAggregate not get value as expected")
 		}
 	})
@@ -929,108 +932,108 @@ func TestValkeyResult(t *testing.T) {
 		if _, _, _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsFtAggregateCursor(); err == nil {
 			t.Fatal("AsFtAggregate not failed as expected")
 		}
-		if c, n, ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '*', values: []ValkeyMessage{
-				{typ: ':', integer: 3},
-				{typ: '*', values: []ValkeyMessage{
-					{typ: '+', string: "k1"},
-					{typ: '+', string: "v1"},
-					{typ: '+', string: "kk"},
-					{typ: '+', string: "vv"},
-				}},
-				{typ: '*', values: []ValkeyMessage{
-					{typ: '+', string: "k2"},
-					{typ: '+', string: "v2"},
-					{typ: '+', string: "kk"},
-					{typ: '+', string: "vv"},
-				}},
-			}},
-			{typ: ':', integer: 1},
-		}}}).AsFtAggregateCursor(); c != 1 || n != 3 || !reflect.DeepEqual([]map[string]string{
+		if c, n, ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			slicemsg('*', []ValkeyMessage{
+				{typ: ':', intlen: 3},
+				slicemsg('*', []ValkeyMessage{
+					strmsg('+', "k1"),
+					strmsg('+', "v1"),
+					strmsg('+', "kk"),
+					strmsg('+', "vv"),
+				}),
+				slicemsg('*', []ValkeyMessage{
+					strmsg('+', "k2"),
+					strmsg('+', "v2"),
+					strmsg('+', "kk"),
+					strmsg('+', "vv"),
+				}),
+			}),
+			{typ: ':', intlen: 1},
+		})}).AsFtAggregateCursor(); c != 1 || n != 3 || !reflect.DeepEqual([]map[string]string{
 			{"k1": "v1", "kk": "vv"},
 			{"k2": "v2", "kk": "vv"},
 		}, ret) {
 			t.Fatal("AsFtAggregate not get value as expected")
 		}
-		if c, n, ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '*', values: []ValkeyMessage{
-				{typ: ':', integer: 3},
-				{typ: '*', values: []ValkeyMessage{
-					{typ: '+', string: "k1"},
-					{typ: '+', string: "v1"},
-					{typ: '+', string: "kk"},
-					{typ: '+', string: "vv"},
-				}},
-			}},
-			{typ: ':', integer: 1},
-		}}}).AsFtAggregateCursor(); c != 1 || n != 3 || !reflect.DeepEqual([]map[string]string{
+		if c, n, ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			slicemsg('*', []ValkeyMessage{
+				{typ: ':', intlen: 3},
+				slicemsg('*', []ValkeyMessage{
+					strmsg('+', "k1"),
+					strmsg('+', "v1"),
+					strmsg('+', "kk"),
+					strmsg('+', "vv"),
+				}),
+			}),
+			{typ: ':', intlen: 1},
+		})}).AsFtAggregateCursor(); c != 1 || n != 3 || !reflect.DeepEqual([]map[string]string{
 			{"k1": "v1", "kk": "vv"},
 		}, ret) {
 			t.Fatal("AsFtAggregate not get value as expected")
 		}
-		if c, n, ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '*', values: []ValkeyMessage{
-				{typ: ':', integer: 3},
-			}},
-			{typ: ':', integer: 1},
-		}}}).AsFtAggregateCursor(); c != 1 || n != 3 || !reflect.DeepEqual([]map[string]string{}, ret) {
+		if c, n, ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			slicemsg('*', []ValkeyMessage{
+				{typ: ':', intlen: 3},
+			}),
+			{typ: ':', intlen: 1},
+		})}).AsFtAggregateCursor(); c != 1 || n != 3 || !reflect.DeepEqual([]map[string]string{}, ret) {
 			t.Fatal("AsFtAggregate not get value as expected")
 		}
 	})
 
 	t.Run("AsFtAggregate Cursor RESP3", func(t *testing.T) {
-		if c, n, ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '%', values: []ValkeyMessage{
-				{typ: '+', string: "total_results"},
-				{typ: ':', integer: 3},
-				{typ: '+', string: "results"},
-				{typ: '*', values: []ValkeyMessage{
-					{typ: '%', values: []ValkeyMessage{
-						{typ: '+', string: "extra_attributes"},
-						{typ: '%', values: []ValkeyMessage{
-							{typ: '+', string: "$"},
-							{typ: '+', string: "1"},
-						}},
-					}},
-					{typ: '%', values: []ValkeyMessage{
-						{typ: '+', string: "extra_attributes"},
-						{typ: '%', values: []ValkeyMessage{
-							{typ: '+', string: "$"},
-							{typ: '+', string: "2"},
-						}},
-					}},
-				}},
-				{typ: '+', string: "error"},
-				{typ: '*', values: []ValkeyMessage{}},
-			}},
-			{typ: ':', integer: 1},
-		}}}).AsFtAggregateCursor(); c != 1 || n != 3 || !reflect.DeepEqual([]map[string]string{
+		if c, n, ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			slicemsg('%', []ValkeyMessage{
+				strmsg('+', "total_results"),
+				{typ: ':', intlen: 3},
+				strmsg('+', "results"),
+				slicemsg('*', []ValkeyMessage{
+					slicemsg('%', []ValkeyMessage{
+						strmsg('+', "extra_attributes"),
+						slicemsg('%', []ValkeyMessage{
+							strmsg('+', "$"),
+							strmsg('+', "1"),
+						}),
+					}),
+					slicemsg('%', []ValkeyMessage{
+						strmsg('+', "extra_attributes"),
+						slicemsg('%', []ValkeyMessage{
+							strmsg('+', "$"),
+							strmsg('+', "2"),
+						}),
+					}),
+				}),
+				strmsg('+', "error"),
+				slicemsg('*', []ValkeyMessage{}),
+			}),
+			{typ: ':', intlen: 1},
+		})}).AsFtAggregateCursor(); c != 1 || n != 3 || !reflect.DeepEqual([]map[string]string{
 			{"$": "1"},
 			{"$": "2"},
 		}, ret) {
 			t.Fatal("AsFtAggregate not get value as expected")
 		}
-		if _, _, _, err := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '%', values: []ValkeyMessage{
-				{typ: '+', string: "total_results"},
-				{typ: ':', integer: 3},
-				{typ: '+', string: "results"},
-				{typ: '*', values: []ValkeyMessage{
-					{typ: '%', values: []ValkeyMessage{
-						{typ: '+', string: "extra_attributes"},
-						{typ: '%', values: []ValkeyMessage{
-							{typ: '+', string: "$"},
-							{typ: '+', string: "1"},
-						}},
-					}},
-				}},
-				{typ: '+', string: "error"},
-				{typ: '*', values: []ValkeyMessage{
-					{typ: '+', string: "mytimeout"},
-				}},
-			}},
-			{typ: ':', integer: 1},
-		}}}).AsFtAggregateCursor(); err == nil || err.Error() != "mytimeout" {
+		if _, _, _, err := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			slicemsg('%', []ValkeyMessage{
+				strmsg('+', "total_results"),
+				{typ: ':', intlen: 3},
+				strmsg('+', "results"),
+				slicemsg('*', []ValkeyMessage{
+					slicemsg('%', []ValkeyMessage{
+						strmsg('+', "extra_attributes"),
+						slicemsg('%', []ValkeyMessage{
+							strmsg('+', "$"),
+							strmsg('+', "1"),
+						}),
+					}),
+				}),
+				strmsg('+', "error"),
+				slicemsg('*', []ValkeyMessage{
+					strmsg('+', "mytimeout"),
+				}),
+			}),
+			{typ: ':', intlen: 1},
+		})}).AsFtAggregateCursor(); err == nil || err.Error() != "mytimeout" {
 			t.Fatal("AsFtAggregate not get value as expected")
 		}
 	})
@@ -1043,161 +1046,161 @@ func TestValkeyResult(t *testing.T) {
 			t.Fatal("AsGeosearch not failed as expected")
 		}
 		//WithDist, WithHash, WithCoord
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '$', string: "k1"},
-				{typ: ',', string: "2.5"},
-				{typ: ':', integer: 1},
-				{typ: '*', values: []ValkeyMessage{
-					{typ: ',', string: "28.0473"},
-					{typ: ',', string: "26.2041"},
-				}},
-			}},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '$', string: "k2"},
-				{typ: ',', string: "4.5"},
-				{typ: ':', integer: 4},
-				{typ: '*', values: []ValkeyMessage{
-					{typ: ',', string: "72.4973"},
-					{typ: ',', string: "13.2263"},
-				}},
-			}},
-		}}}).AsGeosearch(); !reflect.DeepEqual([]GeoLocation{
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			slicemsg('*', []ValkeyMessage{
+				strmsg('$', "k1"),
+				strmsg(',', "2.5"),
+				{typ: ':', intlen: 1},
+				slicemsg('*', []ValkeyMessage{
+					strmsg(',', "28.0473"),
+					strmsg(',', "26.2041"),
+				}),
+			}),
+			slicemsg('*', []ValkeyMessage{
+				strmsg('$', "k2"),
+				strmsg(',', "4.5"),
+				{typ: ':', intlen: 4},
+				slicemsg('*', []ValkeyMessage{
+					strmsg(',', "72.4973"),
+					strmsg(',', "13.2263"),
+				}),
+			}),
+		})}).AsGeosearch(); !reflect.DeepEqual([]GeoLocation{
 			{Name: "k1", Dist: 2.5, GeoHash: 1, Longitude: 28.0473, Latitude: 26.2041},
 			{Name: "k2", Dist: 4.5, GeoHash: 4, Longitude: 72.4973, Latitude: 13.2263},
 		}, ret) {
 			t.Fatal("AsGeosearch not get value as expected")
 		}
 		//WithHash, WithCoord
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '$', string: "k1"},
-				{typ: ':', integer: 1},
-				{typ: '*', values: []ValkeyMessage{
-					{typ: ',', string: "84.3877"},
-					{typ: ',', string: "33.7488"},
-				}},
-			}},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '$', string: "k2"},
-				{typ: ':', integer: 4},
-				{typ: '*', values: []ValkeyMessage{
-					{typ: ',', string: "115.8613"},
-					{typ: ',', string: "31.9523"},
-				}},
-			}},
-		}}}).AsGeosearch(); !reflect.DeepEqual([]GeoLocation{
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			slicemsg('*', []ValkeyMessage{
+				strmsg('$', "k1"),
+				{typ: ':', intlen: 1},
+				slicemsg('*', []ValkeyMessage{
+					strmsg(',', "84.3877"),
+					strmsg(',', "33.7488"),
+				}),
+			}),
+			slicemsg('*', []ValkeyMessage{
+				strmsg('$', "k2"),
+				{typ: ':', intlen: 4},
+				slicemsg('*', []ValkeyMessage{
+					strmsg(',', "115.8613"),
+					strmsg(',', "31.9523"),
+				}),
+			}),
+		})}).AsGeosearch(); !reflect.DeepEqual([]GeoLocation{
 			{Name: "k1", GeoHash: 1, Longitude: 84.3877, Latitude: 33.7488},
 			{Name: "k2", GeoHash: 4, Longitude: 115.8613, Latitude: 31.9523},
 		}, ret) {
 			t.Fatal("AsGeosearch not get value as expected")
 		}
 		//WithDist, WithCoord
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '$', string: "k1"},
-				{typ: ',', string: "2.50076"},
-				{typ: '*', values: []ValkeyMessage{
-					{typ: ',', string: "84.3877"},
-					{typ: ',', string: "33.7488"},
-				}},
-			}},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '$', string: "k2"},
-				{typ: ',', string: "1024.96"},
-				{typ: '*', values: []ValkeyMessage{
-					{typ: ',', string: "115.8613"},
-					{typ: ',', string: "31.9523"},
-				}},
-			}},
-		}}}).AsGeosearch(); !reflect.DeepEqual([]GeoLocation{
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			slicemsg('*', []ValkeyMessage{
+				strmsg('$', "k1"),
+				strmsg(',', "2.50076"),
+				slicemsg('*', []ValkeyMessage{
+					strmsg(',', "84.3877"),
+					strmsg(',', "33.7488"),
+				}),
+			}),
+			slicemsg('*', []ValkeyMessage{
+				strmsg('$', "k2"),
+				strmsg(',', "1024.96"),
+				slicemsg('*', []ValkeyMessage{
+					strmsg(',', "115.8613"),
+					strmsg(',', "31.9523"),
+				}),
+			}),
+		})}).AsGeosearch(); !reflect.DeepEqual([]GeoLocation{
 			{Name: "k1", Dist: 2.50076, Longitude: 84.3877, Latitude: 33.7488},
 			{Name: "k2", Dist: 1024.96, Longitude: 115.8613, Latitude: 31.9523},
 		}, ret) {
 			t.Fatal("AsGeosearch not get value as expected")
 		}
 		//WithCoord
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '$', string: "k1"},
-				{typ: '*', values: []ValkeyMessage{
-					{typ: ',', string: "122.4194"},
-					{typ: ',', string: "37.7749"},
-				}},
-			}},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '$', string: "k2"},
-				{typ: '*', values: []ValkeyMessage{
-					{typ: ',', string: "35.6762"},
-					{typ: ',', string: "139.6503"},
-				}},
-			}},
-		}}}).AsGeosearch(); !reflect.DeepEqual([]GeoLocation{
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			slicemsg('*', []ValkeyMessage{
+				strmsg('$', "k1"),
+				slicemsg('*', []ValkeyMessage{
+					strmsg(',', "122.4194"),
+					strmsg(',', "37.7749"),
+				}),
+			}),
+			slicemsg('*', []ValkeyMessage{
+				strmsg('$', "k2"),
+				slicemsg('*', []ValkeyMessage{
+					strmsg(',', "35.6762"),
+					strmsg(',', "139.6503"),
+				}),
+			}),
+		})}).AsGeosearch(); !reflect.DeepEqual([]GeoLocation{
 			{Name: "k1", Longitude: 122.4194, Latitude: 37.7749},
 			{Name: "k2", Longitude: 35.6762, Latitude: 139.6503},
 		}, ret) {
 			t.Fatal("AsGeosearch not get value as expected")
 		}
 		//WithDist
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '$', string: "k1"},
-				{typ: ',', string: "2.50076"},
-			}},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '$', string: "k2"},
-				{typ: ',', string: strconv.FormatFloat(math.MaxFloat64, 'E', -1, 64)},
-			}},
-		}}}).AsGeosearch(); !reflect.DeepEqual([]GeoLocation{
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			slicemsg('*', []ValkeyMessage{
+				strmsg('$', "k1"),
+				strmsg(',', "2.50076"),
+			}),
+			slicemsg('*', []ValkeyMessage{
+				strmsg('$', "k2"),
+				strmsg(',', strconv.FormatFloat(math.MaxFloat64, 'E', -1, 64)),
+			}),
+		})}).AsGeosearch(); !reflect.DeepEqual([]GeoLocation{
 			{Name: "k1", Dist: 2.50076},
 			{Name: "k2", Dist: math.MaxFloat64},
 		}, ret) {
 			t.Fatal("AsGeosearch not get value as expected")
 		}
 		//WithHash
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '$', string: "k1"},
-				{typ: ':', integer: math.MaxInt64},
-			}},
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '$', string: "k2"},
-				{typ: ':', integer: 22296},
-			}},
-		}}}).AsGeosearch(); !reflect.DeepEqual([]GeoLocation{
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			slicemsg('*', []ValkeyMessage{
+				strmsg('$', "k1"),
+				{typ: ':', intlen: math.MaxInt64},
+			}),
+			slicemsg('*', []ValkeyMessage{
+				strmsg('$', "k2"),
+				{typ: ':', intlen: 22296},
+			}),
+		})}).AsGeosearch(); !reflect.DeepEqual([]GeoLocation{
 			{Name: "k1", GeoHash: math.MaxInt64},
 			{Name: "k2", GeoHash: 22296},
 		}, ret) {
 			t.Fatal("AsGeosearch not get value as expected")
 		}
 		//With no additional options
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '$', string: "k1"},
-			{typ: '$', string: "k2"},
-		}}}).AsGeosearch(); !reflect.DeepEqual([]GeoLocation{
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			strmsg('$', "k1"),
+			strmsg('$', "k2"),
+		})}).AsGeosearch(); !reflect.DeepEqual([]GeoLocation{
 			{Name: "k1"},
 			{Name: "k2"},
 		}, ret) {
 			t.Fatal("AsGeosearch not get value as expected")
 		}
 		//With wrong distance
-		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '$', string: "k1"},
-				{typ: ',', string: "wrong distance"},
-			}},
-		}}}).AsGeosearch(); err == nil {
+		if _, err := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			slicemsg('*', []ValkeyMessage{
+				strmsg('$', "k1"),
+				strmsg(',', "wrong distance"),
+			}),
+		})}).AsGeosearch(); err == nil {
 			t.Fatal("AsGeosearch not failed as expected")
 		}
 		//With wrong coordinates
-		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '$', string: "k2"},
-				{typ: '*', values: []ValkeyMessage{
-					{typ: ',', string: "35.6762"},
-				}},
-			}},
-		}}}).AsGeosearch(); err == nil {
+		if _, err := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+			slicemsg('*', []ValkeyMessage{
+				strmsg('$', "k2"),
+				slicemsg('*', []ValkeyMessage{
+					strmsg(',', "35.6762"),
+				}),
+			}),
+		})}).AsGeosearch(); err == nil {
 			t.Fatal("AsGeosearch not failed as expected")
 		}
 	})
@@ -1259,17 +1262,17 @@ func TestValkeyResult(t *testing.T) {
 		}{
 			{
 				input: ValkeyResult{
-					val: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-						{typ: '*', values: []ValkeyMessage{
-							{typ: ':', integer: 0},
-							{typ: ':', integer: 0},
-							{typ: '*', values: []ValkeyMessage{ // master
-								{typ: '+', string: "127.0.3.1"},
-								{typ: ':', integer: 3},
-								{typ: '+', string: ""},
-							}},
-						}},
-					}},
+					val: slicemsg('*', []ValkeyMessage{
+						slicemsg('*', []ValkeyMessage{
+							{typ: ':', intlen: 0},
+							{typ: ':', intlen: 0},
+							slicemsg('*', []ValkeyMessage{ // master
+								strmsg('+', "127.0.3.1"),
+								{typ: ':', intlen: 3},
+								strmsg('+', ""),
+							}),
+						}),
+					}),
 				},
 				expected: `{"Message":{"Value":[{"Value":[{"Value":0,"Type":"int64"},{"Value":0,"Type":"int64"},{"Value":[{"Value":"127.0.3.1","Type":"simple string"},{"Value":3,"Type":"int64"},{"Value":"","Type":"simple string"}],"Type":"array"}],"Type":"array"}],"Type":"array"}}`,
 			},
@@ -1299,7 +1302,8 @@ func TestValkeyMessage(t *testing.T) {
 	})
 	t.Run("Trim ERR prefix", func(t *testing.T) {
 		// kvrocks: https://github.com/redis/rueidis/issues/152#issuecomment-1333923750
-		if (&ValkeyMessage{typ: '-', string: "ERR no_prefix"}).Error().Error() != "no_prefix" {
+		valkeyMessageError := strmsg('-', "ERR no_prefix")
+		if (&valkeyMessageError).Error().Error() != "no_prefix" {
 			t.Fatal("fail to trim ERR")
 		}
 	})
@@ -1452,7 +1456,8 @@ func TestValkeyMessage(t *testing.T) {
 		}
 
 		// Test case where the message type is '*', which is not a RESP3 string
-		if val, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{{}}}).AsInt64(); err == nil {
+		valkeyMessageArrayWithEmptyMessage := slicemsg('*', []ValkeyMessage{{}})
+		if val, err := (&valkeyMessageArrayWithEmptyMessage).AsInt64(); err == nil {
 			t.Fatal("AsInt64 did not fail as expected")
 		} else if val != 0 {
 			t.Fatalf("expected 0, got %d", val)
@@ -1470,7 +1475,8 @@ func TestValkeyMessage(t *testing.T) {
 		}
 
 		// Test case where the message type is '*', which is not a RESP3 string
-		if val, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{{}}}).AsUint64(); err == nil {
+		valkeyMessageArrayWithEmptyMessage := slicemsg('*', []ValkeyMessage{{}})
+		if val, err := (&valkeyMessageArrayWithEmptyMessage).AsUint64(); err == nil {
 			t.Fatal("AsUint64 did not fail as expected")
 		} else if val != 0 {
 			t.Fatalf("expected 0, got %d", val)
@@ -1670,11 +1676,13 @@ func TestValkeyMessage(t *testing.T) {
 			t.Fatal("AsXRangeEntry did not fail as expected")
 		}
 
-		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: '_'}, {typ: '%'}}}).AsXRangeEntry(); err == nil {
+		valkeyMessageNullAndMap := slicemsg('*', []ValkeyMessage{{typ: '_'}, {typ: '%'}})
+		if _, err := (&valkeyMessageNullAndMap).AsXRangeEntry(); err == nil {
 			t.Fatal("AsXRangeEntry did not fail as expected")
 		}
 
-		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: ':'}, {typ: '%'}}}).AsXRangeEntry(); err == nil {
+		valkeyMessageIntAndMap := slicemsg('*', []ValkeyMessage{{typ: ':'}, {typ: '%'}})
+		if _, err := (&valkeyMessageIntAndMap).AsXRangeEntry(); err == nil {
 			t.Fatal("AsXRangeEntry did not fail as expected")
 		} else if !strings.Contains(err.Error(), fmt.Sprintf("valkey message type %s is not a string", typeNames[':'])) {
 			t.Fatalf("unexpected error: %v", err)
@@ -1690,11 +1698,13 @@ func TestValkeyMessage(t *testing.T) {
 			t.Fatal("AsXRangeEntry did not fail as expected")
 		}
 
-		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: '+'}, {typ: '-'}}}).AsXRangeEntry(); err == nil {
+		valkeyMessageStringAndErr := slicemsg('*', []ValkeyMessage{{typ: '+'}, {typ: '-'}})
+		if _, err := (&valkeyMessageStringAndErr).AsXRangeEntry(); err == nil {
 			t.Fatal("AsXRangeEntry did not fail as expected")
 		}
 
-		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: '+'}, {typ: 't'}}}).AsXRangeEntry(); err == nil {
+		valkeyMessageStringAndUnknown := slicemsg('*', []ValkeyMessage{{typ: '+'}, {typ: 't'}})
+		if _, err := (&valkeyMessageStringAndUnknown).AsXRangeEntry(); err == nil {
 			t.Fatal("AsXRangeEntry did not fail as expected")
 		} else if !strings.Contains(err.Error(), "valkey message type t is not a map/array/set") {
 			t.Fatalf("unexpected error: %v", err)
@@ -1706,7 +1716,8 @@ func TestValkeyMessage(t *testing.T) {
 			t.Fatal("AsXRange not failed as expected")
 		}
 
-		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: '_'}}}).AsXRange(); err == nil {
+		valkeyMessageArrayWithNull := slicemsg('*', []ValkeyMessage{{typ: '_'}})
+		if _, err := (&valkeyMessageArrayWithNull).AsXRange(); err == nil {
 			t.Fatal("AsXRange not failed as expected")
 		}
 	})
@@ -1716,27 +1727,30 @@ func TestValkeyMessage(t *testing.T) {
 			t.Fatal("AsXRead did not fail as expected")
 		}
 
-		if _, err := (&ValkeyMessage{typ: '%', values: []ValkeyMessage{
-			{typ: '+', string: "stream1"},
-			{typ: '*', values: []ValkeyMessage{{typ: '*', values: []ValkeyMessage{{string: "id1", typ: '+'}}}}},
-		}}).AsXRead(); err == nil {
+		valkeyMessageMapIncorrectLen := slicemsg('%', []ValkeyMessage{
+			strmsg('+', "stream1"),
+			slicemsg('*', []ValkeyMessage{slicemsg('*', []ValkeyMessage{strmsg('+', "id1")})}),
+		})
+		if _, err := (&valkeyMessageMapIncorrectLen).AsXRead(); err == nil {
 			t.Fatal("AsXRead did not fail as expected")
 		}
 
-		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '+', string: "stream1"},
-			}},
-		}}).AsXRead(); err == nil {
+		valkeyMessageArrayIncorrectLen := slicemsg('*', []ValkeyMessage{
+			slicemsg('*', []ValkeyMessage{
+				strmsg('+', "stream1"),
+			}),
+		})
+		if _, err := (&valkeyMessageArrayIncorrectLen).AsXRead(); err == nil {
 			t.Fatal("AsXRead did not fail as expected")
 		}
 
-		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '+', string: "stream1"},
-				{typ: '*', values: []ValkeyMessage{{typ: '*', values: []ValkeyMessage{{string: "id1", typ: '+'}}}}},
-			}},
-		}}).AsXRead(); err == nil {
+		valkeyMessageArrayIncorrectLen2 := slicemsg('*', []ValkeyMessage{
+			slicemsg('*', []ValkeyMessage{
+				strmsg('+', "stream1"),
+				slicemsg('*', []ValkeyMessage{slicemsg('*', []ValkeyMessage{strmsg('+', "id1")})}),
+			}),
+		})
+		if _, err := (&valkeyMessageArrayIncorrectLen2).AsXRead(); err == nil {
 			t.Fatal("AsXRead did not fail as expected")
 		}
 
@@ -1763,18 +1777,20 @@ func TestValkeyMessage(t *testing.T) {
 		if _, err := (&ValkeyMessage{typ: '_'}).AsZScores(); err == nil {
 			t.Fatal("AsZScore not failed as expected")
 		}
-		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '+', string: "m1"},
-			{typ: '+', string: "m2"},
-		}}).AsZScores(); err == nil {
+		valkeyMessageStringArray := slicemsg('*', []ValkeyMessage{
+			strmsg('+', "m1"),
+			strmsg('+', "m2"),
+		})
+		if _, err := (&valkeyMessageStringArray).AsZScores(); err == nil {
 			t.Fatal("AsZScores not fails as expected")
 		}
-		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '*', values: []ValkeyMessage{
-				{typ: '+', string: "m1"},
-				{typ: '+', string: "m2"},
-			}},
-		}}).AsZScores(); err == nil {
+		valkeyMessageNestedStringArray := slicemsg('*', []ValkeyMessage{
+			slicemsg('*', []ValkeyMessage{
+				strmsg('+', "m1"),
+				strmsg('+', "m2"),
+			}),
+		})
+		if _, err := (&valkeyMessageNestedStringArray).AsZScores(); err == nil {
 			t.Fatal("AsZScores not fails as expected")
 		}
 	})
@@ -1784,16 +1800,18 @@ func TestValkeyMessage(t *testing.T) {
 			t.Fatal("AsLMPop did not fail as expected")
 		}
 
-		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '+', string: "k"},
+		valkeyMessageStringAndNull := slicemsg('*', []ValkeyMessage{
+			strmsg('+', "k"),
 			{typ: '_'},
-		}}).AsLMPop(); err == nil {
+		})
+		if _, err := (&valkeyMessageStringAndNull).AsLMPop(); err == nil {
 			t.Fatal("AsLMPop did not fail as expected")
 		}
 
-		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '+', string: "k"},
-		}}).AsLMPop(); err == nil {
+		valkeyMessageStringArray := slicemsg('*', []ValkeyMessage{
+			strmsg('+', "k"),
+		})
+		if _, err := (&valkeyMessageStringArray).AsLMPop(); err == nil {
 			t.Fatal("AsLMPop did not fail as expected")
 		} else if !strings.Contains(err.Error(), fmt.Sprintf("valkey message type %s is not a LMPOP response", typeNames['*'])) {
 			t.Fatalf("unexpected error: %v", err)
@@ -1805,16 +1823,18 @@ func TestValkeyMessage(t *testing.T) {
 			t.Fatal("AsZMPop did not fail as expected")
 		}
 
-		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '+', string: "k"},
+		valkeyMessageStringAndNull := slicemsg('*', []ValkeyMessage{
+			strmsg('+', "k"),
 			{typ: '_'},
-		}}).AsZMPop(); err == nil {
+		})
+		if _, err := (&valkeyMessageStringAndNull).AsZMPop(); err == nil {
 			t.Fatal("AsZMPop did not fail as expected")
 		}
 
-		if _, err := (&ValkeyMessage{typ: '*', values: []ValkeyMessage{
-			{typ: '+', string: "k"},
-		}}).AsZMPop(); err == nil {
+		valkeyMessageStringArray := slicemsg('*', []ValkeyMessage{
+			strmsg('+', "k"),
+		})
+		if _, err := (&valkeyMessageStringArray).AsZMPop(); err == nil {
 			t.Fatal("AsZMPop did not fail as expected")
 		} else if !strings.Contains(err.Error(), fmt.Sprintf("valkey message type %s is not a ZMPOP response", typeNames['*'])) {
 			t.Fatalf("unexpected error: %v", err)
@@ -1864,29 +1884,31 @@ func TestValkeyMessage(t *testing.T) {
 		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsScanEntry(); err == nil {
 			t.Fatal("AsScanEntry not failed as expected")
 		}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{{string: "1", typ: '+'}, {typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}, {typ: '+', string: "b"}}}}}}).AsScanEntry(); !reflect.DeepEqual(ScanEntry{
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "1"), slicemsg('*', []ValkeyMessage{strmsg('+', "a"), strmsg('+', "b")})})}).AsScanEntry(); !reflect.DeepEqual(ScanEntry{
 			Cursor:   1,
 			Elements: []string{"a", "b"},
 		}, ret) {
 			t.Fatal("AsScanEntry not get value as expected")
 		}
-		if ret, _ := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{{string: "0", typ: '+'}, {typ: '_'}}}}).AsScanEntry(); !reflect.DeepEqual(ScanEntry{}, ret) {
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "0"), {typ: '_'}})}).AsScanEntry(); !reflect.DeepEqual(ScanEntry{}, ret) {
 			t.Fatal("AsScanEntry not get value as expected")
 		}
-		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '*', values: []ValkeyMessage{{string: "0", typ: '+'}}}}).AsScanEntry(); err == nil || !strings.Contains(err.Error(), "a scan response or its length is not at least 2") {
+		if _, err := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "0")})}).AsScanEntry(); err == nil || !strings.Contains(err.Error(), "a scan response or its length is not at least 2") {
 			t.Fatal("AsScanEntry not get value as expected")
 		}
 	})
 
 	t.Run("ToMap with non-string key", func(t *testing.T) {
-		_, err := (&ValkeyMessage{typ: '~', values: []ValkeyMessage{{typ: ':'}, {typ: ':'}}}).ToMap()
+		valkeyMessageSet := slicemsg('~', []ValkeyMessage{{typ: ':'}, {typ: ':'}})
+		_, err := (&valkeyMessageSet).ToMap()
 		if err == nil {
 			t.Fatal("ToMap did not fail as expected")
 		}
 		if !strings.Contains(err.Error(), "valkey message type set is not a RESP3 map") {
 			t.Fatalf("ToMap failed with unexpected error: %v", err)
 		}
-		_, err = (&ValkeyMessage{typ: '%', values: []ValkeyMessage{{typ: ':'}, {typ: ':'}}}).ToMap()
+		valkeyMessageMap := slicemsg('%', []ValkeyMessage{{typ: ':'}, {typ: ':'}})
+		_, err = (&valkeyMessageMap).ToMap()
 		if err == nil {
 			t.Fatal("ToMap did not fail as expected")
 		}
@@ -1951,21 +1973,26 @@ func TestValkeyMessage(t *testing.T) {
 			expected string
 		}{
 			{
-				input: ValkeyMessage{typ: '*', values: []ValkeyMessage{
-					{typ: '*', values: []ValkeyMessage{
-						{typ: ':', integer: 0},
-						{typ: ':', integer: 0},
-						{typ: '*', values: []ValkeyMessage{
-							{typ: '+', string: "127.0.3.1"},
-							{typ: ':', integer: 3},
-							{typ: '+', string: ""},
-						}},
-					}},
-				}},
+				input: slicemsg('*', []ValkeyMessage{
+					slicemsg('*', []ValkeyMessage{
+						{typ: ':', intlen: 0},
+						{typ: ':', intlen: 0},
+						slicemsg('*', []ValkeyMessage{
+							strmsg('+', "127.0.3.1"),
+							{typ: ':', intlen: 3},
+							strmsg('+', ""),
+						}),
+					}),
+				}),
 				expected: `{"Value":[{"Value":[{"Value":0,"Type":"int64"},{"Value":0,"Type":"int64"},{"Value":[{"Value":"127.0.3.1","Type":"simple string"},{"Value":3,"Type":"int64"},{"Value":"","Type":"simple string"}],"Type":"array"}],"Type":"array"}],"Type":"array"}`,
 			},
 			{
-				input:    ValkeyMessage{typ: '+', string: "127.0.3.1", ttl: [7]byte{97, 77, 74, 61, 138, 1, 0}},
+				input: ValkeyMessage{
+					typ:    '+',
+					bytes:  unsafe.StringData("127.0.3.1"),
+					intlen: int64(len("127.0.3.1")),
+					ttl:    [7]byte{97, 77, 74, 61, 138, 1, 0},
+				},
 				expected: `{"Value":"127.0.3.1","Type":"simple string","TTL":"2023-08-28 17:56:34.273 +0000 UTC"}`,
 			},
 			{
@@ -1973,7 +2000,7 @@ func TestValkeyMessage(t *testing.T) {
 				expected: `{"Type":"unknown"}`,
 			},
 			{
-				input:    ValkeyMessage{typ: typeBool, integer: 1},
+				input:    ValkeyMessage{typ: typeBool, intlen: 1},
 				expected: `{"Value":true,"Type":"boolean"}`,
 			},
 			{
@@ -1981,11 +2008,11 @@ func TestValkeyMessage(t *testing.T) {
 				expected: `{"Type":"null","Error":"valkey nil message"}`,
 			},
 			{
-				input:    ValkeyMessage{typ: typeSimpleErr, string: "ERR foo"},
+				input:    strmsg(typeSimpleErr, "ERR foo"),
 				expected: `{"Type":"simple error","Error":"foo"}`,
 			},
 			{
-				input:    ValkeyMessage{typ: typeBlobErr, string: "ERR foo"},
+				input:    strmsg(typeBlobErr, "ERR foo"),
 				expected: `{"Type":"blob error","Error":"foo"}`,
 			},
 		}
@@ -1999,13 +2026,13 @@ func TestValkeyMessage(t *testing.T) {
 
 	t.Run("CacheMarshal and CacheUnmarshalView", func(t *testing.T) {
 		m1 := ValkeyMessage{typ: '_'}
-		m2 := ValkeyMessage{typ: '+', string: "random"}
-		m3 := ValkeyMessage{typ: '#', integer: 1}
-		m4 := ValkeyMessage{typ: ':', integer: -1234}
-		m5 := ValkeyMessage{typ: ',', string: "-1.5"}
-		m6 := ValkeyMessage{typ: '%', values: nil}
-		m7 := ValkeyMessage{typ: '~', values: []ValkeyMessage{m1, m2, m3, m4, m5, m6}}
-		m8 := ValkeyMessage{typ: '*', values: []ValkeyMessage{m1, m2, m3, m4, m5, m6, m7}}
+		m2 := strmsg('+', "random")
+		m3 := ValkeyMessage{typ: '#', intlen: 1}
+		m4 := ValkeyMessage{typ: ':', intlen: -1234}
+		m5 := strmsg(',', "-1.5")
+		m6 := slicemsg('%', nil)
+		m7 := slicemsg('~', []ValkeyMessage{m1, m2, m3, m4, m5, m6})
+		m8 := slicemsg('*', []ValkeyMessage{m1, m2, m3, m4, m5, m6, m7})
 		msgs := []ValkeyMessage{m1, m2, m3, m4, m5, m6, m7, m8}
 		now := time.Now()
 		for i := range msgs {

@@ -52,11 +52,19 @@ func IsValkeyErr(err error) (ret *ValkeyError, ok bool) {
 // ValkeyError is an error response or a nil message from valkey instance
 type ValkeyError ValkeyMessage
 
+// string retrives the contained string of the ValkeyError
+func (m *ValkeyError) string() string {
+	if m.bytes == nil {
+		return ""
+	}
+	return unsafe.String(m.bytes, m.intlen)
+}
+
 func (r *ValkeyError) Error() string {
 	if r.IsNil() {
 		return "valkey nil message"
 	}
-	return r.string
+	return r.string()
 }
 
 // IsNil checks if it is a valkey nil message.
@@ -64,18 +72,18 @@ func (r *ValkeyError) IsNil() bool {
 	return r.typ == typeNull
 }
 
-// IsMoved checks if it is a valkey MOVED message and returns moved address.
+// IsMoved checks if it is a redis MOVED message and returns moved address.
 func (r *ValkeyError) IsMoved() (addr string, ok bool) {
-	if ok = strings.HasPrefix(r.string, "MOVED"); ok {
-		addr = fixIPv6HostPort(strings.Split(r.string, " ")[2])
+	if ok = strings.HasPrefix(r.string(), "MOVED"); ok {
+		addr = fixIPv6HostPort(strings.Split(r.string(), " ")[2])
 	}
 	return
 }
 
-// IsAsk checks if it is a valkey ASK message and returns ask address.
+// IsAsk checks if it is a redis ASK message and returns ask address.
 func (r *ValkeyError) IsAsk() (addr string, ok bool) {
-	if ok = strings.HasPrefix(r.string, "ASK"); ok {
-		addr = fixIPv6HostPort(strings.Split(r.string, " ")[2])
+	if ok = strings.HasPrefix(r.string(), "ASK"); ok {
+		addr = fixIPv6HostPort(strings.Split(r.string(), " ")[2])
 	}
 	return
 }
@@ -89,29 +97,29 @@ func fixIPv6HostPort(addr string) string {
 	return addr
 }
 
-// IsTryAgain checks if it is a valkey TRYAGAIN message and returns ask address.
+// IsTryAgain checks if it is a redis TRYAGAIN message and returns ask address.
 func (r *ValkeyError) IsTryAgain() bool {
-	return strings.HasPrefix(r.string, "TRYAGAIN")
+	return strings.HasPrefix(r.string(), "TRYAGAIN")
 }
 
-// IsLoading checks if it is a valkey LOADING message
+// IsLoading checks if it is a redis LOADING message
 func (r *ValkeyError) IsLoading() bool {
-	return strings.HasPrefix(r.string, "LOADING")
+	return strings.HasPrefix(r.string(), "LOADING")
 }
 
-// IsClusterDown checks if it is a valkey CLUSTERDOWN message and returns ask address.
+// IsClusterDown checks if it is a redis CLUSTERDOWN message and returns ask address.
 func (r *ValkeyError) IsClusterDown() bool {
-	return strings.HasPrefix(r.string, "CLUSTERDOWN")
+	return strings.HasPrefix(r.string(), "CLUSTERDOWN")
 }
 
-// IsNoScript checks if it is a valkey NOSCRIPT message.
+// IsNoScript checks if it is a redis NOSCRIPT message.
 func (r *ValkeyError) IsNoScript() bool {
-	return strings.HasPrefix(r.string, "NOSCRIPT")
+	return strings.HasPrefix(r.string(), "NOSCRIPT")
 }
 
-// IsBusyGroup checks if it is a valkey BUSYGROUP message.
+// IsBusyGroup checks if it is a redis BUSYGROUP message.
 func (r *ValkeyError) IsBusyGroup() bool {
-	return strings.HasPrefix(r.string, "BUSYGROUP")
+	return strings.HasPrefix(r.string(), "BUSYGROUP")
 }
 
 func newResult(val ValkeyMessage, err error) ValkeyResult {
@@ -521,14 +529,41 @@ func (r *prettyValkeyResult) MarshalJSON() ([]byte, error) {
 	return json.Marshal(obj)
 }
 
-// ValkeyMessage is a valkey response message, it may be a nil response
+// ValkeyMessage is a redis response message, it may be a nil response
 type ValkeyMessage struct {
-	attrs   *ValkeyMessage
-	string  string
-	values  []ValkeyMessage
-	integer int64
-	typ     byte
-	ttl     [7]byte
+	attrs *ValkeyMessage
+	bytes *byte
+	array *ValkeyMessage
+
+	// intlen is used for a simple number or
+	// in conjunction with array or bytes to store the length of array or string
+	intlen int64
+	typ    byte
+	ttl    [7]byte
+}
+
+func (m *ValkeyMessage) string() string {
+	if m.bytes == nil {
+		return ""
+	}
+	return unsafe.String(m.bytes, m.intlen)
+}
+
+func (m *ValkeyMessage) values() []ValkeyMessage {
+	if m.array == nil {
+		return nil
+	}
+	return unsafe.Slice(m.array, m.intlen)
+}
+
+func (m *ValkeyMessage) setString(s string) {
+	m.bytes = unsafe.StringData(s)
+	m.intlen = int64(len(s))
+}
+
+func (m *ValkeyMessage) setValues(values []ValkeyMessage) {
+	m.array = unsafe.SliceData(values)
+	m.intlen = int64(len(values))
 }
 
 func (m *ValkeyMessage) cachesize() int {
@@ -536,11 +571,11 @@ func (m *ValkeyMessage) cachesize() int {
 	switch m.typ {
 	case typeInteger, typeNull, typeBool:
 	case typeArray, typeMap, typeSet:
-		for _, val := range m.values {
+		for _, val := range m.values() {
 			n += val.cachesize()
 		}
 	default:
-		n += len(m.string)
+		n += len(m.string())
 	}
 	return n
 }
@@ -550,18 +585,18 @@ func (m *ValkeyMessage) serialize(o *bytes.Buffer) {
 	o.WriteByte(m.typ)
 	switch m.typ {
 	case typeInteger, typeNull, typeBool:
-		binary.BigEndian.PutUint64(buf[:], uint64(m.integer))
+		binary.BigEndian.PutUint64(buf[:], uint64(m.intlen))
 		o.Write(buf[:])
 	case typeArray, typeMap, typeSet:
-		binary.BigEndian.PutUint64(buf[:], uint64(len(m.values)))
+		binary.BigEndian.PutUint64(buf[:], uint64(len(m.values())))
 		o.Write(buf[:])
-		for _, val := range m.values {
+		for _, val := range m.values() {
 			val.serialize(o)
 		}
 	default:
-		binary.BigEndian.PutUint64(buf[:], uint64(len(m.string)))
+		binary.BigEndian.PutUint64(buf[:], uint64(len(m.string())))
 		o.Write(buf[:])
-		o.WriteString(m.string)
+		o.WriteString(m.string())
 	}
 }
 
@@ -574,25 +609,24 @@ func (m *ValkeyMessage) unmarshalView(c int64, buf []byte) (int64, error) {
 	}
 	m.typ = buf[c]
 	c += 1
-	m.integer = int64(binary.BigEndian.Uint64(buf[c : c+8]))
+	size := int64(binary.BigEndian.Uint64(buf[c : c+8]))
 	c += 8 // TODO: can we use VarInt instead of fixed 8 bytes for length?
 	switch m.typ {
 	case typeInteger, typeNull, typeBool:
+		m.intlen = size
 	case typeArray, typeMap, typeSet:
-		m.values = make([]ValkeyMessage, m.integer)
-		m.integer = 0
-		for i := range m.values {
-			if c, err = m.values[i].unmarshalView(c, buf); err != nil {
+		m.setValues(make([]ValkeyMessage, size))
+		for i := range m.values() {
+			if c, err = m.values()[i].unmarshalView(c, buf); err != nil {
 				break
 			}
 		}
 	default:
-		if int64(len(buf)) < c+m.integer {
+		if int64(len(buf)) < c+size {
 			return 0, ErrCacheUnmarshal
 		}
-		m.string = BinaryString(buf[c : c+m.integer])
-		c += m.integer
-		m.integer = 0
+		m.setString(BinaryString(buf[c : c+size]))
+		c += size
 	}
 	return c, err
 }
@@ -672,7 +706,7 @@ func (m *ValkeyMessage) Error() error {
 	if m.typ == typeSimpleErr || m.typ == typeBlobErr {
 		// kvrocks: https://github.com/valkey/rueidis/issues/152#issuecomment-1333923750
 		mm := *m
-		mm.string = strings.TrimPrefix(m.string, "ERR ")
+		mm.setString(strings.TrimPrefix(m.string(), "ERR "))
 		return (*ValkeyError)(&mm)
 	}
 	return nil
@@ -681,13 +715,13 @@ func (m *ValkeyMessage) Error() error {
 // ToString check if message is a valkey string response, and return it
 func (m *ValkeyMessage) ToString() (val string, err error) {
 	if m.IsString() {
-		return m.string, nil
+		return m.string(), nil
 	}
-	if m.IsInt64() || m.values != nil {
+	if m.IsInt64() || m.array != nil {
 		typ := m.typ
 		return "", fmt.Errorf("%w: valkey message type %s is not a string", errParse, typeNames[typ])
 	}
-	return m.string, m.Error()
+	return m.string(), m.Error()
 }
 
 // AsReader check if message is a valkey string response and wrap it with the strings.NewReader
@@ -721,7 +755,7 @@ func (m *ValkeyMessage) DecodeJSON(v any) (err error) {
 // AsInt64 check if message is a valkey string response, and parse it as int64
 func (m *ValkeyMessage) AsInt64() (val int64, err error) {
 	if m.IsInt64() {
-		return m.integer, nil
+		return m.intlen, nil
 	}
 	v, err := m.ToString()
 	if err != nil {
@@ -733,7 +767,7 @@ func (m *ValkeyMessage) AsInt64() (val int64, err error) {
 // AsUint64 check if message is a valkey string response, and parse it as uint64
 func (m *ValkeyMessage) AsUint64() (val uint64, err error) {
 	if m.IsInt64() {
-		return uint64(m.integer), nil
+		return uint64(m.intlen), nil
 	}
 	v, err := m.ToString()
 	if err != nil {
@@ -749,13 +783,13 @@ func (m *ValkeyMessage) AsBool() (val bool, err error) {
 	}
 	switch m.typ {
 	case typeBlobString, typeSimpleString:
-		val = m.string == "OK"
+		val = m.string() == "OK"
 		return
 	case typeInteger:
-		val = m.integer != 0
+		val = m.intlen != 0
 		return
 	case typeBool:
-		val = m.integer == 1
+		val = m.intlen == 1
 		return
 	default:
 		typ := m.typ
@@ -766,7 +800,7 @@ func (m *ValkeyMessage) AsBool() (val bool, err error) {
 // AsFloat64 check if message is a valkey string response, and parse it as float64
 func (m *ValkeyMessage) AsFloat64() (val float64, err error) {
 	if m.IsFloat64() {
-		return util.ToFloat64(m.string)
+		return util.ToFloat64(m.string())
 	}
 	v, err := m.ToString()
 	if err != nil {
@@ -778,7 +812,7 @@ func (m *ValkeyMessage) AsFloat64() (val float64, err error) {
 // ToInt64 check if message is a valkey RESP3 int response, and return it
 func (m *ValkeyMessage) ToInt64() (val int64, err error) {
 	if m.IsInt64() {
-		return m.integer, nil
+		return m.intlen, nil
 	}
 	if err = m.Error(); err != nil {
 		return 0, err
@@ -790,7 +824,7 @@ func (m *ValkeyMessage) ToInt64() (val int64, err error) {
 // ToBool check if message is a valkey RESP3 bool response, and return it
 func (m *ValkeyMessage) ToBool() (val bool, err error) {
 	if m.IsBool() {
-		return m.integer == 1, nil
+		return m.intlen == 1, nil
 	}
 	if err = m.Error(); err != nil {
 		return false, err
@@ -802,7 +836,7 @@ func (m *ValkeyMessage) ToBool() (val bool, err error) {
 // ToFloat64 check if message is a valkey RESP3 double response, and return it
 func (m *ValkeyMessage) ToFloat64() (val float64, err error) {
 	if m.IsFloat64() {
-		return util.ToFloat64(m.string)
+		return util.ToFloat64(m.string())
 	}
 	if err = m.Error(); err != nil {
 		return 0, err
@@ -814,7 +848,7 @@ func (m *ValkeyMessage) ToFloat64() (val float64, err error) {
 // ToArray check if message is a valkey array/set response, and return it
 func (m *ValkeyMessage) ToArray() ([]ValkeyMessage, error) {
 	if m.IsArray() {
-		return m.values, nil
+		return m.values(), nil
 	}
 	if err := m.Error(); err != nil {
 		return nil, err
@@ -832,7 +866,7 @@ func (m *ValkeyMessage) AsStrSlice() ([]string, error) {
 	}
 	s := make([]string, 0, len(values))
 	for _, v := range values {
-		s = append(s, v.string)
+		s = append(s, v.string())
 	}
 	return s, nil
 }
@@ -846,12 +880,12 @@ func (m *ValkeyMessage) AsIntSlice() ([]int64, error) {
 	}
 	s := make([]int64, len(values))
 	for i, v := range values {
-		if len(v.string) != 0 {
-			if s[i], err = strconv.ParseInt(v.string, 10, 64); err != nil {
+		if len(v.string()) != 0 {
+			if s[i], err = strconv.ParseInt(v.string(), 10, 64); err != nil {
 				return nil, err
 			}
 		} else {
-			s[i] = v.integer
+			s[i] = v.intlen
 		}
 	}
 	return s, nil
@@ -866,12 +900,12 @@ func (m *ValkeyMessage) AsFloatSlice() ([]float64, error) {
 	}
 	s := make([]float64, len(values))
 	for i, v := range values {
-		if len(v.string) != 0 {
-			if s[i], err = util.ToFloat64(v.string); err != nil {
+		if len(v.string()) != 0 {
+			if s[i], err = util.ToFloat64(v.string()); err != nil {
 				return nil, err
 			}
 		} else {
-			s[i] = float64(v.integer)
+			s[i] = float64(v.intlen)
 		}
 	}
 	return s, nil
@@ -946,21 +980,21 @@ func (m *ValkeyMessage) AsXRead() (ret map[string][]XRangeEntry, err error) {
 		return nil, err
 	}
 	if m.IsMap() {
-		ret = make(map[string][]XRangeEntry, len(m.values)/2)
-		for i := 0; i < len(m.values); i += 2 {
-			if ret[m.values[i].string], err = m.values[i+1].AsXRange(); err != nil {
+		ret = make(map[string][]XRangeEntry, len(m.values())/2)
+		for i := 0; i < len(m.values()); i += 2 {
+			if ret[m.values()[i].string()], err = m.values()[i+1].AsXRange(); err != nil {
 				return nil, err
 			}
 		}
 		return ret, nil
 	}
 	if m.IsArray() {
-		ret = make(map[string][]XRangeEntry, len(m.values))
-		for _, v := range m.values {
-			if !v.IsArray() || len(v.values) != 2 {
-				return nil, fmt.Errorf("got %d, wanted 2", len(v.values))
+		ret = make(map[string][]XRangeEntry, len(m.values()))
+		for _, v := range m.values() {
+			if !v.IsArray() || len(v.values()) != 2 {
+				return nil, fmt.Errorf("got %d, wanted 2", len(v.values()))
 			}
-			if ret[v.values[0].string], err = v.values[1].AsXRange(); err != nil {
+			if ret[v.values()[0].string()], err = v.values()[1].AsXRange(); err != nil {
 				return nil, err
 			}
 		}
@@ -1004,7 +1038,7 @@ func (m *ValkeyMessage) AsZScores() ([]ZScore, error) {
 	if len(arr) > 0 && arr[0].IsArray() {
 		scores := make([]ZScore, len(arr))
 		for i, v := range arr {
-			if scores[i], err = toZScore(v.values); err != nil {
+			if scores[i], err = toZScore(v.values()); err != nil {
 				return nil, err
 			}
 		}
@@ -1047,8 +1081,8 @@ func (m *ValkeyMessage) AsMap() (map[string]ValkeyMessage, error) {
 	if err := m.Error(); err != nil {
 		return nil, err
 	}
-	if (m.IsMap() || m.IsArray()) && len(m.values)%2 == 0 {
-		return toMap(m.values)
+	if (m.IsMap() || m.IsArray()) && len(m.values())%2 == 0 {
+		return toMap(m.values())
 	}
 	typ := m.typ
 	return nil, fmt.Errorf("%w: valkey message type %s is not a map/array/set or its length is not even", errParse, typeNames[typ])
@@ -1060,12 +1094,12 @@ func (m *ValkeyMessage) AsStrMap() (map[string]string, error) {
 	if err := m.Error(); err != nil {
 		return nil, err
 	}
-	if (m.IsMap() || m.IsArray()) && len(m.values)%2 == 0 {
-		r := make(map[string]string, len(m.values)/2)
-		for i := 0; i < len(m.values); i += 2 {
-			k := m.values[i]
-			v := m.values[i+1]
-			r[k.string] = v.string
+	if (m.IsMap() || m.IsArray()) && len(m.values())%2 == 0 {
+		r := make(map[string]string, len(m.values())/2)
+		for i := 0; i < len(m.values()); i += 2 {
+			k := m.values()[i]
+			v := m.values()[i+1]
+			r[k.string()] = v.string()
 		}
 		return r, nil
 	}
@@ -1079,19 +1113,19 @@ func (m *ValkeyMessage) AsIntMap() (map[string]int64, error) {
 	if err := m.Error(); err != nil {
 		return nil, err
 	}
-	if (m.IsMap() || m.IsArray()) && len(m.values)%2 == 0 {
+	if (m.IsMap() || m.IsArray()) && len(m.values())%2 == 0 {
 		var err error
-		r := make(map[string]int64, len(m.values)/2)
-		for i := 0; i < len(m.values); i += 2 {
-			k := m.values[i]
-			v := m.values[i+1]
+		r := make(map[string]int64, len(m.values())/2)
+		for i := 0; i < len(m.values()); i += 2 {
+			k := m.values()[i]
+			v := m.values()[i+1]
 			if k.typ == typeBlobString || k.typ == typeSimpleString {
-				if len(v.string) != 0 {
-					if r[k.string], err = strconv.ParseInt(v.string, 0, 64); err != nil {
+				if len(v.string()) != 0 {
+					if r[k.string()], err = strconv.ParseInt(v.string(), 0, 64); err != nil {
 						return nil, err
 					}
 				} else if v.typ == typeInteger || v.typ == typeNull {
-					r[k.string] = v.integer
+					r[k.string()] = v.intlen
 				}
 			}
 		}
@@ -1110,9 +1144,9 @@ func (m *ValkeyMessage) AsLMPop() (kvs KeyValues, err error) {
 	if err = m.Error(); err != nil {
 		return KeyValues{}, err
 	}
-	if len(m.values) >= 2 {
-		kvs.Key = m.values[0].string
-		kvs.Values, err = m.values[1].AsStrSlice()
+	if len(m.values()) >= 2 {
+		kvs.Key = m.values()[0].string()
+		kvs.Values, err = m.values()[1].AsStrSlice()
 		return
 	}
 	typ := m.typ
@@ -1128,9 +1162,9 @@ func (m *ValkeyMessage) AsZMPop() (kvs KeyZScores, err error) {
 	if err = m.Error(); err != nil {
 		return KeyZScores{}, err
 	}
-	if len(m.values) >= 2 {
-		kvs.Key = m.values[0].string
-		kvs.Values, err = m.values[1].AsZScores()
+	if len(m.values()) >= 2 {
+		kvs.Key = m.values()[0].string()
+		kvs.Values, err = m.values()[1].AsZScores()
 		return
 	}
 	typ := m.typ
@@ -1148,27 +1182,27 @@ func (m *ValkeyMessage) AsFtSearch() (total int64, docs []FtSearchDoc, err error
 		return 0, nil, err
 	}
 	if m.IsMap() {
-		for i := 0; i < len(m.values); i += 2 {
-			switch m.values[i].string {
+		for i := 0; i < len(m.values()); i += 2 {
+			switch m.values()[i].string() {
 			case "total_results":
-				total = m.values[i+1].integer
+				total = m.values()[i+1].intlen
 			case "results":
-				records := m.values[i+1].values
+				records := m.values()[i+1].values()
 				docs = make([]FtSearchDoc, len(records))
 				for d, record := range records {
-					for j := 0; j < len(record.values); j += 2 {
-						switch record.values[j].string {
+					for j := 0; j < len(record.values()); j += 2 {
+						switch record.values()[j].string() {
 						case "id":
-							docs[d].Key = record.values[j+1].string
+							docs[d].Key = record.values()[j+1].string()
 						case "extra_attributes":
-							docs[d].Doc, _ = record.values[j+1].AsStrMap()
+							docs[d].Doc, _ = record.values()[j+1].AsStrMap()
 						case "score":
-							docs[d].Score, _ = strconv.ParseFloat(record.values[j+1].string, 64)
+							docs[d].Score, _ = strconv.ParseFloat(record.values()[j+1].string(), 64)
 						}
 					}
 				}
 			case "error":
-				for _, e := range m.values[i+1].values {
+				for _, e := range m.values()[i+1].values() {
 					e := e
 					return 0, nil, (*ValkeyError)(&e)
 				}
@@ -1176,36 +1210,36 @@ func (m *ValkeyMessage) AsFtSearch() (total int64, docs []FtSearchDoc, err error
 		}
 		return
 	}
-	if len(m.values) > 0 {
-		total = m.values[0].integer
+	if len(m.values()) > 0 {
+		total = m.values()[0].intlen
 		wscore := false
 		wattrs := false
 		offset := 1
-		if len(m.values) > 2 {
-			if m.values[2].string == "" {
+		if len(m.values()) > 2 {
+			if m.values()[2].string() == "" {
 				wattrs = true
 				offset++
 			} else {
-				_, err1 := strconv.ParseFloat(m.values[1].string, 64)
-				_, err2 := strconv.ParseFloat(m.values[2].string, 64)
+				_, err1 := strconv.ParseFloat(m.values()[1].string(), 64)
+				_, err2 := strconv.ParseFloat(m.values()[2].string(), 64)
 				wscore = err1 != nil && err2 == nil
 				offset++
 			}
 		}
-		if len(m.values) > 3 && m.values[3].string == "" {
+		if len(m.values()) > 3 && m.values()[3].string() == "" {
 			wattrs = true
 			offset++
 		}
-		docs = make([]FtSearchDoc, 0, (len(m.values)-1)/offset)
-		for i := 1; i < len(m.values); i++ {
-			doc := FtSearchDoc{Key: m.values[i].string}
+		docs = make([]FtSearchDoc, 0, (len(m.values())-1)/offset)
+		for i := 1; i < len(m.values()); i++ {
+			doc := FtSearchDoc{Key: m.values()[i].string()}
 			if wscore {
 				i++
-				doc.Score, _ = strconv.ParseFloat(m.values[i].string, 64)
+				doc.Score, _ = strconv.ParseFloat(m.values()[i].string(), 64)
 			}
 			if wattrs {
 				i++
-				doc.Doc, _ = m.values[i].AsStrMap()
+				doc.Doc, _ = m.values()[i].AsStrMap()
 			}
 			docs = append(docs, doc)
 		}
@@ -1220,23 +1254,23 @@ func (m *ValkeyMessage) AsFtAggregate() (total int64, docs []map[string]string, 
 		return 0, nil, err
 	}
 	if m.IsMap() {
-		for i := 0; i < len(m.values); i += 2 {
-			switch m.values[i].string {
+		for i := 0; i < len(m.values()); i += 2 {
+			switch m.values()[i].string() {
 			case "total_results":
-				total = m.values[i+1].integer
+				total = m.values()[i+1].intlen
 			case "results":
-				records := m.values[i+1].values
+				records := m.values()[i+1].values()
 				docs = make([]map[string]string, len(records))
 				for d, record := range records {
-					for j := 0; j < len(record.values); j += 2 {
-						switch record.values[j].string {
+					for j := 0; j < len(record.values()); j += 2 {
+						switch record.values()[j].string() {
 						case "extra_attributes":
-							docs[d], _ = record.values[j+1].AsStrMap()
+							docs[d], _ = record.values()[j+1].AsStrMap()
 						}
 					}
 				}
 			case "error":
-				for _, e := range m.values[i+1].values {
+				for _, e := range m.values()[i+1].values() {
 					e := e
 					return 0, nil, (*ValkeyError)(&e)
 				}
@@ -1244,10 +1278,10 @@ func (m *ValkeyMessage) AsFtAggregate() (total int64, docs []map[string]string, 
 		}
 		return
 	}
-	if len(m.values) > 0 {
-		total = m.values[0].integer
-		docs = make([]map[string]string, len(m.values)-1)
-		for d, record := range m.values[1:] {
+	if len(m.values()) > 0 {
+		total = m.values()[0].intlen
+		docs = make([]map[string]string, len(m.values())-1)
+		for d, record := range m.values()[1:] {
 			docs[d], _ = record.AsStrMap()
 		}
 		return
@@ -1257,9 +1291,9 @@ func (m *ValkeyMessage) AsFtAggregate() (total int64, docs []map[string]string, 
 }
 
 func (m *ValkeyMessage) AsFtAggregateCursor() (cursor, total int64, docs []map[string]string, err error) {
-	if m.IsArray() && len(m.values) == 2 && (m.values[0].IsArray() || m.values[0].IsMap()) {
-		total, docs, err = m.values[0].AsFtAggregate()
-		cursor = m.values[1].integer
+	if m.IsArray() && len(m.values()) == 2 && (m.values()[0].IsArray() || m.values()[0].IsMap()) {
+		total, docs, err = m.values()[0].AsFtAggregate()
+		cursor = m.values()[1].intlen
 	} else {
 		total, docs, err = m.AsFtAggregate()
 	}
@@ -1281,17 +1315,17 @@ func (m *ValkeyMessage) AsGeosearch() ([]GeoLocation, error) {
 	for _, v := range arr {
 		var loc GeoLocation
 		if v.IsString() {
-			loc.Name = v.string
+			loc.Name = v.string()
 		} else {
-			info := v.values
+			info := v.values()
 			var i int
 
 			//name
-			loc.Name = info[i].string
+			loc.Name = info[i].string()
 			i++
 			//distance
-			if i < len(info) && info[i].string != "" {
-				loc.Dist, err = util.ToFloat64(info[i].string)
+			if i < len(info) && info[i].string() != "" {
+				loc.Dist, err = util.ToFloat64(info[i].string())
 				if err != nil {
 					return nil, err
 				}
@@ -1299,12 +1333,12 @@ func (m *ValkeyMessage) AsGeosearch() ([]GeoLocation, error) {
 			}
 			//hash
 			if i < len(info) && info[i].IsInt64() {
-				loc.GeoHash = info[i].integer
+				loc.GeoHash = info[i].intlen
 				i++
 			}
 			//coordinates
-			if i < len(info) && info[i].values != nil {
-				cord := info[i].values
+			if i < len(info) && info[i].array != nil {
+				cord := info[i].values()
 				if len(cord) < 2 {
 					return nil, fmt.Errorf("got %d, expected 2", len(info))
 				}
@@ -1320,7 +1354,7 @@ func (m *ValkeyMessage) AsGeosearch() ([]GeoLocation, error) {
 // ToMap check if message is a valkey RESP3 map response, and return it
 func (m *ValkeyMessage) ToMap() (map[string]ValkeyMessage, error) {
 	if m.IsMap() {
-		return toMap(m.values)
+		return toMap(m.values())
 	}
 	if err := m.Error(); err != nil {
 		return nil, err
@@ -1336,27 +1370,27 @@ func (m *ValkeyMessage) ToAny() (any, error) {
 	}
 	switch m.typ {
 	case typeFloat:
-		return util.ToFloat64(m.string)
+		return util.ToFloat64(m.string())
 	case typeBlobString, typeSimpleString, typeVerbatimString, typeBigNumber:
-		return m.string, nil
+		return m.string(), nil
 	case typeBool:
-		return m.integer == 1, nil
+		return m.intlen == 1, nil
 	case typeInteger:
-		return m.integer, nil
+		return m.intlen, nil
 	case typeMap:
-		vs := make(map[string]any, len(m.values)/2)
-		for i := 0; i < len(m.values); i += 2 {
-			if v, err := m.values[i+1].ToAny(); err != nil && !IsValkeyNil(err) {
-				vs[m.values[i].string] = err
+		vs := make(map[string]any, len(m.values())/2)
+		for i := 0; i < len(m.values()); i += 2 {
+			if v, err := m.values()[i+1].ToAny(); err != nil && !IsValkeyNil(err) {
+				vs[m.values()[i].string()] = err
 			} else {
-				vs[m.values[i].string] = v
+				vs[m.values()[i].string()] = v
 			}
 		}
 		return vs, nil
 	case typeSet, typeArray:
-		vs := make([]any, len(m.values))
-		for i := 0; i < len(m.values); i++ {
-			if v, err := m.values[i].ToAny(); err != nil && !IsValkeyNil(err) {
+		vs := make([]any, len(m.values()))
+		for i := 0; i < len(m.values()); i++ {
+			if v, err := m.values()[i].ToAny(); err != nil && !IsValkeyNil(err) {
 				vs[i] = err
 			} else {
 				vs[i] = v
@@ -1429,7 +1463,7 @@ func toMap(values []ValkeyMessage) (map[string]ValkeyMessage, error) {
 	r := make(map[string]ValkeyMessage, len(values)/2)
 	for i := 0; i < len(values); i += 2 {
 		if values[i].typ == typeBlobString || values[i].typ == typeSimpleString {
-			r[values[i].string] = values[i+1]
+			r[values[i].string()] = values[i+1]
 			continue
 		}
 		typ := values[i].typ
@@ -1440,8 +1474,8 @@ func toMap(values []ValkeyMessage) (map[string]ValkeyMessage, error) {
 
 func (m *ValkeyMessage) approximateSize() (s int) {
 	s += messageStructSize
-	s += len(m.string)
-	for _, v := range m.values {
+	s += len(m.string())
+	for _, v := range m.values() {
 		s += v.approximateSize()
 	}
 	return
@@ -1454,6 +1488,20 @@ func (m *ValkeyMessage) String() string {
 }
 
 type prettyValkeyMessage ValkeyMessage
+
+func (m *prettyValkeyMessage) string() string {
+	if m.bytes == nil {
+		return ""
+	}
+	return unsafe.String(m.bytes, m.intlen)
+}
+
+func (m *prettyValkeyMessage) values() []ValkeyMessage {
+	if m.array == nil {
+		return nil
+	}
+	return unsafe.Slice(m.array, m.intlen)
+}
 
 // MarshalJSON implements json.Marshaler interface
 func (m *prettyValkeyMessage) MarshalJSON() ([]byte, error) {
@@ -1477,17 +1525,33 @@ func (m *prettyValkeyMessage) MarshalJSON() ([]byte, error) {
 	}
 	switch m.typ {
 	case typeFloat, typeBlobString, typeSimpleString, typeVerbatimString, typeBigNumber:
-		obj.Value = m.string
+		obj.Value = m.string()
 	case typeBool:
-		obj.Value = m.integer == 1
+		obj.Value = m.intlen == 1
 	case typeInteger:
-		obj.Value = m.integer
+		obj.Value = m.intlen
 	case typeMap, typeSet, typeArray:
-		values := make([]prettyValkeyMessage, len(m.values))
-		for i, value := range m.values {
+		values := make([]prettyValkeyMessage, len(m.values()))
+		for i, value := range m.values() {
 			values[i] = prettyValkeyMessage(value)
 		}
 		obj.Value = values
 	}
 	return json.Marshal(obj)
+}
+
+func slicemsg(typ byte, values []ValkeyMessage) ValkeyMessage {
+	return ValkeyMessage{
+		typ:    typ,
+		array:  unsafe.SliceData(values),
+		intlen: int64(len(values)),
+	}
+}
+
+func strmsg(typ byte, value string) ValkeyMessage {
+	return ValkeyMessage{
+		typ:    typ,
+		bytes:  unsafe.StringData(value),
+		intlen: int64(len(value)),
+	}
 }

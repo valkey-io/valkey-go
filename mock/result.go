@@ -25,17 +25,17 @@ func ErrorResult(err error) valkey.ValkeyResult {
 }
 
 func ValkeyString(v string) valkey.ValkeyMessage {
-	m := message{typ: '+', string: v}
+	m := strmsg('+', v)
 	return *(*valkey.ValkeyMessage)(unsafe.Pointer(&m))
 }
 
 func ValkeyBlobString(v string) valkey.ValkeyMessage {
-	m := message{typ: '$', string: v}
+	m := strmsg('$', v)
 	return *(*valkey.ValkeyMessage)(unsafe.Pointer(&m))
 }
 
 func ValkeyError(v string) valkey.ValkeyMessage {
-	m := message{typ: '-', string: v}
+	m := strmsg('-', v)
 	return *(*valkey.ValkeyMessage)(unsafe.Pointer(&m))
 }
 
@@ -45,7 +45,7 @@ func ValkeyInt64(v int64) valkey.ValkeyMessage {
 }
 
 func ValkeyFloat64(v float64) valkey.ValkeyMessage {
-	m := message{typ: ',', string: strconv.FormatFloat(v, 'f', -1, 64)}
+	m := strmsg(',', strconv.FormatFloat(v, 'f', -1, 64))
 	return *(*valkey.ValkeyMessage)(unsafe.Pointer(&m))
 }
 
@@ -63,7 +63,7 @@ func ValkeyNil() valkey.ValkeyMessage {
 }
 
 func ValkeyArray(values ...valkey.ValkeyMessage) valkey.ValkeyMessage {
-	m := message{typ: '*', values: values}
+	m := slicemsg('*', values)
 	return *(*valkey.ValkeyMessage)(unsafe.Pointer(&m))
 }
 
@@ -73,29 +73,29 @@ func ValkeyMap(kv map[string]valkey.ValkeyMessage) valkey.ValkeyMessage {
 		values = append(values, ValkeyString(k))
 		values = append(values, v)
 	}
-	m := message{typ: '%', values: values}
+	m := slicemsg('%', values)
 	return *(*valkey.ValkeyMessage)(unsafe.Pointer(&m))
 }
 
 func serialize(m message, buf *bytes.Buffer) {
 	switch m.typ {
 	case '$', '!', '=':
-		buf.WriteString(fmt.Sprintf("%s%d\r\n%s\r\n", string(m.typ), len(m.string), m.string))
+		buf.WriteString(fmt.Sprintf("%s%d\r\n%s\r\n", string(m.typ), len(m.string()), m.string()))
 	case '+', '-', ',', '(':
-		buf.WriteString(fmt.Sprintf("%s%s\r\n", string(m.typ), m.string))
+		buf.WriteString(fmt.Sprintf("%s%s\r\n", string(m.typ), m.string()))
 	case ':', '#':
 		buf.WriteString(fmt.Sprintf("%s%d\r\n", string(m.typ), m.integer))
 	case '_':
 		buf.WriteString(fmt.Sprintf("%s\r\n", string(m.typ)))
 	case '*':
-		buf.WriteString(fmt.Sprintf("%s%d\r\n", string(m.typ), len(m.values)))
-		for _, v := range m.values {
+		buf.WriteString(fmt.Sprintf("%s%d\r\n", string(m.typ), len(m.values())))
+		for _, v := range m.values() {
 			pv := *(*message)(unsafe.Pointer(&v))
 			serialize(pv, buf)
 		}
 	case '%':
-		buf.WriteString(fmt.Sprintf("%s%d\r\n", string(m.typ), len(m.values)/2))
-		for _, v := range m.values {
+		buf.WriteString(fmt.Sprintf("%s%d\r\n", string(m.typ), len(m.values())/2))
+		for _, v := range m.values() {
 			pv := *(*message)(unsafe.Pointer(&v))
 			serialize(pv, buf)
 		}
@@ -127,11 +127,41 @@ func MultiValkeyResultStreamError(err error) valkey.ValkeyResultStream {
 
 type message struct {
 	attrs   *valkey.ValkeyMessage
-	string  string
-	values  []valkey.ValkeyMessage
+	bytes   *byte
+	array   *valkey.ValkeyMessage
 	integer int64
 	typ     byte
 	ttl     [7]byte
+}
+
+func (m *message) string() string {
+	if m.bytes == nil {
+		return ""
+	}
+	return unsafe.String(m.bytes, m.integer)
+}
+
+func (m *message) values() []valkey.ValkeyMessage {
+	if m.array == nil {
+		return nil
+	}
+	return unsafe.Slice(m.array, m.integer)
+}
+
+func slicemsg(typ byte, values []valkey.ValkeyMessage) message {
+	return message{
+		typ:     typ,
+		array:   unsafe.SliceData(values),
+		integer: int64(len(values)),
+	}
+}
+
+func strmsg(typ byte, value string) message {
+	return message{
+		typ:     typ,
+		bytes:   unsafe.StringData(value),
+		integer: int64(len(value)),
+	}
 }
 
 type result struct {

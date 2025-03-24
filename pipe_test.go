@@ -47,12 +47,12 @@ func (r *valkeyMock) Expect(expected ...string) *valkeyExpect {
 	if err != nil {
 		return &valkeyExpect{valkeyMock: r, err: err}
 	}
-	if len(expected) != len(m.values) {
-		r.t.Fatalf("valkeymock receive unexpected command length: expected %v, got : %v", len(expected), m.values)
+	if len(expected) != len(m.values()) {
+		r.t.Fatalf("valkeymock receive unexpected command length: expected %v, got : %v", len(expected), m.values())
 	}
 	for i, expected := range expected {
-		if m.values[i].string != expected {
-			r.t.Fatalf("valkeymock receive unexpected command: expected %v, got : %v", expected, m.values[i])
+		if m.values()[i].string() != expected {
+			r.t.Fatalf("valkeymock receive unexpected command: expected %v, got : %v", expected, m.values()[i])
 		}
 	}
 	return &valkeyExpect{valkeyMock: r}
@@ -61,7 +61,7 @@ func (r *valkeyMock) Expect(expected ...string) *valkeyExpect {
 func (r *valkeyExpect) ReplyString(replies ...string) *valkeyExpect {
 	for _, reply := range replies {
 		if r.err == nil {
-			r.Reply(ValkeyMessage{typ: '+', string: reply})
+			r.Reply(strmsg('+', reply))
 		}
 	}
 	return r
@@ -70,7 +70,7 @@ func (r *valkeyExpect) ReplyString(replies ...string) *valkeyExpect {
 func (r *valkeyExpect) ReplyBlobString(replies ...string) *valkeyExpect {
 	for _, reply := range replies {
 		if r.err == nil {
-			r.Reply(ValkeyMessage{typ: '$', string: reply})
+			r.Reply(strmsg('$', reply))
 		}
 	}
 	return r
@@ -79,7 +79,7 @@ func (r *valkeyExpect) ReplyBlobString(replies ...string) *valkeyExpect {
 func (r *valkeyExpect) ReplyError(replies ...string) *valkeyExpect {
 	for _, reply := range replies {
 		if r.err == nil {
-			r.Reply(ValkeyMessage{typ: '-', string: reply})
+			r.Reply(strmsg('-', reply))
 		}
 	}
 	return r
@@ -88,7 +88,7 @@ func (r *valkeyExpect) ReplyError(replies ...string) *valkeyExpect {
 func (r *valkeyExpect) ReplyInteger(replies ...int64) *valkeyExpect {
 	for _, reply := range replies {
 		if r.err == nil {
-			r.Reply(ValkeyMessage{typ: ':', integer: reply})
+			r.Reply(ValkeyMessage{typ: ':', intlen: reply})
 		}
 	}
 	return r
@@ -111,14 +111,14 @@ func write(o io.Writer, m ValkeyMessage) (err error) {
 	_, err = o.Write([]byte{m.typ})
 	switch m.typ {
 	case '$':
-		_, _ = o.Write(append([]byte(strconv.Itoa(len(m.string))), '\r', '\n'))
-		_, err = o.Write(append([]byte(m.string), '\r', '\n'))
+		_, _ = o.Write(append([]byte(strconv.Itoa(len(m.string()))), '\r', '\n'))
+		_, err = o.Write(append([]byte(m.string()), '\r', '\n'))
 	case '+', '-', '_':
-		_, err = o.Write(append([]byte(m.string), '\r', '\n'))
+		_, err = o.Write(append([]byte(m.string()), '\r', '\n'))
 	case ':':
-		_, err = o.Write(append([]byte(strconv.FormatInt(m.integer, 10)), '\r', '\n'))
+		_, err = o.Write(append([]byte(strconv.FormatInt(m.intlen, 10)), '\r', '\n'))
 	case '%', '>', '*':
-		size := int64(len(m.values))
+		size := int64(len(m.values()))
 		if m.typ == '%' {
 			if size%2 != 0 {
 				panic("map message with wrong value length")
@@ -126,7 +126,7 @@ func write(o io.Writer, m ValkeyMessage) (err error) {
 			size /= 2
 		}
 		_, err = o.Write(append([]byte(strconv.FormatInt(size, 10)), '\r', '\n'))
-		for _, v := range m.values {
+		for _, v := range m.values() {
 			err = write(o, v)
 		}
 	default:
@@ -147,15 +147,15 @@ func setup(t *testing.T, option ClientOption) (*pipe, *valkeyMock, func(), func(
 	}
 	go func() {
 		mock.Expect("HELLO", "3").
-			Reply(ValkeyMessage{
-				typ: '%',
-				values: []ValkeyMessage{
-					{typ: '+', string: "version"},
-					{typ: '+', string: "6.0.0"},
-					{typ: '+', string: "proto"},
-					{typ: ':', integer: 3},
+			Reply(slicemsg(
+				'%',
+				[]ValkeyMessage{
+					strmsg('+', "version"),
+					strmsg('+', "6.0.0"),
+					strmsg('+', "proto"),
+					{typ: ':', intlen: 3},
 				},
-			})
+			))
 		if option.ClientTrackingOptions != nil {
 			mock.Expect(append([]string{"CLIENT", "TRACKING", "ON"}, option.ClientTrackingOptions...)...).
 				ReplyString("OK")
@@ -172,7 +172,7 @@ func setup(t *testing.T, option ClientOption) (*pipe, *valkeyMock, func(), func(
 	if err != nil {
 		t.Fatalf("pipe setup failed: %v", err)
 	}
-	if info := p.Info(); info["version"].string != "6.0.0" {
+	if infoVersion := p.Info()["version"]; infoVersion.string() != "6.0.0" {
 		t.Fatalf("pipe setup failed, unexpected hello response: %v", p.Info())
 	}
 	if version := p.Version(); version != 6 {
@@ -209,15 +209,15 @@ func TestNewPipe(t *testing.T) {
 		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("HELLO", "3", "AUTH", "default", "pa", "SETNAME", "cn").
-				Reply(ValkeyMessage{
-					typ: '%',
-					values: []ValkeyMessage{
-						{typ: '+', string: "proto"},
-						{typ: ':', integer: 3},
-						{typ: '+', string: "availability_zone"},
-						{typ: '+', string: "us-west-1a"},
+				Reply(slicemsg(
+					'%',
+					[]ValkeyMessage{
+						strmsg('+', "proto"),
+						{typ: ':', intlen: 3},
+						strmsg('+', "availability_zone"),
+						strmsg('+', "us-west-1a"),
 					},
-				})
+				))
 			mock.Expect("CLIENT", "TRACKING", "ON", "OPTIN").
 				ReplyString("OK")
 			mock.Expect("SELECT", "1").
@@ -258,15 +258,15 @@ func TestNewPipe(t *testing.T) {
 			mock.Expect("AUTH", "pa").
 				ReplyString("OK")
 			mock.Expect("HELLO", "2").
-				Reply(ValkeyMessage{
-					typ: '*',
-					values: []ValkeyMessage{
-						{typ: '+', string: "proto"},
-						{typ: ':', integer: 2},
-						{typ: '+', string: "availability_zone"},
-						{typ: '+', string: "us-west-1a"},
+				Reply(slicemsg(
+					'*',
+					[]ValkeyMessage{
+						strmsg('+', "proto"),
+						{typ: ':', intlen: 2},
+						strmsg('+', "availability_zone"),
+						strmsg('+', "us-west-1a"),
 					},
-				})
+				))
 			mock.Expect("CLIENT", "SETNAME", "cn").
 				ReplyString("OK")
 			mock.Expect("SELECT", "1").
@@ -307,13 +307,13 @@ func TestNewPipe(t *testing.T) {
 		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("HELLO", "3", "AUTH", "ua", "pa", "SETNAME", "cn").
-				Reply(ValkeyMessage{
-					typ: '%',
-					values: []ValkeyMessage{
-						{typ: '+', string: "proto"},
-						{typ: ':', integer: 3},
+				Reply(slicemsg(
+					'%',
+					[]ValkeyMessage{
+						strmsg('+', "proto"),
+						{typ: ':', intlen: 3},
 					},
-				})
+				))
 			mock.Expect("CLIENT", "TRACKING", "ON", "OPTIN").
 				ReplyString("OK")
 			mock.Expect("SELECT", "1").
@@ -346,13 +346,13 @@ func TestNewPipe(t *testing.T) {
 		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("HELLO", "3", "AUTH", "ua", "pa", "SETNAME", "cn").
-				Reply(ValkeyMessage{
-					typ: '%',
-					values: []ValkeyMessage{
-						{typ: '+', string: "proto"},
-						{typ: ':', integer: 3},
+				Reply(slicemsg(
+					'%',
+					[]ValkeyMessage{
+						strmsg('+', "proto"),
+						{typ: ':', intlen: 3},
 					},
-				})
+				))
 			mock.Expect("CLIENT", "TRACKING", "ON", "OPTIN").
 				ReplyString("OK")
 			mock.Expect("SELECT", "1").
@@ -386,13 +386,13 @@ func TestNewPipe(t *testing.T) {
 		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("HELLO", "3").
-				Reply(ValkeyMessage{
-					typ: '%',
-					values: []ValkeyMessage{
-						{typ: '+', string: "proto"},
-						{typ: ':', integer: 3},
+				Reply(slicemsg(
+					'%',
+					[]ValkeyMessage{
+						strmsg('+', "proto"),
+						{typ: ':', intlen: 3},
 					},
-				})
+				))
 			mock.Expect("CLIENT", "TRACKING", "ON", "OPTIN", "NOLOOP").
 				ReplyString("OK")
 			mock.Expect("CLIENT", "SETINFO", "LIB-NAME", LibName).
@@ -417,13 +417,13 @@ func TestNewPipe(t *testing.T) {
 		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("HELLO", "3", "AUTH", "ua", "pa", "SETNAME", "cn").
-				Reply(ValkeyMessage{
-					typ: '%',
-					values: []ValkeyMessage{
-						{typ: '+', string: "proto"},
-						{typ: ':', integer: 3},
+				Reply(slicemsg(
+					'%',
+					[]ValkeyMessage{
+						strmsg('+', "proto"),
+						{typ: ':', intlen: 3},
 					},
-				})
+				))
 			mock.Expect("CLIENT", "TRACKING", "ON", "OPTIN").
 				ReplyString("OK")
 			mock.Expect("SELECT", "1").
@@ -456,13 +456,13 @@ func TestNewPipe(t *testing.T) {
 		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("HELLO", "3", "AUTH", "ua", "pa", "SETNAME", "cn").
-				Reply(ValkeyMessage{
-					typ: '%',
-					values: []ValkeyMessage{
-						{typ: '+', string: "proto"},
-						{typ: ':', integer: 3},
+				Reply(slicemsg(
+					'%',
+					[]ValkeyMessage{
+						strmsg('+', "proto"),
+						{typ: ':', intlen: 3},
 					},
-				})
+				))
 			mock.Expect("CLIENT", "TRACKING", "ON", "OPTIN").
 				ReplyString("OK")
 			mock.Expect("SELECT", "1").
@@ -521,13 +521,13 @@ func TestNewPipe(t *testing.T) {
 		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("HELLO", "3").
-				Reply(ValkeyMessage{
-					typ: '%',
-					values: []ValkeyMessage{
-						{typ: '+', string: "proto"},
-						{typ: ':', integer: 3},
+				Reply(slicemsg(
+					'%',
+					[]ValkeyMessage{
+						strmsg('+', "proto"),
+						{typ: ':', intlen: 3},
 					},
-				})
+				))
 			mock.Expect("CLIENT", "TRACKING", "ON", "OPTIN").
 				ReplyString("OK")
 		}()
@@ -597,27 +597,27 @@ func TestNewRESP2Pipe(t *testing.T) {
 		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
 		go func() {
 			mock.Expect("HELLO", "3").
-				Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-					{typ: '+', string: "server"},
-					{typ: '+', string: "valkey"},
-					{typ: '+', string: "proto"},
-					{typ: ':', integer: 2},
-					{typ: '+', string: "availability_zone"},
-					{typ: '+', string: "us-west-1a"},
-				}})
+				Reply(slicemsg('*', []ValkeyMessage{
+					strmsg('+', "server"),
+					strmsg('+', "redis"),
+					strmsg('+', "proto"),
+					{typ: ':', intlen: 2},
+					strmsg('+', "availability_zone"),
+					strmsg('+', "us-west-1a"),
+				}))
 			mock.Expect("CLIENT", "SETINFO", "LIB-NAME", LibName).
 				ReplyError("UNKNOWN COMMAND")
 			mock.Expect("CLIENT", "SETINFO", "LIB-VER", LibVer).
 				ReplyError("UNKNOWN COMMAND")
 			mock.Expect("HELLO", "2").
-				Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-					{typ: '+', string: "server"},
-					{typ: '+', string: "redis"},
-					{typ: '+', string: "proto"},
-					{typ: ':', integer: 2},
-					{typ: '+', string: "availability_zone"},
-					{typ: '+', string: "us-west-1a"},
-				}})
+				Reply(slicemsg('*', []ValkeyMessage{
+					strmsg('+', "server"),
+					strmsg('+', "redis"),
+					strmsg('+', "proto"),
+					{typ: ':', intlen: 2},
+					strmsg('+', "availability_zone"),
+					strmsg('+', "us-west-1a"),
+				}))
 			mock.Expect("CLIENT", "SETINFO", "LIB-NAME", LibName).
 				ReplyError("UNKNOWN COMMAND")
 			mock.Expect("CLIENT", "SETINFO", "LIB-VER", LibVer).
@@ -890,7 +890,7 @@ func TestIgnoreOutOfBandDataDuringSyncMode(t *testing.T) {
 	p, mock, cancel, _ := setup(t, ClientOption{})
 	defer cancel()
 	go func() {
-		mock.Expect("PING").Reply(ValkeyMessage{typ: '>', string: "This should be ignore"}).ReplyString("OK")
+		mock.Expect("PING").Reply(strmsg('>', "This should be ignore")).ReplyString("OK")
 	}()
 	ExpectOK(t, p.Do(context.Background(), cmds.NewCompleted([]string{"PING"})))
 }
@@ -1219,11 +1219,11 @@ func TestNoReplyExceedRingSize(t *testing.T) {
 	}()
 
 	for i := 0; i < times; i++ {
-		mock.Expect("UNSUBSCRIBE").Reply(ValkeyMessage{typ: '>', values: []ValkeyMessage{
-			{typ: '+', string: "unsubscribe"},
-			{typ: '+', string: "1"},
-			{typ: ':', integer: 0},
-		}}).Expect(cmds.PingCmd.Commands()...).Reply(ValkeyMessage{typ: '+', string: "PONG"})
+		mock.Expect("UNSUBSCRIBE").Reply(slicemsg('>', []ValkeyMessage{
+			strmsg('+', "unsubscribe"),
+			strmsg('+', "1"),
+			{typ: ':', intlen: 0},
+		})).Expect(cmds.PingCmd.Commands()...).Reply(strmsg('+', "PONG"))
 	}
 	<-wait
 }
@@ -1257,15 +1257,15 @@ func TestResponseSequenceWithPushMessageInjected(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			v := strconv.Itoa(i)
-			if val, _ := p.Do(context.Background(), cmds.NewCompleted([]string{"GET", v})).ToMessage(); val.string != v {
-				t.Errorf("out of order response, expected %v, got %v", v, val.string)
+			if val, _ := p.Do(context.Background(), cmds.NewCompleted([]string{"GET", v})).ToMessage(); val.string() != v {
+				t.Errorf("out of order response, expected %v, got %v", v, val.string())
 			}
 		}(i)
 	}
 	for i := 0; i < times; i++ {
 		m, _ := mock.ReadMessage()
-		mock.Expect().ReplyString(m.values[1].string).
-			Reply(ValkeyMessage{typ: '>', values: []ValkeyMessage{{typ: '+', string: "should be ignore"}}})
+		mock.Expect().ReplyString(m.values()[1].string()).
+			Reply(slicemsg('>', []ValkeyMessage{strmsg('+', "should be ignore")}))
 	}
 	wg.Wait()
 }
@@ -1285,19 +1285,19 @@ func TestClientSideCaching(t *testing.T) {
 			ReplyString("OK").
 			ReplyString("OK").
 			ReplyString("OK").
-			Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-				{typ: ':', integer: ttl},
-				{typ: '+', string: resp},
-			}})
+			Reply(slicemsg('*', []ValkeyMessage{
+				{typ: ':', intlen: ttl},
+				strmsg('+', resp),
+			}))
 	}
 	invalidateCSC := func(keys ValkeyMessage) {
-		mock.Expect().Reply(ValkeyMessage{
-			typ: '>',
-			values: []ValkeyMessage{
-				{typ: '+', string: "invalidate"},
+		mock.Expect().Reply(slicemsg(
+			'>',
+			[]ValkeyMessage{
+				strmsg('+', "invalidate"),
 				keys,
 			},
-		})
+		))
 	}
 
 	go func() {
@@ -1313,8 +1313,8 @@ func TestClientSideCaching(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			v, _ := p.DoCache(context.Background(), Cacheable(cmds.NewCompleted([]string{"GET", "a"})), 10*time.Second).ToMessage()
-			if v.string != "1" {
-				t.Errorf("unexpected cached result, expected %v, got %v", "1", v.string)
+			if v.string() != "1" {
+				t.Errorf("unexpected cached result, expected %v, got %v", "1", v.string())
 			}
 			if v.IsCacheHit() {
 				atomic.AddUint64(&hits, 1)
@@ -1334,13 +1334,13 @@ func TestClientSideCaching(t *testing.T) {
 	}
 
 	// cache invalidation
-	invalidateCSC(ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}}})
+	invalidateCSC(slicemsg('*', []ValkeyMessage{strmsg('+', "a")}))
 	go func() {
 		expectCSC(-1, "2")
 	}()
 
 	for {
-		if v, _ := p.DoCache(context.Background(), Cacheable(cmds.NewCompleted([]string{"GET", "a"})), time.Second).ToMessage(); v.string == "2" {
+		if v, _ := p.DoCache(context.Background(), Cacheable(cmds.NewCompleted([]string{"GET", "a"})), time.Second).ToMessage(); v.string() == "2" {
 			break
 		}
 		t.Logf("waiting for invalidating")
@@ -1353,7 +1353,7 @@ func TestClientSideCaching(t *testing.T) {
 	}()
 
 	for {
-		if v, _ := p.DoCache(context.Background(), Cacheable(cmds.NewCompleted([]string{"GET", "a"})), time.Second).ToMessage(); v.string == "3" {
+		if v, _ := p.DoCache(context.Background(), Cacheable(cmds.NewCompleted([]string{"GET", "a"})), time.Second).ToMessage(); v.string() == "3" {
 			break
 		}
 		t.Logf("waiting for invalidating")
@@ -1377,19 +1377,19 @@ func TestClientSideCachingBCAST(t *testing.T) {
 			ReplyString("OK").
 			ReplyString("OK").
 			ReplyString("OK").
-			Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-				{typ: ':', integer: ttl},
-				{typ: '+', string: resp},
-			}})
+			Reply(slicemsg('*', []ValkeyMessage{
+				{typ: ':', intlen: ttl},
+				strmsg('+', resp),
+			}))
 	}
 	invalidateCSC := func(keys ValkeyMessage) {
-		mock.Expect().Reply(ValkeyMessage{
-			typ: '>',
-			values: []ValkeyMessage{
-				{typ: '+', string: "invalidate"},
+		mock.Expect().Reply(slicemsg(
+			'>',
+			[]ValkeyMessage{
+				strmsg('+', "invalidate"),
 				keys,
 			},
-		})
+		))
 	}
 
 	go func() {
@@ -1405,8 +1405,8 @@ func TestClientSideCachingBCAST(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			v, _ := p.DoCache(context.Background(), Cacheable(cmds.NewCompleted([]string{"GET", "a"})), 10*time.Second).ToMessage()
-			if v.string != "1" {
-				t.Errorf("unexpected cached result, expected %v, got %v", "1", v.string)
+			if v.string() != "1" {
+				t.Errorf("unexpected cached result, expected %v, got %v", "1", v.string())
 			}
 			if v.IsCacheHit() {
 				atomic.AddUint64(&hits, 1)
@@ -1426,13 +1426,13 @@ func TestClientSideCachingBCAST(t *testing.T) {
 	}
 
 	// cache invalidation
-	invalidateCSC(ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}}})
+	invalidateCSC(slicemsg('*', []ValkeyMessage{strmsg('+', "a")}))
 	go func() {
 		expectCSC(-1, "2")
 	}()
 
 	for {
-		if v, _ := p.DoCache(context.Background(), Cacheable(cmds.NewCompleted([]string{"GET", "a"})), time.Second).ToMessage(); v.string == "2" {
+		if v, _ := p.DoCache(context.Background(), Cacheable(cmds.NewCompleted([]string{"GET", "a"})), time.Second).ToMessage(); v.string() == "2" {
 			break
 		}
 		t.Logf("waiting for invalidating")
@@ -1445,7 +1445,7 @@ func TestClientSideCachingBCAST(t *testing.T) {
 	}()
 
 	for {
-		if v, _ := p.DoCache(context.Background(), Cacheable(cmds.NewCompleted([]string{"GET", "a"})), time.Second).ToMessage(); v.string == "3" {
+		if v, _ := p.DoCache(context.Background(), Cacheable(cmds.NewCompleted([]string{"GET", "a"})), time.Second).ToMessage(); v.string() == "3" {
 			break
 		}
 		t.Logf("waiting for invalidating")
@@ -1469,19 +1469,19 @@ func TestClientSideCachingOPTOUT(t *testing.T) {
 			ReplyString("OK").
 			ReplyString("OK").
 			ReplyString("OK").
-			Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-				{typ: ':', integer: ttl},
-				{typ: '+', string: resp},
-			}})
+			Reply(slicemsg('*', []ValkeyMessage{
+				{typ: ':', intlen: ttl},
+				strmsg('+', resp),
+			}))
 	}
 	invalidateCSC := func(keys ValkeyMessage) {
-		mock.Expect().Reply(ValkeyMessage{
-			typ: '>',
-			values: []ValkeyMessage{
-				{typ: '+', string: "invalidate"},
+		mock.Expect().Reply(slicemsg(
+			'>',
+			[]ValkeyMessage{
+				strmsg('+', "invalidate"),
 				keys,
 			},
-		})
+		))
 	}
 
 	go func() {
@@ -1497,8 +1497,8 @@ func TestClientSideCachingOPTOUT(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			v, _ := p.DoCache(context.Background(), Cacheable(cmds.NewCompleted([]string{"GET", "a"})), 10*time.Second).ToMessage()
-			if v.string != "1" {
-				t.Errorf("unexpected cached result, expected %v, got %v", "1", v.string)
+			if v.string() != "1" {
+				t.Errorf("unexpected cached result, expected %v, got %v", "1", v.string())
 			}
 			if v.IsCacheHit() {
 				atomic.AddUint64(&hits, 1)
@@ -1518,13 +1518,13 @@ func TestClientSideCachingOPTOUT(t *testing.T) {
 	}
 
 	// cache invalidation
-	invalidateCSC(ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}}})
+	invalidateCSC(slicemsg('*', []ValkeyMessage{strmsg('+', "a")}))
 	go func() {
 		expectCSC(-1, "2")
 	}()
 
 	for {
-		if v, _ := p.DoCache(context.Background(), Cacheable(cmds.NewCompleted([]string{"GET", "a"})), time.Second).ToMessage(); v.string == "2" {
+		if v, _ := p.DoCache(context.Background(), Cacheable(cmds.NewCompleted([]string{"GET", "a"})), time.Second).ToMessage(); v.string() == "2" {
 			break
 		}
 		t.Logf("waiting for invalidating")
@@ -1537,7 +1537,7 @@ func TestClientSideCachingOPTOUT(t *testing.T) {
 	}()
 
 	for {
-		if v, _ := p.DoCache(context.Background(), Cacheable(cmds.NewCompleted([]string{"GET", "a"})), time.Second).ToMessage(); v.string == "3" {
+		if v, _ := p.DoCache(context.Background(), Cacheable(cmds.NewCompleted([]string{"GET", "a"})), time.Second).ToMessage(); v.string() == "3" {
 			break
 		}
 		t.Logf("waiting for invalidating")
@@ -1617,13 +1617,13 @@ func TestClientSideCachingMGet(t *testing.T) {
 	defer cancel()
 
 	invalidateCSC := func(keys ValkeyMessage) {
-		mock.Expect().Reply(ValkeyMessage{
-			typ: '>',
-			values: []ValkeyMessage{
-				{typ: '+', string: "invalidate"},
+		mock.Expect().Reply(slicemsg(
+			'>',
+			[]ValkeyMessage{
+				strmsg('+', "invalidate"),
 				keys,
 			},
-		})
+		))
 	}
 
 	go func() {
@@ -1640,16 +1640,16 @@ func TestClientSideCachingMGet(t *testing.T) {
 			ReplyString("OK").
 			ReplyString("OK").
 			ReplyString("OK").
-			Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-				{typ: ':', integer: 1000},
-				{typ: ':', integer: 2000},
-				{typ: ':', integer: 3000},
-				{typ: '*', values: []ValkeyMessage{
-					{typ: ':', integer: 1},
-					{typ: ':', integer: 2},
-					{typ: ':', integer: 3},
-				}},
-			}})
+			Reply(slicemsg('*', []ValkeyMessage{
+				{typ: ':', intlen: 1000},
+				{typ: ':', intlen: 2000},
+				{typ: ':', intlen: 3000},
+				slicemsg('*', []ValkeyMessage{
+					{typ: ':', intlen: 1},
+					{typ: ':', intlen: 2},
+					{typ: ':', intlen: 3},
+				}),
+			}))
 	}()
 	// single flight
 	miss := uint64(0)
@@ -1661,8 +1661,8 @@ func TestClientSideCachingMGet(t *testing.T) {
 			t.Errorf("unexpected cached mget length, expected 3, got %v", len(arr))
 		}
 		for i, v := range arr {
-			if v.integer != int64(i+1) {
-				t.Errorf("unexpected cached mget response, expected %v, got %v", i+1, v.integer)
+			if v.intlen != int64(i+1) {
+				t.Errorf("unexpected cached mget response, expected %v, got %v", i+1, v.intlen)
 			}
 		}
 		if ttl := p.cache.(*lru).GetTTL("a1", "GET"); !roughly(ttl, time.Second) {
@@ -1690,7 +1690,7 @@ func TestClientSideCachingMGet(t *testing.T) {
 	}
 
 	// partial cache invalidation
-	invalidateCSC(ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a1"}, {typ: '+', string: "a3"}}})
+	invalidateCSC(slicemsg('*', []ValkeyMessage{strmsg('+', "a1"), strmsg('+', "a3")}))
 	go func() {
 		mock.Expect("CLIENT", "CACHING", "YES").
 			Expect("MULTI").
@@ -1703,14 +1703,14 @@ func TestClientSideCachingMGet(t *testing.T) {
 			ReplyString("OK").
 			ReplyString("OK").
 			ReplyString("OK").
-			Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-				{typ: ':', integer: 10000},
-				{typ: ':', integer: 30000},
-				{typ: '*', values: []ValkeyMessage{
-					{typ: ':', integer: 10},
-					{typ: ':', integer: 30},
-				}},
-			}})
+			Reply(slicemsg('*', []ValkeyMessage{
+				{typ: ':', intlen: 10000},
+				{typ: ':', intlen: 30000},
+				slicemsg('*', []ValkeyMessage{
+					{typ: ':', intlen: 10},
+					{typ: ':', intlen: 30},
+				}),
+			}))
 	}()
 
 	for {
@@ -1725,14 +1725,14 @@ func TestClientSideCachingMGet(t *testing.T) {
 	if len(arr) != 3 {
 		t.Errorf("unexpected cached mget length, expected 3, got %v", len(arr))
 	}
-	if arr[1].integer != 2 {
-		t.Errorf("unexpected cached mget response, expected %v, got %v", 2, arr[1].integer)
+	if arr[1].intlen != 2 {
+		t.Errorf("unexpected cached mget response, expected %v, got %v", 2, arr[1].intlen)
 	}
-	if arr[0].integer != 10 {
-		t.Errorf("unexpected cached mget response, expected %v, got %v", 10, arr[0].integer)
+	if arr[0].intlen != 10 {
+		t.Errorf("unexpected cached mget response, expected %v, got %v", 10, arr[0].intlen)
 	}
-	if arr[2].integer != 30 {
-		t.Errorf("unexpected cached mget response, expected %v, got %v", 30, arr[2].integer)
+	if arr[2].intlen != 30 {
+		t.Errorf("unexpected cached mget response, expected %v, got %v", 30, arr[2].intlen)
 	}
 	if ttl := p.cache.(*lru).GetTTL("a1", "GET"); !roughly(ttl, time.Second*10) {
 		t.Errorf("unexpected ttl %v", ttl)
@@ -1751,13 +1751,13 @@ func TestClientSideCachingJSONMGet(t *testing.T) {
 	defer cancel()
 
 	invalidateCSC := func(keys ValkeyMessage) {
-		mock.Expect().Reply(ValkeyMessage{
-			typ: '>',
-			values: []ValkeyMessage{
-				{typ: '+', string: "invalidate"},
+		mock.Expect().Reply(slicemsg(
+			'>',
+			[]ValkeyMessage{
+				strmsg('+', "invalidate"),
 				keys,
 			},
-		})
+		))
 	}
 
 	go func() {
@@ -1774,16 +1774,16 @@ func TestClientSideCachingJSONMGet(t *testing.T) {
 			ReplyString("OK").
 			ReplyString("OK").
 			ReplyString("OK").
-			Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-				{typ: ':', integer: 1000},
-				{typ: ':', integer: 2000},
-				{typ: ':', integer: 3000},
-				{typ: '*', values: []ValkeyMessage{
-					{typ: ':', integer: 1},
-					{typ: ':', integer: 2},
-					{typ: ':', integer: 3},
-				}},
-			}})
+			Reply(slicemsg('*', []ValkeyMessage{
+				{typ: ':', intlen: 1000},
+				{typ: ':', intlen: 2000},
+				{typ: ':', intlen: 3000},
+				slicemsg('*', []ValkeyMessage{
+					{typ: ':', intlen: 1},
+					{typ: ':', intlen: 2},
+					{typ: ':', intlen: 3},
+				}),
+			}))
 	}()
 	// single flight
 	miss := uint64(0)
@@ -1795,8 +1795,8 @@ func TestClientSideCachingJSONMGet(t *testing.T) {
 			t.Errorf("unexpected cached mget length, expected 3, got %v", len(arr))
 		}
 		for i, v := range arr {
-			if v.integer != int64(i+1) {
-				t.Errorf("unexpected cached mget response, expected %v, got %v", i+1, v.integer)
+			if v.intlen != int64(i+1) {
+				t.Errorf("unexpected cached mget response, expected %v, got %v", i+1, v.intlen)
 			}
 		}
 		if ttl := p.cache.(*lru).GetTTL("a1", "JSON.GET$"); !roughly(ttl, time.Second) {
@@ -1824,7 +1824,7 @@ func TestClientSideCachingJSONMGet(t *testing.T) {
 	}
 
 	// partial cache invalidation
-	invalidateCSC(ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a1"}, {typ: '+', string: "a3"}}})
+	invalidateCSC(slicemsg('*', []ValkeyMessage{strmsg('+', "a1"), strmsg('+', "a3")}))
 	go func() {
 		mock.Expect("CLIENT", "CACHING", "YES").
 			Expect("MULTI").
@@ -1837,14 +1837,14 @@ func TestClientSideCachingJSONMGet(t *testing.T) {
 			ReplyString("OK").
 			ReplyString("OK").
 			ReplyString("OK").
-			Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-				{typ: ':', integer: 10000},
-				{typ: ':', integer: 30000},
-				{typ: '*', values: []ValkeyMessage{
-					{typ: ':', integer: 10},
-					{typ: ':', integer: 30},
-				}},
-			}})
+			Reply(slicemsg('*', []ValkeyMessage{
+				{typ: ':', intlen: 10000},
+				{typ: ':', intlen: 30000},
+				slicemsg('*', []ValkeyMessage{
+					{typ: ':', intlen: 10},
+					{typ: ':', intlen: 30},
+				}),
+			}))
 	}()
 
 	for {
@@ -1859,14 +1859,14 @@ func TestClientSideCachingJSONMGet(t *testing.T) {
 	if len(arr) != 3 {
 		t.Errorf("unexpected cached mget length, expected 3, got %v", len(arr))
 	}
-	if arr[1].integer != 2 {
-		t.Errorf("unexpected cached mget response, expected %v, got %v", 2, arr[1].integer)
+	if arr[1].intlen != 2 {
+		t.Errorf("unexpected cached mget response, expected %v, got %v", 2, arr[1].intlen)
 	}
-	if arr[0].integer != 10 {
-		t.Errorf("unexpected cached mget response, expected %v, got %v", 10, arr[0].integer)
+	if arr[0].intlen != 10 {
+		t.Errorf("unexpected cached mget response, expected %v, got %v", 10, arr[0].intlen)
 	}
-	if arr[2].integer != 30 {
-		t.Errorf("unexpected cached mget response, expected %v, got %v", 30, arr[2].integer)
+	if arr[2].intlen != 30 {
+		t.Errorf("unexpected cached mget response, expected %v, got %v", 30, arr[2].intlen)
 	}
 	if ttl := p.cache.(*lru).GetTTL("a1", "JSON.GET$"); !roughly(ttl, time.Second*10) {
 		t.Errorf("unexpected ttl %v", ttl)
@@ -1964,7 +1964,7 @@ func TestClientSideCachingWithSideChannelMGet(t *testing.T) {
 	p.cache.Flight("a1", "GET", 10*time.Second, time.Now())
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		m := ValkeyMessage{typ: '+', string: "OK"}
+		m := strmsg('+', "OK")
 		m.setExpireAt(time.Now().Add(10 * time.Millisecond).UnixMilli())
 		p.cache.Update("a1", "GET", m)
 	}()
@@ -2014,13 +2014,13 @@ func TestClientSideCachingDoMultiCache(t *testing.T) {
 		defer cancel()
 
 		invalidateCSC := func(keys ValkeyMessage) {
-			mock.Expect().Reply(ValkeyMessage{
-				typ: '>',
-				values: []ValkeyMessage{
-					{typ: '+', string: "invalidate"},
+			mock.Expect().Reply(slicemsg(
+				'>',
+				[]ValkeyMessage{
+					strmsg('+', "invalidate"),
 					keys,
 				},
-			})
+			))
 		}
 
 		go func() {
@@ -2043,26 +2043,26 @@ func TestClientSideCachingDoMultiCache(t *testing.T) {
 				ReplyString("OK").
 				ReplyString("OK").
 				ReplyString("OK").
-				Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-					{typ: ':', integer: 1000},
-					{typ: ':', integer: 1},
-				}}).
+				Reply(slicemsg('*', []ValkeyMessage{
+					{typ: ':', intlen: 1000},
+					{typ: ':', intlen: 1},
+				})).
 				ReplyString("OK").
 				ReplyString("OK").
 				ReplyString("OK").
 				ReplyString("OK").
-				Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-					{typ: ':', integer: 2000},
-					{typ: ':', integer: 2},
-				}}).
+				Reply(slicemsg('*', []ValkeyMessage{
+					{typ: ':', intlen: 2000},
+					{typ: ':', intlen: 2},
+				})).
 				ReplyString("OK").
 				ReplyString("OK").
 				ReplyString("OK").
 				ReplyString("OK").
-				Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-					{typ: ':', integer: 3000},
-					{typ: ':', integer: 3},
-				}})
+				Reply(slicemsg('*', []ValkeyMessage{
+					{typ: ':', intlen: 3000},
+					{typ: ':', intlen: 3},
+				}))
 		}()
 		// single flight
 		miss := uint64(0)
@@ -2077,8 +2077,8 @@ func TestClientSideCachingDoMultiCache(t *testing.T) {
 				t.Errorf("unexpected cached mget length, expected 3, got %v", len(arr))
 			}
 			for i, v := range arr {
-				if v.val.integer != int64(i+1) {
-					t.Errorf("unexpected cached mget response, expected %v, got %v", i+1, v.val.integer)
+				if v.val.intlen != int64(i+1) {
+					t.Errorf("unexpected cached mget response, expected %v, got %v", i+1, v.val.intlen)
 				}
 				if v.val.IsCacheHit() {
 					atomic.AddUint64(&hits, 1)
@@ -2106,7 +2106,7 @@ func TestClientSideCachingDoMultiCache(t *testing.T) {
 		}
 
 		// partial cache invalidation
-		invalidateCSC(ValkeyMessage{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a1"}, {typ: '+', string: "a3"}}})
+		invalidateCSC(slicemsg('*', []ValkeyMessage{strmsg('+', "a1"), strmsg('+', "a3")}))
 		go func() {
 			mock.Expect("CLIENT", "CACHING", "YES").
 				Expect("MULTI").
@@ -2122,18 +2122,18 @@ func TestClientSideCachingDoMultiCache(t *testing.T) {
 				ReplyString("OK").
 				ReplyString("OK").
 				ReplyString("OK").
-				Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-					{typ: ':', integer: 10000},
-					{typ: ':', integer: 10},
-				}}).
+				Reply(slicemsg('*', []ValkeyMessage{
+					{typ: ':', intlen: 10000},
+					{typ: ':', intlen: 10},
+				})).
 				ReplyString("OK").
 				ReplyString("OK").
 				ReplyString("OK").
 				ReplyString("OK").
-				Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-					{typ: ':', integer: 30000},
-					{typ: ':', integer: 30},
-				}})
+				Reply(slicemsg('*', []ValkeyMessage{
+					{typ: ':', intlen: 30000},
+					{typ: ':', intlen: 30},
+				}))
 		}()
 
 		if cache, ok := p.cache.(*lru); ok {
@@ -2155,14 +2155,14 @@ func TestClientSideCachingDoMultiCache(t *testing.T) {
 		if len(arr) != 3 {
 			t.Errorf("unexpected cached mget length, expected 3, got %v", len(arr))
 		}
-		if arr[1].val.integer != 2 {
-			t.Errorf("unexpected cached mget response, expected %v, got %v", 2, arr[1].val.integer)
+		if arr[1].val.intlen != 2 {
+			t.Errorf("unexpected cached mget response, expected %v, got %v", 2, arr[1].val.intlen)
 		}
-		if arr[0].val.integer != 10 {
-			t.Errorf("unexpected cached mget response, expected %v, got %v", 10, arr[0].val.integer)
+		if arr[0].val.intlen != 10 {
+			t.Errorf("unexpected cached mget response, expected %v, got %v", 10, arr[0].val.intlen)
 		}
-		if arr[2].val.integer != 30 {
-			t.Errorf("unexpected cached mget response, expected %v, got %v", 30, arr[2].val.integer)
+		if arr[2].val.intlen != 30 {
+			t.Errorf("unexpected cached mget response, expected %v, got %v", 30, arr[2].val.intlen)
 		}
 		if ttl := time.Duration(arr[0].CachePTTL()) * time.Millisecond; !roughly(ttl, time.Second*10) {
 			t.Errorf("unexpected ttl %v", ttl)
@@ -2212,10 +2212,10 @@ func TestClientSideCachingExecAbortDoMultiCache(t *testing.T) {
 				ReplyString("OK").
 				ReplyString("OK").
 				ReplyString("OK").
-				Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-					{typ: ':', integer: 1000},
-					{typ: ':', integer: 1},
-				}}).
+				Reply(slicemsg('*', []ValkeyMessage{
+					{typ: ':', intlen: 1000},
+					{typ: ':', intlen: 1},
+				})).
 				ReplyString("OK").
 				ReplyString("OK").
 				ReplyString("OK").
@@ -2236,8 +2236,8 @@ func TestClientSideCachingExecAbortDoMultiCache(t *testing.T) {
 		for i, resp := range arr {
 			v, err := resp.ToMessage()
 			if i == 0 {
-				if v.integer != 1 {
-					t.Errorf("unexpected cached response, expected %v, got %v", 1, v.integer)
+				if v.intlen != 1 {
+					t.Errorf("unexpected cached response, expected %v, got %v", 1, v.intlen)
 				}
 			} else if i == 1 {
 				if err != ErrDoCacheAborted {
@@ -2257,8 +2257,8 @@ func TestClientSideCachingExecAbortDoMultiCache(t *testing.T) {
 				}
 			}
 		}
-		if v, entry := p.cache.Flight("a1", "GET", time.Second, time.Now()); v.integer != 1 {
-			t.Errorf("unexpected cache value and entry %v %v", v.integer, entry)
+		if v, entry := p.cache.Flight("a1", "GET", time.Second, time.Now()); v.intlen != 1 {
+			t.Errorf("unexpected cache value and entry %v %v", v.intlen, entry)
 		}
 		if ttl := time.Duration(arr[0].CachePTTL()) * time.Millisecond; !roughly(ttl, time.Second) {
 			t.Errorf("unexpected ttl %v", ttl)
@@ -2326,7 +2326,7 @@ func TestClientSideCachingWithSideChannelDoMultiCache(t *testing.T) {
 		p.cache.Flight("a1", "GET", 10*time.Second, time.Now())
 		go func() {
 			time.Sleep(100 * time.Millisecond)
-			m := ValkeyMessage{typ: '+', string: "OK"}
+			m := strmsg('+', "OK")
 			m.setExpireAt(time.Now().Add(10 * time.Millisecond).UnixMilli())
 			p.cache.Update("a1", "GET", m)
 		}()
@@ -2334,8 +2334,8 @@ func TestClientSideCachingWithSideChannelDoMultiCache(t *testing.T) {
 		arr := p.DoMultiCache(context.Background(), []CacheableTTL{
 			CT(Cacheable(cmds.NewCompleted([]string{"GET", "a1"})), time.Second*10),
 		}...).s
-		if arr[0].val.string != "OK" {
-			t.Errorf("unexpected value, got %v", arr[0].val.string)
+		if arr[0].val.string() != "OK" {
+			t.Errorf("unexpected value, got %v", arr[0].val.string())
 		}
 	}
 	t.Run("LRU", func(t *testing.T) {
@@ -2396,10 +2396,10 @@ func TestClientSideCachingMissCacheTTL(t *testing.T) {
 					ReplyString("OK").
 					ReplyString("OK").
 					ReplyString("OK").
-					Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-						{typ: ':', integer: pttl},
-						{typ: '+', string: key},
-					}})
+					Reply(slicemsg('*', []ValkeyMessage{
+						{typ: ':', intlen: pttl},
+						strmsg('+', key),
+					}))
 			}
 			go func() {
 				expectCSC(-1, "a")
@@ -2436,16 +2436,16 @@ func TestClientSideCachingMissCacheTTL(t *testing.T) {
 					ReplyString("OK").
 					ReplyString("OK").
 					ReplyString("OK").
-					Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-						{typ: ':', integer: -1},
-						{typ: ':', integer: 1000},
-						{typ: ':', integer: 20000},
-						{typ: '*', values: []ValkeyMessage{
-							{typ: '+', string: "a"},
-							{typ: '+', string: "b"},
-							{typ: '+', string: "c"},
-						}},
-					}})
+					Reply(slicemsg('*', []ValkeyMessage{
+						{typ: ':', intlen: -1},
+						{typ: ':', intlen: 1000},
+						{typ: ':', intlen: 20000},
+						slicemsg('*', []ValkeyMessage{
+							strmsg('+', "a"),
+							strmsg('+', "b"),
+							strmsg('+', "c"),
+						}),
+					}))
 			}()
 			v, _ := p.DoCache(context.Background(), Cacheable(cmds.NewMGetCompleted([]string{"MGET", "a", "b", "c"})), 10*time.Second).ToArray()
 			if ttl := v[0].CacheTTL(); ttl != 10 {
@@ -2481,26 +2481,26 @@ func TestClientSideCachingMissCacheTTL(t *testing.T) {
 					ReplyString("OK").
 					ReplyString("OK").
 					ReplyString("OK").
-					Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-						{typ: ':', integer: -1},
-						{typ: ':', integer: 1},
-					}}).
+					Reply(slicemsg('*', []ValkeyMessage{
+						{typ: ':', intlen: -1},
+						{typ: ':', intlen: 1},
+					})).
 					ReplyString("OK").
 					ReplyString("OK").
 					ReplyString("OK").
 					ReplyString("OK").
-					Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-						{typ: ':', integer: 1000},
-						{typ: ':', integer: 2},
-					}}).
+					Reply(slicemsg('*', []ValkeyMessage{
+						{typ: ':', intlen: 1000},
+						{typ: ':', intlen: 2},
+					})).
 					ReplyString("OK").
 					ReplyString("OK").
 					ReplyString("OK").
 					ReplyString("OK").
-					Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-						{typ: ':', integer: 20000},
-						{typ: ':', integer: 3},
-					}})
+					Reply(slicemsg('*', []ValkeyMessage{
+						{typ: ':', intlen: 20000},
+						{typ: ':', intlen: 3},
+					}))
 			}()
 			arr := p.DoMultiCache(context.Background(), []CacheableTTL{
 				CT(Cacheable(cmds.NewCompleted([]string{"GET", "a1"})), time.Second*10),
@@ -2546,16 +2546,16 @@ func TestClientSideCachingValkey6InvalidationBug1(t *testing.T) {
 			ReplyString("OK").
 			ReplyString("OK").
 			ReplyString("OK").
-			Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-				{
-					typ: '>',
-					values: []ValkeyMessage{
-						{typ: '+', string: "invalidate"},
-						{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}}},
+			Reply(slicemsg('*', []ValkeyMessage{
+				slicemsg(
+					'>',
+					[]ValkeyMessage{
+						strmsg('+', "invalidate"),
+						slicemsg('*', []ValkeyMessage{strmsg('+', "a")}),
 					},
-				},
-				{typ: ':', integer: -2},
-			}}).Reply(ValkeyMessage{typ: '_'})
+				),
+				{typ: ':', intlen: -2},
+			})).Reply(ValkeyMessage{typ: '_'})
 	}
 
 	go func() {
@@ -2572,7 +2572,7 @@ func TestClientSideCachingValkey6InvalidationBug1(t *testing.T) {
 			defer wg.Done()
 			v, _ := p.DoCache(context.Background(), Cacheable(cmds.NewCompleted([]string{"GET", "a"})), 10*time.Second).ToMessage()
 			if v.typ != '_' {
-				t.Errorf("unexpected cached result, expected null, got %v", v.string)
+				t.Errorf("unexpected cached result, expected null, got %v", v.string())
 			}
 			if v.IsCacheHit() {
 				atomic.AddUint64(&hits, 1)
@@ -2608,16 +2608,16 @@ func TestClientSideCachingValkey6InvalidationBug2(t *testing.T) {
 			ReplyString("OK").
 			ReplyString("OK").
 			ReplyString("OK").
-			Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-				{typ: ':', integer: -2},
-				{
-					typ: '>',
-					values: []ValkeyMessage{
-						{typ: '+', string: "invalidate"},
-						{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}}},
+			Reply(slicemsg('*', []ValkeyMessage{
+				{typ: ':', intlen: -2},
+				slicemsg(
+					'>',
+					[]ValkeyMessage{
+						strmsg('+', "invalidate"),
+						slicemsg('*', []ValkeyMessage{strmsg('+', "a")}),
 					},
-				},
-			}}).Reply(ValkeyMessage{typ: '_'})
+				),
+			})).Reply(ValkeyMessage{typ: '_'})
 	}
 
 	go func() {
@@ -2634,7 +2634,7 @@ func TestClientSideCachingValkey6InvalidationBug2(t *testing.T) {
 			defer wg.Done()
 			v, _ := p.DoCache(context.Background(), Cacheable(cmds.NewCompleted([]string{"GET", "a"})), 10*time.Second).ToMessage()
 			if v.typ != '_' {
-				t.Errorf("unexpected cached result, expected null, got %v", v.string)
+				t.Errorf("unexpected cached result, expected null, got %v", v.string())
 			}
 			if v.IsCacheHit() {
 				atomic.AddUint64(&hits, 1)
@@ -2669,16 +2669,16 @@ func TestClientSideCachingValkey6InvalidationBugErr(t *testing.T) {
 			ReplyString("OK").
 			ReplyString("OK").
 			ReplyString("OK").
-			Reply(ValkeyMessage{typ: '*', values: []ValkeyMessage{
-				{typ: ':', integer: -2},
-				{
-					typ: '>',
-					values: []ValkeyMessage{
-						{typ: '+', string: "invalidate"},
-						{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}}},
+			Reply(slicemsg('*', []ValkeyMessage{
+				{typ: ':', intlen: -2},
+				slicemsg(
+					'>',
+					[]ValkeyMessage{
+						strmsg('+', "invalidate"),
+						slicemsg('*', []ValkeyMessage{strmsg('+', "a")}),
 					},
-				},
-			}})
+				),
+			}))
 	}
 
 	go func() {
@@ -2699,13 +2699,13 @@ func TestDisableClientSideCaching(t *testing.T) {
 	p.background()
 
 	go func() {
-		mock.Expect().Reply(ValkeyMessage{
-			typ: '>',
-			values: []ValkeyMessage{
-				{typ: '+', string: "invalidate"},
-				{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}}},
+		mock.Expect().Reply(slicemsg(
+			'>',
+			[]ValkeyMessage{
+				strmsg('+', "invalidate"),
+				slicemsg('*', []ValkeyMessage{strmsg('+', "a")}),
 			},
-		})
+		))
 		mock.Expect("GET", "a").ReplyString("1").
 			Expect("GET", "b").
 			Expect("GET", "c").
@@ -2714,18 +2714,18 @@ func TestDisableClientSideCaching(t *testing.T) {
 	}()
 
 	v, _ := p.DoCache(context.Background(), Cacheable(cmds.NewCompleted([]string{"GET", "a"})), 10*time.Second).ToMessage()
-	if v.string != "1" {
-		t.Errorf("unexpected cached result, expected %v, got %v", "1", v.string)
+	if v.string() != "1" {
+		t.Errorf("unexpected cached result, expected %v, got %v", "1", v.string())
 	}
 
 	vs := p.DoMultiCache(context.Background(),
 		CT(Cacheable(cmds.NewCompleted([]string{"GET", "b"})), 10*time.Second),
 		CT(Cacheable(cmds.NewCompleted([]string{"GET", "c"})), 10*time.Second)).s
-	if vs[0].val.string != "2" {
-		t.Errorf("unexpected cached result, expected %v, got %v", "1", v.string)
+	if vs[0].val.string() != "2" {
+		t.Errorf("unexpected cached result, expected %v, got %v", "1", v.string())
 	}
-	if vs[1].val.string != "3" {
-		t.Errorf("unexpected cached result, expected %v, got %v", "1", v.string)
+	if vs[1].val.string() != "3" {
+		t.Errorf("unexpected cached result, expected %v, got %v", "1", v.string())
 	}
 }
 
@@ -2739,27 +2739,27 @@ func TestOnInvalidations(t *testing.T) {
 	})
 
 	go func() {
-		mock.Expect().Reply(ValkeyMessage{
-			typ: '>',
-			values: []ValkeyMessage{
-				{typ: '+', string: "invalidate"},
-				{typ: '*', values: []ValkeyMessage{{typ: '+', string: "a"}}},
+		mock.Expect().Reply(slicemsg(
+			'>',
+			[]ValkeyMessage{
+				strmsg('+', "invalidate"),
+				slicemsg('*', []ValkeyMessage{strmsg('+', "a")}),
 			},
-		})
+		))
 	}()
 
-	if messages := <-ch; messages[0].string != "a" {
+	if messages := <-ch; messages[0].string() != "a" {
 		t.Fatalf("unexpected invlidation %v", messages)
 	}
 
 	go func() {
-		mock.Expect().Reply(ValkeyMessage{
-			typ: '>',
-			values: []ValkeyMessage{
-				{typ: '+', string: "invalidate"},
+		mock.Expect().Reply(slicemsg(
+			'>',
+			[]ValkeyMessage{
+				strmsg('+', "invalidate"),
 				{typ: '_'},
 			},
-		})
+		))
 	}()
 
 	if messages := <-ch; messages != nil {
@@ -2818,15 +2818,15 @@ func TestPubSub(t *testing.T) {
 		go func() {
 			for _, c := range commands {
 				if c.IsUnsub() {
-					mock.Expect(c.Commands()...).Expect(cmds.PingCmd.Commands()...).Reply(ValkeyMessage{typ: '>', values: []ValkeyMessage{
-						{typ: '+', string: strings.ToLower(c.Commands()[0])},
-						{typ: '+', string: strings.ToLower(c.Commands()[1])},
-					}}).Reply(ValkeyMessage{typ: '+', string: "PONG"})
+					mock.Expect(c.Commands()...).Expect(cmds.PingCmd.Commands()...).Reply(slicemsg('>', []ValkeyMessage{
+						strmsg('+', strings.ToLower(c.Commands()[0])),
+						strmsg('+', strings.ToLower(c.Commands()[1])),
+					})).Reply(strmsg('+', "PONG"))
 				} else {
-					mock.Expect(c.Commands()...).Reply(ValkeyMessage{typ: '>', values: []ValkeyMessage{
-						{typ: '+', string: strings.ToLower(c.Commands()[0])},
-						{typ: '+', string: strings.ToLower(c.Commands()[1])},
-					}})
+					mock.Expect(c.Commands()...).Reply(slicemsg('>', []ValkeyMessage{
+						strmsg('+', strings.ToLower(c.Commands()[0])),
+						strmsg('+', strings.ToLower(c.Commands()[1])),
+					}))
 				}
 				mock.Expect("GET", "k").ReplyString("v")
 			}
@@ -2834,7 +2834,7 @@ func TestPubSub(t *testing.T) {
 
 		for _, c := range commands {
 			p.Do(context.Background(), c)
-			if v, _ := p.Do(context.Background(), builder.Get().Key("k").Build()).ToMessage(); v.string != "v" {
+			if v, _ := p.Do(context.Background(), builder.Get().Key("k").Build()).ToMessage(); v.string() != "v" {
 				t.Fatalf("no-reply commands should not affect nornal commands")
 			}
 		}
@@ -2854,22 +2854,22 @@ func TestPubSub(t *testing.T) {
 		go func() {
 			for _, c := range commands {
 				if c.IsUnsub() {
-					mock.Expect(c.Commands()...).Expect(cmds.PingCmd.Commands()...).Reply(ValkeyMessage{typ: '>', values: []ValkeyMessage{
-						{typ: '+', string: strings.ToLower(c.Commands()[0])},
-						{typ: '+', string: strings.ToLower(c.Commands()[1])},
-					}}).Reply(ValkeyMessage{typ: '+', string: "PONG"})
+					mock.Expect(c.Commands()...).Expect(cmds.PingCmd.Commands()...).Reply(slicemsg('>', []ValkeyMessage{
+						strmsg('+', strings.ToLower(c.Commands()[0])),
+						strmsg('+', strings.ToLower(c.Commands()[1])),
+					})).Reply(strmsg('+', "PONG"))
 				} else {
-					mock.Expect(c.Commands()...).Reply(ValkeyMessage{typ: '>', values: []ValkeyMessage{
-						{typ: '+', string: strings.ToLower(c.Commands()[0])},
-						{typ: '+', string: strings.ToLower(c.Commands()[1])},
-					}})
+					mock.Expect(c.Commands()...).Reply(slicemsg('>', []ValkeyMessage{
+						strmsg('+', strings.ToLower(c.Commands()[0])),
+						strmsg('+', strings.ToLower(c.Commands()[1])),
+					}))
 				}
 			}
 			mock.Expect("GET", "k").ReplyString("v")
 		}()
 
 		p.DoMulti(context.Background(), commands...)
-		if v, _ := p.Do(context.Background(), builder.Get().Key("k").Build()).ToMessage(); v.string != "v" {
+		if v, _ := p.Do(context.Background(), builder.Get().Key("k").Build()).ToMessage(); v.string() != "v" {
 			t.Fatalf("no-reply commands should not affect nornal commands")
 		}
 	})
@@ -2882,24 +2882,24 @@ func TestPubSub(t *testing.T) {
 		deactivate := builder.Unsubscribe().Channel("1").Build()
 		go func() {
 			mock.Expect(activate.Commands()...).Reply(
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "subscribe"},
-					{typ: '+', string: "1"},
-					{typ: ':', integer: 1},
-				}},
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "message"},
-					{typ: '+', string: "1"},
-					{typ: '+', string: "2"},
-				}},
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "subscribe"),
+					strmsg('+', "1"),
+					{typ: ':', intlen: 1},
+				}),
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "message"),
+					strmsg('+', "1"),
+					strmsg('+', "2"),
+				}),
 			)
 			mock.Expect(deactivate.Commands()...).Expect(cmds.PingCmd.Commands()...).Reply(
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "unsubscribe"},
-					{typ: '+', string: "1"},
-					{typ: ':', integer: 0},
-				}},
-			).Reply(ValkeyMessage{typ: '+', string: "PONG"})
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "unsubscribe"),
+					strmsg('+', "1"),
+					{typ: ':', intlen: 0},
+				}),
+			).Reply(strmsg('+', "PONG"))
 		}()
 
 		if err := p.Receive(ctx, activate, func(msg PubSubMessage) {
@@ -2923,24 +2923,24 @@ func TestPubSub(t *testing.T) {
 		deactivate := builder.Sunsubscribe().Channel("1").Build()
 		go func() {
 			mock.Expect(activate.Commands()...).Reply(
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "ssubscribe"},
-					{typ: '+', string: "1"},
-					{typ: ':', integer: 1},
-				}},
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "smessage"},
-					{typ: '+', string: "1"},
-					{typ: '+', string: "2"},
-				}},
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "ssubscribe"),
+					strmsg('+', "1"),
+					{typ: ':', intlen: 1},
+				}),
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "smessage"),
+					strmsg('+', "1"),
+					strmsg('+', "2"),
+				}),
 			)
 			mock.Expect(deactivate.Commands()...).Expect(cmds.PingCmd.Commands()...).Reply(
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "sunsubscribe"},
-					{typ: '+', string: "1"},
-					{typ: ':', integer: 0},
-				}},
-			).Reply(ValkeyMessage{typ: '+', string: "PONG"})
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "sunsubscribe"),
+					strmsg('+', "1"),
+					{typ: ':', intlen: 0},
+				}),
+			).Reply(strmsg('+', "PONG"))
 		}()
 
 		if err := p.Receive(ctx, activate, func(msg PubSubMessage) {
@@ -2964,25 +2964,25 @@ func TestPubSub(t *testing.T) {
 		deactivate := builder.Punsubscribe().Pattern("1").Build()
 		go func() {
 			mock.Expect(activate.Commands()...).Reply(
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "psubscribe"},
-					{typ: '+', string: "1"},
-					{typ: ':', integer: 1},
-				}},
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "pmessage"},
-					{typ: '+', string: "1"},
-					{typ: '+', string: "2"},
-					{typ: '+', string: "3"},
-				}},
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "psubscribe"),
+					strmsg('+', "1"),
+					{typ: ':', intlen: 1},
+				}),
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "pmessage"),
+					strmsg('+', "1"),
+					strmsg('+', "2"),
+					strmsg('+', "3"),
+				}),
 			)
 			mock.Expect(deactivate.Commands()...).Expect(cmds.PingCmd.Commands()...).Reply(
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "punsubscribe"},
-					{typ: '+', string: "1"},
-					{typ: ':', integer: 0},
-				}},
-			).Reply(ValkeyMessage{typ: '+', string: "PONG"})
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "punsubscribe"),
+					strmsg('+', "1"),
+					{typ: ':', intlen: 0},
+				}),
+			).Reply(strmsg('+', "PONG"))
 		}()
 
 		if err := p.Receive(ctx, activate, func(msg PubSubMessage) {
@@ -3028,16 +3028,16 @@ func TestPubSub(t *testing.T) {
 		activate := builder.Subscribe().Channel("1").Build()
 		go func() {
 			mock.Expect(activate.Commands()...).Reply(
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "subscribe"},
-					{typ: '+', string: "1"},
-					{typ: ':', integer: 1},
-				}},
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "message"},
-					{typ: '+', string: "1"},
-					{typ: '+', string: "2"},
-				}},
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "subscribe"),
+					strmsg('+', "1"),
+					{typ: ':', intlen: 1},
+				}),
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "message"),
+					strmsg('+', "1"),
+					strmsg('+', "2"),
+				}),
 			)
 		}()
 
@@ -3067,9 +3067,9 @@ func TestPubSub(t *testing.T) {
 		go func() {
 			for _, cmd := range commands {
 				if cmd.IsUnsub() {
-					mock.Expect(cmd.Commands()...).Expect(cmds.PingCmd.Commands()...).Reply(ValkeyMessage{typ: '-', string: cmd.Commands()[0]}).Reply(ValkeyMessage{typ: '+', string: "PONG"})
+					mock.Expect(cmd.Commands()...).Expect(cmds.PingCmd.Commands()...).Reply(strmsg('-', cmd.Commands()[0])).Reply(strmsg('+', "PONG"))
 				} else {
-					mock.Expect(cmd.Commands()...).Reply(ValkeyMessage{typ: '-', string: cmd.Commands()[0]})
+					mock.Expect(cmd.Commands()...).Reply(strmsg('-', cmd.Commands()[0]))
 				}
 			}
 		}()
@@ -3100,39 +3100,39 @@ func TestPubSub(t *testing.T) {
 			go func() {
 				if cmd1.IsUnsub() {
 					mock.Expect(cmd1.Commands()...).Expect(cmds.PingCmd.Commands()...).Reply(
-						ValkeyMessage{typ: '>', values: []ValkeyMessage{
-							{typ: '+', string: "unsubscribe"},
-							{typ: '+', string: "a"},
-							{typ: ':', integer: 1},
-						}},
-						ValkeyMessage{typ: '>', values: []ValkeyMessage{ // skip
-							{typ: '+', string: "unsubscribe"},
-							{typ: '+', string: "b"},
-							{typ: ':', integer: 1},
-						}},
-						ValkeyMessage{typ: '>', values: []ValkeyMessage{ // skip
-							{typ: '+', string: "unsubscribe"},
-							{typ: '+', string: "c"},
-							{typ: ':', integer: 1},
-						}},
-					).Reply(ValkeyMessage{typ: '+', string: "PONG"}).Expect(cmd2.Commands()...).ReplyString(strconv.Itoa(i))
+						slicemsg('>', []ValkeyMessage{
+							strmsg('+', "unsubscribe"),
+							strmsg('+', "a"),
+							{typ: ':', intlen: 1},
+						}),
+						slicemsg('>', []ValkeyMessage{ // skip
+							strmsg('+', "unsubscribe"),
+							strmsg('+', "b"),
+							{typ: ':', intlen: 1},
+						}),
+						slicemsg('>', []ValkeyMessage{ // skip
+							strmsg('+', "unsubscribe"),
+							strmsg('+', "c"),
+							{typ: ':', intlen: 1},
+						}),
+					).Reply(strmsg('+', "PONG")).Expect(cmd2.Commands()...).ReplyString(strconv.Itoa(i))
 				} else {
 					mock.Expect(cmd1.Commands()...).Reply(
-						ValkeyMessage{typ: '>', values: []ValkeyMessage{
-							{typ: '+', string: "subscribe"},
-							{typ: '+', string: "a"},
-							{typ: ':', integer: 1},
-						}},
-						ValkeyMessage{typ: '>', values: []ValkeyMessage{ // skip
-							{typ: '+', string: "subscribe"},
-							{typ: '+', string: "b"},
-							{typ: ':', integer: 1},
-						}},
-						ValkeyMessage{typ: '>', values: []ValkeyMessage{ // skip
-							{typ: '+', string: "subscribe"},
-							{typ: '+', string: "c"},
-							{typ: ':', integer: 1},
-						}},
+						slicemsg('>', []ValkeyMessage{
+							strmsg('+', "subscribe"),
+							strmsg('+', "a"),
+							{typ: ':', intlen: 1},
+						}),
+						slicemsg('>', []ValkeyMessage{ // skip
+							strmsg('+', "subscribe"),
+							strmsg('+', "b"),
+							{typ: ':', intlen: 1},
+						}),
+						slicemsg('>', []ValkeyMessage{ // skip
+							strmsg('+', "subscribe"),
+							strmsg('+', "c"),
+							{typ: ':', intlen: 1},
+						}),
 					).Expect(cmd2.Commands()...).ReplyString(strconv.Itoa(i))
 				}
 
@@ -3159,46 +3159,46 @@ func TestPubSub(t *testing.T) {
 		}
 
 		replies := [][]ValkeyMessage{{
-			{
-				typ: '>',
-				values: []ValkeyMessage{
-					{typ: '+', string: "unsubscribe"},
+			slicemsg(
+				'>',
+				[]ValkeyMessage{
+					strmsg('+', "unsubscribe"),
 					{typ: '_'},
-					{typ: ':', integer: 0},
+					{typ: ':', intlen: 0},
 				},
-			},
+			),
 		}, {
-			{
-				typ: '>',
-				values: []ValkeyMessage{
-					{typ: '+', string: "punsubscribe"},
-					{typ: '+', string: "1"},
-					{typ: ':', integer: 0},
+			slicemsg(
+				'>',
+				[]ValkeyMessage{
+					strmsg('+', "punsubscribe"),
+					strmsg('+', "1"),
+					{typ: ':', intlen: 0},
 				},
-			},
+			),
 		}, {
-			{
-				typ: '>',
-				values: []ValkeyMessage{
-					{typ: '+', string: "sunsubscribe"},
-					{typ: '+', string: "2"},
-					{typ: ':', integer: 0},
+			slicemsg(
+				'>',
+				[]ValkeyMessage{
+					strmsg('+', "sunsubscribe"),
+					strmsg('+', "2"),
+					{typ: ':', intlen: 0},
 				},
-			},
-			{
-				typ: '>',
-				values: []ValkeyMessage{
-					{typ: '+', string: "sunsubscribe"},
-					{typ: '+', string: "3"},
-					{typ: ':', integer: 0},
+			),
+			slicemsg(
+				'>',
+				[]ValkeyMessage{
+					strmsg('+', "sunsubscribe"),
+					strmsg('+', "3"),
+					{typ: ':', intlen: 0},
 				},
-			},
+			),
 		}}
 
 		for i, cmd1 := range commands {
 			cmd2 := builder.Get().Key(strconv.Itoa(i)).Build()
 			go func() {
-				mock.Expect(cmd1.Commands()...).Expect(cmds.PingCmd.Commands()...).Reply(replies[i]...).Reply(ValkeyMessage{typ: '+', string: "PONG"}).Expect(cmd2.Commands()...).ReplyString(strconv.Itoa(i))
+				mock.Expect(cmd1.Commands()...).Expect(cmds.PingCmd.Commands()...).Reply(replies[i]...).Reply(strmsg('+', "PONG")).Expect(cmd2.Commands()...).ReplyString(strconv.Itoa(i))
 			}()
 
 			if err := p.Do(ctx, cmd1).Error(); err != nil {
@@ -3229,70 +3229,70 @@ func TestPubSub(t *testing.T) {
 
 				replies := [][]ValkeyMessage{
 					{
-						{ // proactive unsubscribe before user unsubscribe
-							typ: '>',
-							values: []ValkeyMessage{
-								{typ: '+', string: command},
-								{typ: '+', string: "1"},
-								{typ: ':', integer: 0},
+						slicemsg( // proactive unsubscribe before user unsubscribe
+							'>',
+							[]ValkeyMessage{
+								strmsg('+', command),
+								strmsg('+', "1"),
+								{typ: ':', intlen: 0},
 							},
-						},
-						{ // proactive unsubscribe before user unsubscribe
-							typ: '>',
-							values: []ValkeyMessage{
-								{typ: '+', string: command},
-								{typ: '+', string: "2"},
-								{typ: ':', integer: 0},
+						),
+						slicemsg( // proactive unsubscribe before user unsubscribe
+							'>',
+							[]ValkeyMessage{
+								strmsg('+', command),
+								strmsg('+', "2"),
+								{typ: ':', intlen: 0},
 							},
-						},
-						{ // user unsubscribe
-							typ: '>',
-							values: []ValkeyMessage{
-								{typ: '+', string: command},
+						),
+						slicemsg( // user unsubscribe
+							'>',
+							[]ValkeyMessage{
+								strmsg('+', command),
 								{typ: '_'},
-								{typ: ':', integer: 0},
+								{typ: ':', intlen: 0},
 							},
-						},
-						{ // proactive unsubscribe after user unsubscribe
-							typ: '>',
-							values: []ValkeyMessage{
-								{typ: '+', string: command},
+						),
+						slicemsg( // proactive unsubscribe after user unsubscribe
+							'>',
+							[]ValkeyMessage{
+								strmsg('+', command),
 								{typ: '_'},
-								{typ: ':', integer: 0},
+								{typ: ':', intlen: 0},
 							},
-						},
+						),
 					},
 					{
-						{ // user ssubscribe
-							typ: '>',
-							values: []ValkeyMessage{
-								{typ: '+', string: "ssubscribe"},
-								{typ: '+', string: "3"},
-								{typ: ':', integer: 0},
+						slicemsg( // user ssubscribe
+							'>',
+							[]ValkeyMessage{
+								strmsg('+', "ssubscribe"),
+								strmsg('+', "3"),
+								{typ: ':', intlen: 0},
 							},
-						},
-						{ // proactive unsubscribe after user ssubscribe
-							typ: '>',
-							values: []ValkeyMessage{
-								{typ: '+', string: command},
-								{typ: '+', string: "3"},
-								{typ: ':', integer: 0},
+						),
+						slicemsg( // proactive unsubscribe after user ssubscribe
+							'>',
+							[]ValkeyMessage{
+								strmsg('+', command),
+								strmsg('+', "3"),
+								{typ: ':', intlen: 0},
 							},
-						},
+						),
 					},
 				}
 
 				p.background()
 
 				// proactive unsubscribe before other commands
-				mock.Expect().Reply(ValkeyMessage{ // proactive unsubscribe before user unsubscribe
-					typ: '>',
-					values: []ValkeyMessage{
-						{typ: '+', string: command},
-						{typ: '+', string: "0"},
-						{typ: ':', integer: 0},
+				mock.Expect().Reply(slicemsg( // proactive unsubscribe before user unsubscribe
+					'>',
+					[]ValkeyMessage{
+						strmsg('+', command),
+						strmsg('+', "0"),
+						{typ: ':', intlen: 0},
 					},
-				})
+				))
 
 				time.Sleep(time.Millisecond * 100)
 
@@ -3300,7 +3300,7 @@ func TestPubSub(t *testing.T) {
 					cmd2 := builder.Get().Key(strconv.Itoa(i)).Build()
 					go func() {
 						if cmd1.IsUnsub() {
-							mock.Expect(cmd1.Commands()...).Expect(cmds.PingCmd.Commands()...).Reply(replies[i]...).Reply(ValkeyMessage{typ: '+', string: "PONG"}).Expect(cmd2.Commands()...).ReplyString(strconv.Itoa(i))
+							mock.Expect(cmd1.Commands()...).Expect(cmds.PingCmd.Commands()...).Reply(replies[i]...).Reply(strmsg('+', "PONG")).Expect(cmd2.Commands()...).ReplyString(strconv.Itoa(i))
 						} else {
 							mock.Expect(cmd1.Commands()...).Reply(replies[i]...).Expect(cmd2.Commands()...).ReplyString(strconv.Itoa(i))
 						}
@@ -3330,64 +3330,64 @@ func TestPubSub(t *testing.T) {
 
 		replies := [][]ValkeyMessage{
 			{
-				{ // proactive unsubscribe before user unsubscribe
-					typ: '>',
-					values: []ValkeyMessage{
-						{typ: '+', string: "sunsubscribe"},
-						{typ: '+', string: "a"},
-						{typ: ':', integer: 0},
+				slicemsg( // proactive unsubscribe before user unsubscribe
+					'>',
+					[]ValkeyMessage{
+						strmsg('+', "sunsubscribe"),
+						strmsg('+', "a"),
+						{typ: ':', intlen: 0},
 					},
-				},
-				{ // proactive unsubscribe before user unsubscribe
-					typ: '>',
-					values: []ValkeyMessage{
-						{typ: '+', string: "sunsubscribe"},
-						{typ: '+', string: "b"},
-						{typ: ':', integer: 0},
+				),
+				slicemsg( // proactive unsubscribe before user unsubscribe
+					'>',
+					[]ValkeyMessage{
+						strmsg('+', "sunsubscribe"),
+						strmsg('+', "b"),
+						{typ: ':', intlen: 0},
 					},
-				},
-				{ // user unsubscribe, but error
-					typ:    '-',
-					string: "MOVED 1111",
-				},
+				),
+				strmsg( // user unsubscribe, but error
+					'-',
+					"MOVED 1111",
+				),
 			}, {
-				{ // user unsubscribe, but error
-					typ:    '-',
-					string: "MOVED 222",
-				},
+				strmsg( // user unsubscribe, but error
+					'-',
+					"MOVED 222",
+				),
 			}, {
-				{ // user unsubscribe success
-					typ: '>',
-					values: []ValkeyMessage{
-						{typ: '+', string: "sunsubscribe"},
-						{typ: '+', string: "c"},
-						{typ: ':', integer: 0},
+				slicemsg( // user unsubscribe success
+					'>',
+					[]ValkeyMessage{
+						strmsg('+', "sunsubscribe"),
+						strmsg('+', "c"),
+						{typ: ':', intlen: 0},
 					},
-				},
+				),
 			}, {
-				{ // proactive unsubscribe after user unsubscribe
-					typ: '>',
-					values: []ValkeyMessage{
-						{typ: '+', string: "sunsubscribe"},
+				slicemsg( // proactive unsubscribe after user unsubscribe
+					'>',
+					[]ValkeyMessage{
+						strmsg('+', "sunsubscribe"),
 						{typ: '_'},
-						{typ: ':', integer: 0},
+						{typ: ':', intlen: 0},
 					},
-				},
-				{typ: '+', string: "mk"},
+				),
+				strmsg('+', "mk"),
 			},
 		}
 
 		p.background()
 
 		// proactive unsubscribe before other commands
-		mock.Expect().Reply(ValkeyMessage{ // proactive unsubscribe before user unsubscribe
-			typ: '>',
-			values: []ValkeyMessage{
-				{typ: '+', string: "sunsubscribe"},
-				{typ: '+', string: "0"},
-				{typ: ':', integer: 0},
+		mock.Expect().Reply(slicemsg( // proactive unsubscribe before user unsubscribe
+			'>',
+			[]ValkeyMessage{
+				strmsg('+', "sunsubscribe"),
+				strmsg('+', "0"),
+				{typ: ':', intlen: 0},
 			},
-		})
+		))
 
 		time.Sleep(time.Millisecond * 100)
 
@@ -3395,7 +3395,7 @@ func TestPubSub(t *testing.T) {
 			cmd2 := builder.Get().Key(strconv.Itoa(i)).Build()
 			go func() {
 				if cmd1.IsUnsub() {
-					mock.Expect(cmd1.Commands()...).Expect(cmds.PingCmd.Commands()...).Reply(replies[i]...).Reply(ValkeyMessage{typ: '+', string: "PONG"}).Expect(cmd2.Commands()...).ReplyString(strconv.Itoa(i))
+					mock.Expect(cmd1.Commands()...).Expect(cmds.PingCmd.Commands()...).Reply(replies[i]...).Reply(strmsg('+', "PONG")).Expect(cmd2.Commands()...).ReplyString(strconv.Itoa(i))
 				} else {
 					mock.Expect(cmd1.Commands()...).Reply(replies[i]...).Expect(cmd2.Commands()...).ReplyString(strconv.Itoa(i))
 				}
@@ -3423,11 +3423,11 @@ func TestPubSub(t *testing.T) {
 			p.queue.PutOne(push)
 			_, _, ch := p.queue.NextWriteCmd()
 			go func() {
-				mock.Expect().Reply(ValkeyMessage{
-					typ: '-', string: "MOVED",
-				}).Reply(ValkeyMessage{
-					typ: '-', string: "MOVED",
-				})
+				mock.Expect().Reply(strmsg(
+					'-', "MOVED",
+				)).Reply(strmsg(
+					'-', "MOVED",
+				))
 			}()
 			go func() {
 				<-ch
@@ -3455,11 +3455,11 @@ func TestPubSub(t *testing.T) {
 			_, _, ch := p.queue.NextWriteCmd()
 			_, _, _ = p.queue.NextWriteCmd()
 			go func() {
-				mock.Expect().Reply(ValkeyMessage{
-					typ: '-', string: "MOVED",
-				}).Reply(ValkeyMessage{
-					typ: '-', string: "MOVED",
-				})
+				mock.Expect().Reply(strmsg(
+					'-', "MOVED",
+				)).Reply(strmsg(
+					'-', "MOVED",
+				))
 			}()
 			go func() {
 				<-ch
@@ -3488,48 +3488,48 @@ func TestPubSub(t *testing.T) {
 
 		replies := [][]ValkeyMessage{
 			{
-				{ // proactive unsubscribe before user unsubscribe
-					typ: '>',
-					values: []ValkeyMessage{
-						{typ: '+', string: "sunsubscribe"},
-						{typ: '+', string: "a"},
-						{typ: ':', integer: 0},
+				slicemsg( // proactive unsubscribe before user unsubscribe
+					'>',
+					[]ValkeyMessage{
+						strmsg('+', "sunsubscribe"),
+						strmsg('+', "a"),
+						{typ: ':', intlen: 0},
 					},
-				},
-				{ // proactive unsubscribe before user unsubscribe
-					typ: '>',
-					values: []ValkeyMessage{
-						{typ: '+', string: "sunsubscribe"},
-						{typ: '+', string: "b"},
-						{typ: ':', integer: 0},
+				),
+				slicemsg( // proactive unsubscribe before user unsubscribe
+					'>',
+					[]ValkeyMessage{
+						strmsg('+', "sunsubscribe"),
+						strmsg('+', "b"),
+						{typ: ':', intlen: 0},
 					},
-				},
+				),
 			}, {
 				// empty
 			}, {
-				{ // proactive unsubscribe after user unsubscribe
-					typ: '>',
-					values: []ValkeyMessage{
-						{typ: '+', string: "sunsubscribe"},
+				slicemsg( // proactive unsubscribe after user unsubscribe
+					'>',
+					[]ValkeyMessage{
+						strmsg('+', "sunsubscribe"),
 						{typ: '_'},
-						{typ: ':', integer: 0},
+						{typ: ':', intlen: 0},
 					},
-				},
-				{typ: '+', string: "mk"},
+				),
+				strmsg('+', "mk"),
 			},
 		}
 
 		p.background()
 
 		// proactive unsubscribe before other commands
-		mock.Expect().Reply(ValkeyMessage{ // proactive unsubscribe before user unsubscribe
-			typ: '>',
-			values: []ValkeyMessage{
-				{typ: '+', string: "sunsubscribe"},
-				{typ: '+', string: "0"},
-				{typ: ':', integer: 0},
+		mock.Expect().Reply(slicemsg( // proactive unsubscribe before user unsubscribe
+			'>',
+			[]ValkeyMessage{
+				strmsg('+', "sunsubscribe"),
+				strmsg('+', "0"),
+				{typ: ':', intlen: 0},
 			},
-		})
+		))
 
 		time.Sleep(time.Millisecond * 100)
 
@@ -3539,10 +3539,10 @@ func TestPubSub(t *testing.T) {
 				if cmd1.IsUnsub() {
 					mock.Expect(cmd1.Commands()...).Expect(cmds.PingCmd.Commands()...).
 						Reply(replies[i]...).
-						Reply(ValkeyMessage{ // failed unsubReply
-							typ:    '-',
-							string: "NOPERM User u has no permissions to run the 'ping' command",
-						}).Expect(cmd2.Commands()...).ReplyString(strconv.Itoa(i))
+						Reply(strmsg( // failed unsubReply
+							'-',
+							"NOPERM User u has no permissions to run the 'ping' command",
+						)).Expect(cmd2.Commands()...).ReplyString(strconv.Itoa(i))
 				} else {
 					mock.Expect(cmd1.Commands()...).Reply(replies[i]...).Expect(cmd2.Commands()...).ReplyString(strconv.Itoa(i))
 				}
@@ -3575,48 +3575,48 @@ func TestPubSub(t *testing.T) {
 
 		replies := [][]ValkeyMessage{
 			{
-				{ // proactive unsubscribe before user unsubscribe
-					typ: '>',
-					values: []ValkeyMessage{
-						{typ: '+', string: "sunsubscribe"},
-						{typ: '+', string: "a"},
-						{typ: ':', integer: 0},
+				slicemsg( // proactive unsubscribe before user unsubscribe
+					'>',
+					[]ValkeyMessage{
+						strmsg('+', "sunsubscribe"),
+						strmsg('+', "a"),
+						{typ: ':', intlen: 0},
 					},
-				},
-				{ // proactive unsubscribe before user unsubscribe
-					typ: '>',
-					values: []ValkeyMessage{
-						{typ: '+', string: "sunsubscribe"},
-						{typ: '+', string: "b"},
-						{typ: ':', integer: 0},
+				),
+				slicemsg( // proactive unsubscribe before user unsubscribe
+					'>',
+					[]ValkeyMessage{
+						strmsg('+', "sunsubscribe"),
+						strmsg('+', "b"),
+						{typ: ':', intlen: 0},
 					},
-				},
+				),
 			}, {
 				// empty
 			}, {
-				{ // proactive unsubscribe after user unsubscribe
-					typ: '>',
-					values: []ValkeyMessage{
-						{typ: '+', string: "sunsubscribe"},
+				slicemsg( // proactive unsubscribe after user unsubscribe
+					'>',
+					[]ValkeyMessage{
+						strmsg('+', "sunsubscribe"),
 						{typ: '_'},
-						{typ: ':', integer: 0},
+						{typ: ':', intlen: 0},
 					},
-				},
-				{typ: '+', string: "mk"},
+				),
+				strmsg('+', "mk"),
 			},
 		}
 
 		p.background()
 
 		// proactive unsubscribe before other commands
-		mock.Expect().Reply(ValkeyMessage{ // proactive unsubscribe before user unsubscribe
-			typ: '>',
-			values: []ValkeyMessage{
-				{typ: '+', string: "sunsubscribe"},
-				{typ: '+', string: "0"},
-				{typ: ':', integer: 0},
+		mock.Expect().Reply(slicemsg( // proactive unsubscribe before user unsubscribe
+			'>',
+			[]ValkeyMessage{
+				strmsg('+', "sunsubscribe"),
+				strmsg('+', "0"),
+				{typ: ':', intlen: 0},
 			},
-		})
+		))
 
 		time.Sleep(time.Millisecond * 100)
 
@@ -3626,10 +3626,10 @@ func TestPubSub(t *testing.T) {
 				if cmd1.IsUnsub() {
 					mock.Expect(cmd1.Commands()...).Expect(cmds.PingCmd.Commands()...).
 						Reply(replies[i]...).
-						Reply(ValkeyMessage{ // failed unsubReply
-							typ:    '-',
-							string: "LOADING server is loading the dataset in memory",
-						}).Expect(cmd2.Commands()...).ReplyString(strconv.Itoa(i))
+						Reply(strmsg( // failed unsubReply
+							'-',
+							"LOADING server is loading the dataset in memory",
+						)).Expect(cmd2.Commands()...).ReplyString(strconv.Itoa(i))
 				} else {
 					mock.Expect(cmd1.Commands()...).Reply(replies[i]...).Expect(cmd2.Commands()...).ReplyString(strconv.Itoa(i))
 				}
@@ -3662,48 +3662,48 @@ func TestPubSub(t *testing.T) {
 
 		replies := [][]ValkeyMessage{
 			{
-				{ // proactive unsubscribe before user unsubscribe
-					typ: '>',
-					values: []ValkeyMessage{
-						{typ: '+', string: "sunsubscribe"},
-						{typ: '+', string: "a"},
-						{typ: ':', integer: 0},
+				slicemsg( // proactive unsubscribe before user unsubscribe
+					'>',
+					[]ValkeyMessage{
+						strmsg('+', "sunsubscribe"),
+						strmsg('+', "a"),
+						{typ: ':', intlen: 0},
 					},
-				},
-				{ // proactive unsubscribe before user unsubscribe
-					typ: '>',
-					values: []ValkeyMessage{
-						{typ: '+', string: "sunsubscribe"},
-						{typ: '+', string: "b"},
-						{typ: ':', integer: 0},
+				),
+				slicemsg( // proactive unsubscribe before user unsubscribe
+					'>',
+					[]ValkeyMessage{
+						strmsg('+', "sunsubscribe"),
+						strmsg('+', "b"),
+						{typ: ':', intlen: 0},
 					},
-				},
+				),
 			}, {
 				// empty
 			}, {
-				{ // proactive unsubscribe after user unsubscribe
-					typ: '>',
-					values: []ValkeyMessage{
-						{typ: '+', string: "sunsubscribe"},
+				slicemsg( // proactive unsubscribe after user unsubscribe
+					'>',
+					[]ValkeyMessage{
+						strmsg('+', "sunsubscribe"),
 						{typ: '_'},
-						{typ: ':', integer: 0},
+						{typ: ':', intlen: 0},
 					},
-				},
-				{typ: '+', string: "mk"},
+				),
+				strmsg('+', "mk"),
 			},
 		}
 
 		p.background()
 
 		// proactive unsubscribe before other commands
-		mock.Expect().Reply(ValkeyMessage{ // proactive unsubscribe before user unsubscribe
-			typ: '>',
-			values: []ValkeyMessage{
-				{typ: '+', string: "sunsubscribe"},
-				{typ: '+', string: "0"},
-				{typ: ':', integer: 0},
+		mock.Expect().Reply(slicemsg( // proactive unsubscribe before user unsubscribe
+			'>',
+			[]ValkeyMessage{
+				strmsg('+', "sunsubscribe"),
+				strmsg('+', "0"),
+				{typ: ':', intlen: 0},
 			},
-		})
+		))
 
 		time.Sleep(time.Millisecond * 100)
 
@@ -3713,10 +3713,10 @@ func TestPubSub(t *testing.T) {
 				if cmd1.IsUnsub() {
 					mock.Expect(cmd1.Commands()...).Expect(cmds.PingCmd.Commands()...).
 						Reply(replies[i]...).
-						Reply(ValkeyMessage{ // failed unsubReply
-							typ:    '-',
-							string: "BUSY",
-						}).Expect(cmd2.Commands()...).ReplyString(strconv.Itoa(i))
+						Reply(strmsg( // failed unsubReply
+							'-',
+							"BUSY",
+						)).Expect(cmd2.Commands()...).ReplyString(strconv.Itoa(i))
 				} else {
 					mock.Expect(cmd1.Commands()...).Reply(replies[i]...).Expect(cmd2.Commands()...).ReplyString(strconv.Itoa(i))
 				}
@@ -3746,12 +3746,12 @@ func TestPubSub(t *testing.T) {
 			p.queue.PutOne(builder.Get().Key("a").Build())
 			p.queue.NextWriteCmd()
 			go func() {
-				mock.Expect().Reply(ValkeyMessage{
-					typ: '>', values: []ValkeyMessage{
-						{typ: '+', string: push},
-						{typ: '+', string: ""},
+				mock.Expect().Reply(slicemsg(
+					'>', []ValkeyMessage{
+						strmsg('+', push),
+						strmsg('+', ""),
 					},
-				})
+				))
 			}()
 			p._backgroundRead()
 			return
@@ -3776,7 +3776,7 @@ func TestPubSub(t *testing.T) {
 			p.queue.PutOne(cmd)
 			p.queue.NextWriteCmd()
 			go func() {
-				mock.Expect().Reply(ValkeyMessage{typ: '+', string: "QUEUED"})
+				mock.Expect().Reply(strmsg('+', "QUEUED"))
 			}()
 			p._backgroundRead()
 			return
@@ -3926,41 +3926,41 @@ func TestPubSubHooks(t *testing.T) {
 		deactivate2 := builder.Punsubscribe().Pattern("2").Build()
 		go func() {
 			mock.Expect(activate1.Commands()...).Expect(activate2.Commands()...).Reply(
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "subscribe"},
-					{typ: '+', string: "1"},
-					{typ: ':', integer: 1},
-				}},
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "psubscribe"},
-					{typ: '+', string: "2"},
-					{typ: ':', integer: 2},
-				}},
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "message"},
-					{typ: '+', string: "1"},
-					{typ: '+', string: "11"},
-				}},
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "pmessage"},
-					{typ: '+', string: "2"},
-					{typ: '+', string: "22"},
-					{typ: '+', string: "222"},
-				}},
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "subscribe"),
+					strmsg('+', "1"),
+					{typ: ':', intlen: 1},
+				}),
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "psubscribe"),
+					strmsg('+', "2"),
+					{typ: ':', intlen: 2},
+				}),
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "message"),
+					strmsg('+', "1"),
+					strmsg('+', "11"),
+				}),
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "pmessage"),
+					strmsg('+', "2"),
+					strmsg('+', "22"),
+					strmsg('+', "222"),
+				}),
 			)
 			mock.Expect(deactivate1.Commands()...).Expect(cmds.PingCmd.Commands()...).Expect(deactivate2.Commands()...).Expect(cmds.PingCmd.Commands()...).Reply(
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "unsubscribe"},
-					{typ: '+', string: "1"},
-					{typ: ':', integer: 1},
-				}},
-				ValkeyMessage{typ: '+', string: "PONG"},
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "punsubscribe"},
-					{typ: '+', string: "2"},
-					{typ: ':', integer: 2},
-				}},
-				ValkeyMessage{typ: '+', string: "PONG"},
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "unsubscribe"),
+					strmsg('+', "1"),
+					{typ: ':', intlen: 1},
+				}),
+				strmsg('+', "PONG"),
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "punsubscribe"),
+					strmsg('+', "2"),
+					{typ: ':', intlen: 2},
+				}),
+				strmsg('+', "PONG"),
 			)
 			cancel()
 		}()
@@ -4015,41 +4015,41 @@ func TestPubSubHooks(t *testing.T) {
 		deactivate2 := builder.Punsubscribe().Pattern("2").Build()
 		go func() {
 			mock.Expect(activate1.Commands()...).Expect(activate2.Commands()...).Reply(
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "subscribe"},
-					{typ: '+', string: "1"},
-					{typ: ':', integer: 1},
-				}},
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "psubscribe"},
-					{typ: '+', string: "2"},
-					{typ: ':', integer: 2},
-				}},
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "message"},
-					{typ: '+', string: "1"},
-					{typ: '+', string: "11"},
-				}},
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "pmessage"},
-					{typ: '+', string: "2"},
-					{typ: '+', string: "22"},
-					{typ: '+', string: "222"},
-				}},
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "subscribe"),
+					strmsg('+', "1"),
+					{typ: ':', intlen: 1},
+				}),
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "psubscribe"),
+					strmsg('+', "2"),
+					{typ: ':', intlen: 2},
+				}),
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "message"),
+					strmsg('+', "1"),
+					strmsg('+', "11"),
+				}),
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "pmessage"),
+					strmsg('+', "2"),
+					strmsg('+', "22"),
+					strmsg('+', "222"),
+				}),
 			)
 			mock.Expect(deactivate1.Commands()...).Expect(cmds.PingCmd.Commands()...).Expect(deactivate2.Commands()...).Expect(cmds.PingCmd.Commands()...).Reply(
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "unsubscribe"},
-					{typ: '+', string: "1"},
-					{typ: ':', integer: 1},
-				}},
-				ValkeyMessage{typ: '+', string: "PONG"},
-				ValkeyMessage{typ: '>', values: []ValkeyMessage{
-					{typ: '+', string: "punsubscribe"},
-					{typ: '+', string: "2"},
-					{typ: ':', integer: 2},
-				}},
-				ValkeyMessage{typ: '+', string: "PONG"},
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "unsubscribe"),
+					strmsg('+', "1"),
+					{typ: ':', intlen: 1},
+				}),
+				strmsg('+', "PONG"),
+				slicemsg('>', []ValkeyMessage{
+					strmsg('+', "punsubscribe"),
+					strmsg('+', "2"),
+					{typ: ':', intlen: 2},
+				}),
+				strmsg('+', "PONG"),
 			)
 			cancel()
 		}()
@@ -4281,8 +4281,8 @@ func TestCloseAndWaitPendingCMDs(t *testing.T) {
 	for i := 0; i < loop; i++ {
 		go func() {
 			defer wg.Done()
-			if v, _ := p.Do(context.Background(), cmds.NewCompleted([]string{"GET", "a"})).ToMessage(); v.string != "b" {
-				t.Errorf("unexpected GET result %v", v.string)
+			if v, _ := p.Do(context.Background(), cmds.NewCompleted([]string{"GET", "a"})).ToMessage(); v.string() != "b" {
+				t.Errorf("unexpected GET result %v", v.string())
 			}
 		}()
 	}
@@ -5085,19 +5085,19 @@ func TestPipe_CleanSubscriptions_6(t *testing.T) {
 		p.CleanSubscriptions()
 	}()
 	mock.Expect("UNSUBSCRIBE").Expect(cmds.PingCmd.Commands()...).Expect("PUNSUBSCRIBE").Expect(cmds.PingCmd.Commands()...).Expect("DISCARD").Reply(
-		ValkeyMessage{typ: '>', values: []ValkeyMessage{
-			{typ: '+', string: "unsubscribe"},
+		slicemsg('>', []ValkeyMessage{
+			strmsg('+', "unsubscribe"),
 			{typ: '_'},
-			{typ: ':', integer: 1},
-		}},
-		ValkeyMessage{typ: '+', string: "PONG"},
-		ValkeyMessage{typ: '>', values: []ValkeyMessage{
-			{typ: '+', string: "punsubscribe"},
+			{typ: ':', intlen: 1},
+		}),
+		strmsg('+', "PONG"),
+		slicemsg('>', []ValkeyMessage{
+			strmsg('+', "punsubscribe"),
 			{typ: '_'},
-			{typ: ':', integer: 2},
-		}},
-		ValkeyMessage{typ: '+', string: "PONG"},
-		ValkeyMessage{typ: '+', string: "OK"},
+			{typ: ':', intlen: 2},
+		}),
+		strmsg('+', "PONG"),
+		strmsg('+', "OK"),
 	)
 }
 
@@ -5128,25 +5128,25 @@ func TestPipe_CleanSubscriptions_7(t *testing.T) {
 		p.CleanSubscriptions()
 	}()
 	mock.Expect("UNSUBSCRIBE").Expect(cmds.PingCmd.Commands()...).Expect("PUNSUBSCRIBE").Expect(cmds.PingCmd.Commands()...).Expect("SUNSUBSCRIBE").Expect(cmds.PingCmd.Commands()...).Expect("DISCARD").Reply(
-		ValkeyMessage{typ: '>', values: []ValkeyMessage{
-			{typ: '+', string: "unsubscribe"},
+		slicemsg('>', []ValkeyMessage{
+			strmsg('+', "unsubscribe"),
 			{typ: '_'},
-			{typ: ':', integer: 1},
-		}},
-		ValkeyMessage{typ: '+', string: "PONG"},
-		ValkeyMessage{typ: '>', values: []ValkeyMessage{
-			{typ: '+', string: "punsubscribe"},
+			{typ: ':', intlen: 1},
+		}),
+		strmsg('+', "PONG"),
+		slicemsg('>', []ValkeyMessage{
+			strmsg('+', "punsubscribe"),
 			{typ: '_'},
-			{typ: ':', integer: 2},
-		}},
-		ValkeyMessage{typ: '+', string: "PONG"},
-		ValkeyMessage{typ: '>', values: []ValkeyMessage{
-			{typ: '+', string: "sunsubscribe"},
+			{typ: ':', intlen: 2},
+		}),
+		strmsg('+', "PONG"),
+		slicemsg('>', []ValkeyMessage{
+			strmsg('+', "sunsubscribe"),
 			{typ: '_'},
-			{typ: ':', integer: 3},
-		}},
-		ValkeyMessage{typ: '+', string: "PONG"},
-		ValkeyMessage{typ: '+', string: "OK"},
+			{typ: ':', intlen: 3},
+		}),
+		strmsg('+', "PONG"),
+		strmsg('+', "OK"),
 	)
 }
 
@@ -5317,16 +5317,16 @@ func TestErrorPipe(t *testing.T) {
 
 func TestBackgroundPing(t *testing.T) {
 	defer ShouldNotLeaked(SetupLeakDetection())
-	timeout := 100*time.Millisecond
+	timeout := 100 * time.Millisecond
 	t.Run("background ping", func(t *testing.T) {
-		opt := ClientOption{ConnWriteTimeout: timeout, 
-							Dialer: net.Dialer{KeepAlive: timeout}, 
-							DisableAutoPipelining: true}
+		opt := ClientOption{ConnWriteTimeout: timeout,
+			Dialer:                net.Dialer{KeepAlive: timeout},
+			DisableAutoPipelining: true}
 		p, mock, cancel, _ := setup(t, opt)
 		defer cancel()
-		time.Sleep(50*time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 		prev := atomic.LoadInt32(&p.recvs)
-		
+
 		for i := range 10 {
 			atomic.AddInt32(&p.blcksig, 1) // block
 			time.Sleep(timeout)
@@ -5344,7 +5344,7 @@ func TestBackgroundPing(t *testing.T) {
 		}()
 		for i := range 10 {
 			time.Sleep(timeout)
-			recv := atomic.LoadInt32(&p.recvs)		
+			recv := atomic.LoadInt32(&p.recvs)
 			if prev == recv {
 				t.Fatalf("round %d unexpect recv %v, need be different from prev %v", i, recv, prev)
 			}

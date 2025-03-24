@@ -23,21 +23,21 @@ func test(t *testing.T, storeFn func() CacheStore) {
 			t.Fatal("flights before Update should return empty ValkeyMessage and non-nil CacheEntry")
 		}
 
-		store.Delete([]ValkeyMessage{{typ: '+', string: "key"}}) // Delete should not affect pending CacheEntry
+		store.Delete([]ValkeyMessage{strmsg('+', "key")}) // Delete should not affect pending CacheEntry
 
 		v2, e2 := store.Flight("key", "cmd", time.Millisecond*100, now)
 		if v2.typ != 0 || e != e2 {
 			t.Fatal("flights before Update should return empty ValkeyMessage and the same CacheEntry, not be affected by Delete")
 		}
 
-		v = ValkeyMessage{typ: '+', string: "val"}
+		v = strmsg('+', "val")
 		v.setExpireAt(now.Add(time.Second).UnixMilli())
 		if pttl := store.Update("key", "cmd", v); pttl < now.Add(90*time.Millisecond).UnixMilli() || pttl > now.Add(100*time.Millisecond).UnixMilli() {
 			t.Fatal("Update should return a desired pttl")
 		}
 
 		v2, err = e.Wait(context.Background())
-		if v2.typ != v.typ || v2.string != v.string || err != nil {
+		if v2.typ != v.typ || v2.string() != v.string() || err != nil {
 			t.Fatal("unexpected cache response")
 		}
 		if pttl := v2.CachePXAT(); pttl < now.Add(90*time.Millisecond).UnixMilli() || pttl > now.Add(100*time.Millisecond).UnixMilli() {
@@ -45,14 +45,14 @@ func test(t *testing.T, storeFn func() CacheStore) {
 		}
 
 		v2, _ = store.Flight("key", "cmd", time.Millisecond*100, now)
-		if v2.typ != v.typ || v2.string != v.string {
+		if v2.typ != v.typ || v2.string() != v.string() {
 			t.Fatal("flights after Update should return updated ValkeyMessage")
 		}
 		if pttl := v2.CachePXAT(); pttl < now.Add(90*time.Millisecond).UnixMilli() || pttl > now.Add(100*time.Millisecond).UnixMilli() {
 			t.Fatal("CachePXAT should return a desired pttl")
 		}
 
-		store.Delete([]ValkeyMessage{{typ: '+', string: "key"}})
+		store.Delete([]ValkeyMessage{strmsg('+', "key")})
 		v, e = store.Flight("key", "cmd", time.Millisecond*100, now)
 		if v.typ != 0 || e != nil {
 			t.Fatal("flights after Delete should return empty ValkeyMessage and nil CacheEntry")
@@ -74,7 +74,7 @@ func test(t *testing.T, storeFn func() CacheStore) {
 			t.Fatal("flights before Update should return empty ValkeyMessage and non-nil CacheEntry")
 		}
 
-		store.Delete([]ValkeyMessage{{typ: '+', string: "key"}}) // Delete should not affect pending CacheEntry
+		store.Delete([]ValkeyMessage{strmsg('+', "key")}) // Delete should not affect pending CacheEntry
 
 		v2, e2 := store.Flight("key", "cmd", time.Millisecond*100, now)
 		if v2.typ != 0 || e != e2 {
@@ -99,13 +99,13 @@ func test(t *testing.T, storeFn func() CacheStore) {
 		var store = storeFn()
 
 		for _, deletions := range [][]ValkeyMessage{
-			{{typ: '+', string: "key"}},
+			{strmsg('+', "key")},
 			nil,
 		} {
 			store.Flight("key", "cmd1", time.Millisecond*100, now)
 			store.Flight("key", "cmd2", time.Millisecond*100, now)
-			store.Update("key", "cmd1", ValkeyMessage{typ: '+', string: "val"})
-			store.Update("key", "cmd2", ValkeyMessage{typ: '+', string: "val"})
+			store.Update("key", "cmd1", strmsg('+', "val"))
+			store.Update("key", "cmd2", strmsg('+', "val"))
 
 			store.Delete(deletions)
 
@@ -128,7 +128,7 @@ func test(t *testing.T, storeFn func() CacheStore) {
 			t.Fatal("first flight should return empty ValkeyMessage and nil CacheEntry")
 		}
 
-		v = ValkeyMessage{typ: '+', string: "val"}
+		v = strmsg('+', "val")
 		v.setExpireAt(now.Add(time.Millisecond).UnixMilli())
 		store.Update("key", "cmd", v)
 
