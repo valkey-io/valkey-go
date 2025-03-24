@@ -15,8 +15,8 @@ import (
 )
 
 type wrapped struct {
-	msg string
 	err error
+	msg string
 }
 
 func (e wrapped) Error() string { return e.msg }
@@ -1257,8 +1257,8 @@ func TestValkeyResult(t *testing.T) {
 
 	t.Run("Stringer", func(t *testing.T) {
 		tests := []struct {
-			input    ValkeyResult
 			expected string
+			input    ValkeyResult
 		}{
 			{
 				input: ValkeyResult{
@@ -1969,8 +1969,8 @@ func TestValkeyMessage(t *testing.T) {
 
 	t.Run("Stringer", func(t *testing.T) {
 		tests := []struct {
-			input    ValkeyMessage
 			expected string
+			input    ValkeyMessage
 		}{
 			{
 				input: slicemsg('*', []ValkeyMessage{
