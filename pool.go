@@ -95,7 +95,7 @@ retry:
 		}
 		p.cond.L.Unlock()
 		return v
-	} else if ctx.Err() != nil { // if poolCtx is timedout due to configured poolTimeout
+	} else if poolCtx.Err() != nil { // if poolCtx is timedout due to configured poolTimeout
 
 		if deadPipe, ok := p.dead.(*pipe); ok {
 			deadPipe.error.Store(&errs{error: poolTimeoutError})
