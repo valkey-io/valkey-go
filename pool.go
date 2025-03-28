@@ -2,47 +2,114 @@ package valkey
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 )
 
-func newPool(cap int, dead wire, cleanup time.Duration, minSize int, makeFn func(context.Context) wire) *pool {
+const (
+	PoolTimeoutExceeded = "pool timeout exceeded"
+)
+
+var poolTimeoutError = errors.New(PoolTimeoutExceeded)
+
+func newPool(cap int, dead wire, cleanup time.Duration, minSize int, poolTimeout time.Duration, makeFn func(context.Context) wire) *pool {
 	if cap <= 0 {
 		cap = DefaultPoolSize
 	}
 
 	return &pool{
-		size:    0,
-		minSize: minSize,
-		cap:     cap,
-		dead:    dead,
-		make:    makeFn,
-		list:    make([]wire, 0, 4),
-		cond:    sync.NewCond(&sync.Mutex{}),
-		cleanup: cleanup,
+		size:        0,
+		minSize:     minSize,
+		cap:         cap,
+		dead:        dead,
+		make:        makeFn,
+		list:        make([]wire, 0, 4),
+		cond:        sync.NewCond(&sync.Mutex{}),
+		cleanup:     cleanup,
+		poolTimeout: poolTimeout,
 	}
 }
 
 type pool struct {
-	dead    wire
-	cond    *sync.Cond
-	timer   *time.Timer
-	make    func(ctx context.Context) wire
-	list    []wire
-	cleanup time.Duration
-	size    int
-	minSize int
-	cap     int
-	down    bool
-	timerOn bool
+	dead        wire
+	cond        *sync.Cond
+	timer       *time.Timer
+	make        func(ctx context.Context) wire
+	list        []wire
+	cleanup     time.Duration
+	size        int
+	minSize     int
+	cap         int
+	down        bool
+	timerOn     bool
+	poolTimeout time.Duration
 }
 
 func (p *pool) Acquire(ctx context.Context) (v wire) {
 	p.cond.L.Lock()
+
+	poolDeadline := time.Time{}
+	if p.poolTimeout > 0 {
+		poolDeadline = time.Now().Add(p.poolTimeout)
+	}
+
+	if ctxDeadline, ok := ctx.Deadline(); ok {
+		if poolDeadline.IsZero() {
+			poolDeadline = ctxDeadline
+		} else if ctxDeadline.Before(poolDeadline) {
+			poolDeadline = ctxDeadline
+		}
+	}
+
+	var (
+		poolCtx context.Context
+		cancel  context.CancelFunc
+	)
+	if !poolDeadline.IsZero() {
+		poolCtx, cancel = context.WithDeadline(context.Background(), poolDeadline)
+		defer cancel()
+		defer func() {
+		}()
+
+		go func() {
+			<-poolCtx.Done()
+			if poolCtx.Err() == context.DeadlineExceeded { // signal the pool to stop waiting, only if the poolctx is deadline exceeded
+				p.cond.Broadcast() // broadcasting to ensure that the connection wait within this invocation is awakened.
+			}
+		}()
+
+	} else {
+		poolCtx = ctx
+	}
+
 retry:
-	for len(p.list) == 0 && p.size == p.cap && !p.down {
+	for len(p.list) == 0 && p.size == p.cap && !p.down && ctx.Err() == nil && poolCtx.Err() == nil {
 		p.cond.Wait()
 	}
+
+	if ctx.Err() != nil {
+
+		if deadPipe, ok := p.dead.(*pipe); ok {
+			deadPipe.error.Store(&errs{error: ctx.Err()})
+			v = deadPipe
+		} else {
+			v = p.dead
+		}
+		p.cond.L.Unlock()
+		return v
+	} else if poolCtx.Err() != nil { // if poolCtx is timedout due to configured poolTimeout
+
+		if deadPipe, ok := p.dead.(*pipe); ok {
+			deadPipe.error.Store(&errs{error: poolTimeoutError})
+			v = deadPipe
+		} else {
+			v = p.dead
+		}
+		p.cond.L.Unlock()
+		return v
+	}
+
 	if p.down {
 		v = p.dead
 		p.cond.L.Unlock()
