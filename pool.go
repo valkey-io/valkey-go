@@ -84,7 +84,7 @@ func (p *pool) Acquire(ctx context.Context) (v wire) {
 	}
 
 retry:
-	for len(p.list) == 0 && p.size == p.cap && !p.down {
+	for len(p.list) == 0 && p.size == p.cap && !p.down && ctx.Err() == nil && poolCtx.Err() == nil {
 		p.cond.Wait()
 	}
 
