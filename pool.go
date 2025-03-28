@@ -69,11 +69,13 @@ func (p *pool) Acquire(ctx context.Context) (v wire) {
 	if !poolDeadline.IsZero() {
 		poolCtx, cancel = context.WithDeadline(context.Background(), poolDeadline)
 		defer cancel()
+		defer func() {
+		}()
 
 		go func() {
 			<-poolCtx.Done()
 			if poolCtx.Err() == context.DeadlineExceeded { // signal the pool to stop waiting, only if the poolctx is deadline exceeded
-				p.cond.Signal()
+				p.cond.Broadcast() // broadcasting to ensure that the connection wait within this invocation is awakened.
 			}
 		}()
 
@@ -82,9 +84,10 @@ func (p *pool) Acquire(ctx context.Context) (v wire) {
 	}
 
 retry:
-	for len(p.list) == 0 && p.size == p.cap && !p.down && ctx.Err() == nil && poolCtx.Err() == nil {
+	for len(p.list) == 0 && p.size == p.cap && !p.down {
 		p.cond.Wait()
 	}
+
 	if ctx.Err() != nil {
 
 		if deadPipe, ok := p.dead.(*pipe); ok {
