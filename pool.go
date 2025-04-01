@@ -53,8 +53,6 @@ func (p *pool) Acquire(ctx context.Context) (v wire) {
 	if !poolDeadline.IsZero() {
 		poolCtx, cancel = context.WithDeadline(context.Background(), poolDeadline)
 		defer cancel()
-		defer func() {
-		}()
 
 		go func() {
 			<-poolCtx.Done()
