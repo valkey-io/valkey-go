@@ -17,7 +17,7 @@ func TestPool(t *testing.T) {
 	defer ShouldNotLeaked(SetupLeakDetection())
 	setup := func(size int) (*pool, *int32) {
 		var count int32
-		return newPool(size, dead, 0, 0, -1, func(_ context.Context) wire {
+		return newPool(size, dead, 0, 0, func(_ context.Context) wire {
 			atomic.AddInt32(&count, 1)
 			closed := false
 			return &mockWire{
@@ -35,7 +35,7 @@ func TestPool(t *testing.T) {
 	}
 
 	t.Run("DefaultPoolSize", func(t *testing.T) {
-		p := newPool(0, dead, 0, 0, -1, func(_ context.Context) wire { return nil })
+		p := newPool(0, dead, 0, 0, func(_ context.Context) wire { return nil })
 		if cap(p.list) == 0 {
 			t.Fatalf("DefaultPoolSize is not applied")
 		}
@@ -211,7 +211,7 @@ func TestPoolError(t *testing.T) {
 	defer ShouldNotLeaked(SetupLeakDetection())
 	setup := func(size int) (*pool, *int32) {
 		var count int32
-		return newPool(size, dead, 0, 0, -1, func(_ context.Context) wire {
+		return newPool(size, dead, 0, 0, func(_ context.Context) wire {
 			w := &pipe{}
 			w.pshks.Store(emptypshks)
 			c := atomic.AddInt32(&count, 1)
@@ -246,7 +246,7 @@ func TestPoolError(t *testing.T) {
 func TestPoolWithIdleTTL(t *testing.T) {
 	defer ShouldNotLeaked(SetupLeakDetection())
 	setup := func(size int, ttl time.Duration, minSize int) *pool {
-		return newPool(size, dead, ttl, minSize, -1, func(_ context.Context) wire {
+		return newPool(size, dead, ttl, minSize, func(_ context.Context) wire {
 			closed := false
 			return &mockWire{
 				CloseFn: func() {
@@ -335,7 +335,7 @@ func TestPoolWithIdleTTL(t *testing.T) {
 func TestPoolWithAcquireCtx(t *testing.T) {
 	defer ShouldNotLeaked(SetupLeakDetection())
 	setup := func(size int, delay time.Duration) *pool {
-		return newPool(size, dead, 0, 0, -1, func(ctx context.Context) wire {
+		return newPool(size, dead, 0, 0, func(ctx context.Context) wire {
 			var err error
 			closed := false
 			timer := time.NewTimer(delay)
@@ -454,7 +454,7 @@ func TestPoolWithAcquireCtx(t *testing.T) {
 func TestPoolWithCtxTimeout(t *testing.T) {
 	defer ShouldNotLeaked(SetupLeakDetection())
 	setup := func(size int, delay time.Duration) *pool {
-		return newPool(size, dead, 0, 0, -1, func(ctx context.Context) wire {
+		return newPool(size, dead, 0, 0, func(ctx context.Context) wire {
 
 			var err error
 			closed := false
@@ -532,4 +532,40 @@ func TestPoolWithCtxTimeout(t *testing.T) {
 
 	})
 
+}
+
+func TestCondSignalBehavior(t *testing.T) {
+	var mu sync.Mutex
+	cond := sync.NewCond(&mu)
+	var wg sync.WaitGroup
+
+	// Goroutine to wait on the condition variable
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("Goroutine panicked: %v", r)
+			}
+		}()
+		for i := 0; i < 2; i++ {
+			mu.Lock()
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				cond.Wait()
+				t.Logf("Woken up %d time(s)", i+1)
+			}()
+		}
+	}()
+
+	// Goroutine to signal the condition variable twice
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		time.Sleep(1 * time.Second)
+		cond.Broadcast()
+	}()
+
+	wg.Wait()
 }

@@ -174,10 +174,6 @@ type ClientOption struct {
 	// BlockingPipeline is the threshold of a pipeline that will be treated as blocking commands when exceeding it.
 	BlockingPipeline int
 
-	// BlockingPoolTimeout is the maximum amount of time pool waits to acquire a connection from the pool, when all the connections are busy
-	// pool waits until either this timeout is reached or context deadline is exceeded
-	BlockingPoolTimeout time.Duration
-
 	// PipelineMultiplex determines how many tcp connections used to pipeline commands to one valkey instance.
 	// The default for single and sentinel clients is 2, which means 4 connections (2^2).
 	// The default for cluster clients is 0, which means 1 connection (2^0).
@@ -415,9 +411,6 @@ func NewClient(option ClientOption) (client Client, err error) {
 	}
 	if option.ConnWriteTimeout == 0 {
 		option.ConnWriteTimeout = max(DefaultTCPKeepAlive, option.Dialer.KeepAlive) * 10
-	}
-	if option.BlockingPoolTimeout == 0 {
-		option.BlockingPoolTimeout = option.ConnWriteTimeout + 1*time.Second
 	}
 	if option.BlockingPipeline == 0 {
 		option.BlockingPipeline = DefaultBlockingPipeline

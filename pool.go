@@ -2,64 +2,48 @@ package valkey
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
 )
 
-const (
-	PoolTimeoutExceeded = "pool timeout exceeded"
-)
-
-var poolTimeoutError = errors.New(PoolTimeoutExceeded)
-
-func newPool(cap int, dead wire, cleanup time.Duration, minSize int, poolTimeout time.Duration, makeFn func(context.Context) wire) *pool {
+func newPool(cap int, dead wire, cleanup time.Duration, minSize int, makeFn func(context.Context) wire) *pool {
 	if cap <= 0 {
 		cap = DefaultPoolSize
 	}
 
 	return &pool{
-		size:        0,
-		minSize:     minSize,
-		cap:         cap,
-		dead:        dead,
-		make:        makeFn,
-		list:        make([]wire, 0, 4),
-		cond:        sync.NewCond(&sync.Mutex{}),
-		cleanup:     cleanup,
-		poolTimeout: poolTimeout,
+		size:    0,
+		minSize: minSize,
+		cap:     cap,
+		dead:    dead,
+		make:    makeFn,
+		list:    make([]wire, 0, 4),
+		cond:    sync.NewCond(&sync.Mutex{}),
+		cleanup: cleanup,
 	}
 }
 
 type pool struct {
-	dead        wire
-	cond        *sync.Cond
-	timer       *time.Timer
-	make        func(ctx context.Context) wire
-	list        []wire
-	cleanup     time.Duration
-	size        int
-	minSize     int
-	cap         int
-	down        bool
-	timerOn     bool
-	poolTimeout time.Duration
+	dead    wire
+	cond    *sync.Cond
+	timer   *time.Timer
+	make    func(ctx context.Context) wire
+	list    []wire
+	cleanup time.Duration
+	size    int
+	minSize int
+	cap     int
+	down    bool
+	timerOn bool
 }
 
 func (p *pool) Acquire(ctx context.Context) (v wire) {
 	p.cond.L.Lock()
 
 	poolDeadline := time.Time{}
-	if p.poolTimeout > 0 {
-		poolDeadline = time.Now().Add(p.poolTimeout)
-	}
 
 	if ctxDeadline, ok := ctx.Deadline(); ok {
-		if poolDeadline.IsZero() {
-			poolDeadline = ctxDeadline
-		} else if ctxDeadline.Before(poolDeadline) {
-			poolDeadline = ctxDeadline
-		}
+		poolDeadline = ctxDeadline
 	}
 
 	var (
@@ -84,7 +68,7 @@ func (p *pool) Acquire(ctx context.Context) (v wire) {
 	}
 
 retry:
-	for len(p.list) == 0 && p.size == p.cap && !p.down && ctx.Err() == nil && poolCtx.Err() == nil {
+	for len(p.list) == 0 && p.size == p.cap && !p.down && ctx.Err() == nil {
 		p.cond.Wait()
 	}
 
@@ -92,16 +76,6 @@ retry:
 
 		if deadPipe, ok := p.dead.(*pipe); ok {
 			deadPipe.error.Store(&errs{error: ctx.Err()})
-			v = deadPipe
-		} else {
-			v = p.dead
-		}
-		p.cond.L.Unlock()
-		return v
-	} else if poolCtx.Err() != nil { // if poolCtx is timedout due to configured poolTimeout
-
-		if deadPipe, ok := p.dead.(*pipe); ok {
-			deadPipe.error.Store(&errs{error: poolTimeoutError})
 			v = deadPipe
 		} else {
 			v = p.dead
