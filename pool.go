@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// ErrAcquireComplete is a special error used to indicate that the Acquire operation has completed successfully
-var ErrAcquireComplete = errors.New("acquire complete")
+// errAcquireComplete is a special error used to indicate that the Acquire operation has completed successfully
+var errAcquireComplete = errors.New("acquire complete")
 
 func newPool(cap int, dead wire, cleanup time.Duration, minSize int, makeFn func(context.Context) wire) *pool {
 	if cap <= 0 {
@@ -47,11 +47,11 @@ func (p *pool) Acquire(ctx context.Context) (v wire) {
 	// Set up ctx handling when waiting for an available connection
 	if len(p.list) == 0 && p.size == p.cap && !p.down && ctx.Err() == nil {
 		poolCtx, cancel := context.WithCancelCause(ctx)
-		defer cancel(ErrAcquireComplete)
+		defer cancel(errAcquireComplete)
 
 		go func() {
 			<-poolCtx.Done()
-			if context.Cause(poolCtx) != ErrAcquireComplete { // no need to broadcast if the poolCtx is cancelled explicitly.
+			if context.Cause(poolCtx) != errAcquireComplete { // no need to broadcast if the poolCtx is cancelled explicitly.
 				p.cond.Broadcast()
 			}
 		}()
