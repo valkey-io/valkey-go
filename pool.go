@@ -2,9 +2,13 @@ package valkey
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 )
+
+// ErrAcquireComplete is a special error used to indicate that the Acquire operation has completed successfully
+var ErrAcquireComplete = errors.New("acquire complete")
 
 func newPool(cap int, dead wire, cleanup time.Duration, minSize int, makeFn func(context.Context) wire) *pool {
 	if cap <= 0 {
@@ -40,29 +44,17 @@ type pool struct {
 func (p *pool) Acquire(ctx context.Context) (v wire) {
 	p.cond.L.Lock()
 
-	poolDeadline := time.Time{}
-
-	if ctxDeadline, ok := ctx.Deadline(); ok {
-		poolDeadline = ctxDeadline
-	}
-
-	var (
-		poolCtx context.Context
-		cancel  context.CancelFunc
-	)
-	if !poolDeadline.IsZero() {
-		poolCtx, cancel = context.WithDeadline(context.Background(), poolDeadline)
-		defer cancel()
+	// Set up ctx handling when waiting for an available connection
+	if len(p.list) == 0 && p.size == p.cap && !p.down && ctx.Err() == nil {
+		poolCtx, cancel := context.WithCancelCause(ctx)
+		defer cancel(ErrAcquireComplete)
 
 		go func() {
 			<-poolCtx.Done()
-			if poolCtx.Err() == context.DeadlineExceeded { // signal the pool to stop waiting, only if the poolctx is deadline exceeded
-				p.cond.Broadcast() // broadcasting to ensure that the connection wait within this invocation is awakened.
+			if context.Cause(poolCtx) != ErrAcquireComplete { // no need to broadcast if the poolCtx is cancelled explicitly.
+				p.cond.Broadcast()
 			}
 		}()
-
-	} else {
-		poolCtx = ctx
 	}
 
 retry:
@@ -71,13 +63,9 @@ retry:
 	}
 
 	if ctx.Err() != nil {
-
-		if deadPipe, ok := p.dead.(*pipe); ok {
-			deadPipe.error.Store(&errs{error: ctx.Err()})
-			v = deadPipe
-		} else {
-			v = p.dead
-		}
+		deadPipe := deadFn()
+		deadPipe.error.Store(&errs{error: ctx.Err()})
+		v = deadPipe
 		p.cond.L.Unlock()
 		return v
 	}

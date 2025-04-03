@@ -514,8 +514,6 @@ func TestPoolWithCtxTimeout(t *testing.T) {
 				start := time.Now()
 				ctx, cancel := context.WithTimeout(context.Background(), ctxTimeout)
 				defer cancel()
-				defer func() {
-				}()
 				p.Acquire(ctx)
 				acquireTime[index] = time.Since(start).Milliseconds()
 			}(i)
@@ -532,40 +530,53 @@ func TestPoolWithCtxTimeout(t *testing.T) {
 
 	})
 
-}
+	t.Run("context cancelled after some timeout, pool should not wait for the connection", func(t *testing.T) {
+		p := setup(5, time.Millisecond*20)
+		acquireTime := make([]int64, 5)
 
-func TestCondSignalBehavior(t *testing.T) {
-	var mu sync.Mutex
-	cond := sync.NewCond(&mu)
-	var wg sync.WaitGroup
-
-	// Goroutine to wait on the condition variable
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		defer func() {
-			if r := recover(); r != nil {
-				t.Errorf("Goroutine panicked: %v", r)
-			}
-		}()
-		for i := 0; i < 2; i++ {
-			mu.Lock()
+		var wg sync.WaitGroup
+		// acquire 5 connections with a higher deadline
+		for i := 0; i < 5; i++ {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				cond.Wait()
-				t.Logf("Woken up %d time(s)", i+1)
+				ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+				defer cancel()
+				defer func() {
+				}()
+				p.Acquire(ctx)
 			}()
 		}
-	}()
 
-	// Goroutine to signal the condition variable twice
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		time.Sleep(1 * time.Second)
-		cond.Broadcast()
-	}()
+		// sleep for 1ms so that the above go routines can acquire the connections
+		time.Sleep(1 * time.Millisecond)
 
-	wg.Wait()
+		cancelTimeout := 4 * time.Millisecond
+		// acquire 5 more connections with premature cancellation
+		for i := 0; i < 5; i++ {
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+				start := time.Now()
+				ctx, cancel := context.WithCancel(context.Background())
+				go func() {
+					time.Sleep(cancelTimeout)
+					cancel()
+				}()
+
+				p.Acquire(ctx)
+				acquireTime[index] = time.Since(start).Milliseconds()
+			}(i)
+		}
+
+		wg.Wait()
+
+		// Assert that acquire time is close to cancel timeout
+		for i := 0; i < 5; i++ {
+			if acquireTime[i] < cancelTimeout.Milliseconds()-1 || acquireTime[i] > cancelTimeout.Milliseconds()+1 {
+				t.Fatalf("Acquire time for request %d is not within the expected range: %d seconds, got: %d", i, cancelTimeout.Milliseconds(), acquireTime[i])
+			}
+		}
+	})
+
 }
