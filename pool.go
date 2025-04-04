@@ -45,7 +45,7 @@ func (p *pool) Acquire(ctx context.Context) (v wire) {
 	p.cond.L.Lock()
 
 	// Set up ctx handling when waiting for an available connection
-	if len(p.list) == 0 && p.size == p.cap && !p.down && ctx.Err() == nil {
+	if len(p.list) == 0 && p.size == p.cap && !p.down && ctx.Err() == nil && ctx.Done() != nil {
 		poolCtx, cancel := context.WithCancelCause(ctx)
 		defer cancel(errAcquireComplete)
 
