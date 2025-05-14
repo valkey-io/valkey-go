@@ -18,18 +18,18 @@ import (
 type LockerOption struct {
 	// ClientBuilder can be used to modify valkey.Client used by Locker
 	ClientBuilder func(option valkey.ClientOption) (valkey.Client, error)
-	// KeyPrefix is the prefix of valkey key for locks. Default value is "valkeylock".
+	// KeyPrefix is the prefix of the valkey key for locks. The default value is "valkeylock".
 	KeyPrefix string
 	// ClientOption is passed to valkey.NewClient or LockerOption.ClientBuilder to build a valkey.Client
 	ClientOption valkey.ClientOption
-	// KeyValidity is the validity duration of locks and will be extended periodically by the ExtendInterval. Default value is 5s.
+	// KeyValidity is the validity duration of locks and will be extended periodically by the ExtendInterval. The default value is 5s.
 	KeyValidity time.Duration
 	// ExtendInterval is the interval to extend KeyValidity. Default value is 1s.
 	ExtendInterval time.Duration
-	// TryNextAfter is the timeout duration before trying the next valkey key for locks. Default value is 20ms.
+	// TryNextAfter is the timeout duration before trying the next valkey key for locks. The default value is 20ms.
 	TryNextAfter time.Duration
 	// KeyMajority is at least how many valkey keys in a total of KeyMajority*2-1 should be acquired to be a valid lock.
-	// Default value is 2.
+	// The default value is 2.
 	KeyMajority int32
 	// NoLoopTracking will use NOLOOP in the CLIENT TRACKING command to avoid unnecessary notifications and thus have better performance.
 	// This can only be enabled if all your valkey nodes >= 7.0.5. (https://github.com/redis/redis/pull/11052)

@@ -7314,7 +7314,7 @@ func testAdapterCache(resp3 bool) {
 					}
 				}()
 
-				// We can not run blocking commands in Redis functions, so we're using an infinite loop,
+				// We can not run blocking commands in Valkey functions, so we're using an infinite loop,
 				// but we're killing the function after calling FUNCTION STATS
 				lib := Library{
 					Name:   "mylib1",

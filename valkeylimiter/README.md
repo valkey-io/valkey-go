@@ -129,6 +129,6 @@ result, err := limiter.AllowN(ctx, "user_identifier", 3)
 
 The `valkeylimiter` module employs Lua scripts executed within Valkey to ensure atomic operations for checking and updating rate limits. This approach minimizes race conditions and maintains consistency across distributed systems.
 
-By utilizing Valkey's expiration capabilities, the module automatically resets rate limits after the specified time window, ensuring efficient memory usage and accurate rate limiting behavior.
+By utilizing Valkey's expiration capabilities, the module automatically resets rate limits after the specified time window, ensuring efficient memory usage and accurate rate-limiting behavior.
 
 For more information on the design and implementation of Valkey-based rate limiters, refer to GitHub's detailed account of scaling their API with a sharded, replicated rate limiter in Valkey ([github.blog](https://github.blog/engineering/infrastructure/how-we-scaled-github-api-sharded-replicated-rate-limiter-redis/)).

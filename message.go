@@ -24,8 +24,8 @@ var Nil = &ValkeyError{typ: typeNull}
 // ErrParse is a parse error that occurs when a Valkey message cannot be parsed correctly.
 var errParse = errors.New("valkey: parse error")
 
-// IsValkeyNil is a handy method to check if error is a valkey nil response.
-// All valkey nil response returns as an error.
+// IsValkeyNil is a handy method to check if the error is a valkey nil response.
+// All valkey nil responses returned as an error.
 func IsValkeyNil(err error) bool {
 	return err == Nil
 }
@@ -43,13 +43,13 @@ func IsValkeyBusyGroup(err error) bool {
 	return false
 }
 
-// IsValkeyErr is a handy method to check if error is a valkey ERR response.
+// IsValkeyErr is a handy method to check if the error is a valkey ERR response.
 func IsValkeyErr(err error) (ret *ValkeyError, ok bool) {
 	ret, ok = err.(*ValkeyError)
 	return ret, ok && ret != Nil
 }
 
-// ValkeyError is an error response or a nil message from valkey instance
+// ValkeyError is an error response or a nil message from the valkey instance
 type ValkeyError ValkeyMessage
 
 // string retrives the contained string of the ValkeyError
@@ -72,7 +72,7 @@ func (r *ValkeyError) IsNil() bool {
 	return r.typ == typeNull
 }
 
-// IsMoved checks if it is a redis MOVED message and returns moved address.
+// IsMoved checks if it is a valkey MOVED message and returns the moved address.
 func (r *ValkeyError) IsMoved() (addr string, ok bool) {
 	if ok = strings.HasPrefix(r.string(), "MOVED"); ok {
 		addr = fixIPv6HostPort(strings.Split(r.string(), " ")[2])
@@ -80,7 +80,7 @@ func (r *ValkeyError) IsMoved() (addr string, ok bool) {
 	return
 }
 
-// IsAsk checks if it is a redis ASK message and returns ask address.
+// IsAsk checks if it is a valkey ASK message and returns ask address.
 func (r *ValkeyError) IsAsk() (addr string, ok bool) {
 	if ok = strings.HasPrefix(r.string(), "ASK"); ok {
 		addr = fixIPv6HostPort(strings.Split(r.string(), " ")[2])
@@ -97,27 +97,27 @@ func fixIPv6HostPort(addr string) string {
 	return addr
 }
 
-// IsTryAgain checks if it is a redis TRYAGAIN message and returns ask address.
+// IsTryAgain checks if it is a valkey TRYAGAIN message and returns ask address.
 func (r *ValkeyError) IsTryAgain() bool {
 	return strings.HasPrefix(r.string(), "TRYAGAIN")
 }
 
-// IsLoading checks if it is a redis LOADING message
+// IsLoading checks if it is a valkey LOADING message
 func (r *ValkeyError) IsLoading() bool {
 	return strings.HasPrefix(r.string(), "LOADING")
 }
 
-// IsClusterDown checks if it is a redis CLUSTERDOWN message and returns ask address.
+// IsClusterDown checks if it is a valkey CLUSTERDOWN message and returns ask address.
 func (r *ValkeyError) IsClusterDown() bool {
 	return strings.HasPrefix(r.string(), "CLUSTERDOWN")
 }
 
-// IsNoScript checks if it is a redis NOSCRIPT message.
+// IsNoScript checks if it is a valkey NOSCRIPT message.
 func (r *ValkeyError) IsNoScript() bool {
 	return strings.HasPrefix(r.string(), "NOSCRIPT")
 }
 
-// IsBusyGroup checks if it is a redis BUSYGROUP message.
+// IsBusyGroup checks if it is a valkey BUSYGROUP message.
 func (r *ValkeyError) IsBusyGroup() bool {
 	return strings.HasPrefix(r.string(), "BUSYGROUP")
 }
@@ -529,14 +529,14 @@ func (r *prettyValkeyResult) MarshalJSON() ([]byte, error) {
 	return json.Marshal(obj)
 }
 
-// ValkeyMessage is a redis response message, it may be a nil response
+// ValkeyMessage is a valkey response message, it may be a nil response
 type ValkeyMessage struct {
 	attrs *ValkeyMessage
 	bytes *byte
 	array *ValkeyMessage
 
 	// intlen is used for a simple number or
-	// in conjunction with array or bytes to store the length of array or string
+	// in conjunction with an array or bytes to store the length of array or string
 	intlen int64
 	typ    byte
 	ttl    [7]byte
@@ -638,7 +638,7 @@ func (m *ValkeyMessage) CacheSize() int {
 
 // CacheMarshal writes serialized ValkeyMessage to the provided buffer.
 // If the provided buffer is nil, CacheMarshal will allocate one.
-// Note that output format is not compatible with different client versions.
+// Note that an output format is not compatible with different client versions.
 func (m *ValkeyMessage) CacheMarshal(buf []byte) []byte {
 	if buf == nil {
 		buf = make([]byte, 0, m.CacheSize())
@@ -663,48 +663,48 @@ func (m *ValkeyMessage) CacheUnmarshalView(buf []byte) error {
 	return nil
 }
 
-// IsNil check if message is a valkey nil response
+// IsNil check if the message is a valkey nil response
 func (m *ValkeyMessage) IsNil() bool {
 	return m.typ == typeNull
 }
 
-// IsInt64 check if message is a valkey RESP3 int response
+// IsInt64 check if the message is a valkey RESP3 int response
 func (m *ValkeyMessage) IsInt64() bool {
 	return m.typ == typeInteger
 }
 
-// IsFloat64 check if message is a valkey RESP3 double response
+// IsFloat64 check if the message is a valkey RESP3 double response
 func (m *ValkeyMessage) IsFloat64() bool {
 	return m.typ == typeFloat
 }
 
-// IsString check if message is a valkey string response
+// IsString check if the message is a valkey string response
 func (m *ValkeyMessage) IsString() bool {
 	return m.typ == typeBlobString || m.typ == typeSimpleString
 }
 
-// IsBool check if message is a valkey RESP3 bool response
+// IsBool check if the message is a valkey RESP3 bool response
 func (m *ValkeyMessage) IsBool() bool {
 	return m.typ == typeBool
 }
 
-// IsArray check if message is a valkey array response
+// IsArray check if the message is a valkey array response
 func (m *ValkeyMessage) IsArray() bool {
 	return m.typ == typeArray || m.typ == typeSet
 }
 
-// IsMap check if message is a valkey RESP3 map response
+// IsMap check if the message is a valkey RESP3 map response
 func (m *ValkeyMessage) IsMap() bool {
 	return m.typ == typeMap
 }
 
-// Error check if message is a valkey error response, including nil response
+// Error check if the message is a valkey error response, including nil response
 func (m *ValkeyMessage) Error() error {
 	if m.typ == typeNull {
 		return Nil
 	}
 	if m.typ == typeSimpleErr || m.typ == typeBlobErr {
-		// kvrocks: https://github.com/valkey/rueidis/issues/152#issuecomment-1333923750
+		// kvrocks: https://github.com/redis/rueidis/issues/152#issuecomment-1333923750
 		mm := *m
 		mm.setString(strings.TrimPrefix(m.string(), "ERR "))
 		return (*ValkeyError)(&mm)
@@ -712,7 +712,7 @@ func (m *ValkeyMessage) Error() error {
 	return nil
 }
 
-// ToString check if message is a valkey string response, and return it
+// ToString check if the message is a valkey string response and return it
 func (m *ValkeyMessage) ToString() (val string, err error) {
 	if m.IsString() {
 		return m.string(), nil
@@ -724,7 +724,7 @@ func (m *ValkeyMessage) ToString() (val string, err error) {
 	return m.string(), m.Error()
 }
 
-// AsReader check if message is a valkey string response and wrap it with the strings.NewReader
+// AsReader check if the message is a valkey string response and wrap it with the strings.NewReader
 func (m *ValkeyMessage) AsReader() (reader io.Reader, err error) {
 	str, err := m.ToString()
 	if err != nil {
@@ -733,7 +733,7 @@ func (m *ValkeyMessage) AsReader() (reader io.Reader, err error) {
 	return strings.NewReader(str), nil
 }
 
-// AsBytes check if message is a valkey string response and return it as an immutable []byte
+// AsBytes check if the message is a valkey string response and return it as an immutable []byte
 func (m *ValkeyMessage) AsBytes() (bs []byte, err error) {
 	str, err := m.ToString()
 	if err != nil {
@@ -742,7 +742,7 @@ func (m *ValkeyMessage) AsBytes() (bs []byte, err error) {
 	return unsafe.Slice(unsafe.StringData(str), len(str)), nil
 }
 
-// DecodeJSON check if message is a valkey string response and treat it as json, then unmarshal it into provided value
+// DecodeJSON check if the message is a valkey string response and treat it as JSON, then unmarshal it into the provided value
 func (m *ValkeyMessage) DecodeJSON(v any) (err error) {
 	str, err := m.ToString()
 	if err != nil {
@@ -752,7 +752,7 @@ func (m *ValkeyMessage) DecodeJSON(v any) (err error) {
 	return decoder.Decode(v)
 }
 
-// AsInt64 check if message is a valkey string response, and parse it as int64
+// AsInt64 check if the message is a valkey string response and parse it as int64
 func (m *ValkeyMessage) AsInt64() (val int64, err error) {
 	if m.IsInt64() {
 		return m.intlen, nil
@@ -764,7 +764,7 @@ func (m *ValkeyMessage) AsInt64() (val int64, err error) {
 	return strconv.ParseInt(v, 10, 64)
 }
 
-// AsUint64 check if message is a valkey string response, and parse it as uint64
+// AsUint64 check if the message is a valkey string response and parse it as uint64
 func (m *ValkeyMessage) AsUint64() (val uint64, err error) {
 	if m.IsInt64() {
 		return uint64(m.intlen), nil
@@ -776,7 +776,7 @@ func (m *ValkeyMessage) AsUint64() (val uint64, err error) {
 	return strconv.ParseUint(v, 10, 64)
 }
 
-// AsBool checks if message is non-nil valkey response, and parses it as bool
+// AsBool checks if the message is a non-nil response and parses it as bool
 func (m *ValkeyMessage) AsBool() (val bool, err error) {
 	if err = m.Error(); err != nil {
 		return
@@ -797,7 +797,7 @@ func (m *ValkeyMessage) AsBool() (val bool, err error) {
 	}
 }
 
-// AsFloat64 check if message is a valkey string response, and parse it as float64
+// AsFloat64 check if the message is a valkey string response and parse it as float64
 func (m *ValkeyMessage) AsFloat64() (val float64, err error) {
 	if m.IsFloat64() {
 		return util.ToFloat64(m.string())
@@ -809,7 +809,7 @@ func (m *ValkeyMessage) AsFloat64() (val float64, err error) {
 	return util.ToFloat64(v)
 }
 
-// ToInt64 check if message is a valkey RESP3 int response, and return it
+// ToInt64 check if the message is a valkey RESP3 int response and return it
 func (m *ValkeyMessage) ToInt64() (val int64, err error) {
 	if m.IsInt64() {
 		return m.intlen, nil
@@ -821,7 +821,7 @@ func (m *ValkeyMessage) ToInt64() (val int64, err error) {
 	return 0, fmt.Errorf("%w: valkey message type %s is not a RESP3 int64", errParse, typeNames[typ])
 }
 
-// ToBool check if message is a valkey RESP3 bool response, and return it
+// ToBool check if the message is a valkey RESP3 bool response and return it
 func (m *ValkeyMessage) ToBool() (val bool, err error) {
 	if m.IsBool() {
 		return m.intlen == 1, nil
@@ -833,7 +833,7 @@ func (m *ValkeyMessage) ToBool() (val bool, err error) {
 	return false, fmt.Errorf("%w: valkey message type %s is not a RESP3 bool", errParse, typeNames[typ])
 }
 
-// ToFloat64 check if message is a valkey RESP3 double response, and return it
+// ToFloat64 check if the message is a valkey RESP3 double response and return it
 func (m *ValkeyMessage) ToFloat64() (val float64, err error) {
 	if m.IsFloat64() {
 		return util.ToFloat64(m.string())
@@ -845,7 +845,7 @@ func (m *ValkeyMessage) ToFloat64() (val float64, err error) {
 	return 0, fmt.Errorf("%w: valkey message type %s is not a RESP3 float64", errParse, typeNames[typ])
 }
 
-// ToArray check if message is a valkey array/set response, and return it
+// ToArray check if the message is a valkey array/set response and return it
 func (m *ValkeyMessage) ToArray() ([]ValkeyMessage, error) {
 	if m.IsArray() {
 		return m.values(), nil
@@ -857,8 +857,8 @@ func (m *ValkeyMessage) ToArray() ([]ValkeyMessage, error) {
 	return nil, fmt.Errorf("%w: valkey message type %s is not a array", errParse, typeNames[typ])
 }
 
-// AsStrSlice check if message is a valkey array/set response, and convert to []string.
-// valkey nil element and other non string element will be present as zero.
+// AsStrSlice check if the message is a valkey array/set response and convert to []string.
+// valkey nil element and other non-string elements will be present as zero.
 func (m *ValkeyMessage) AsStrSlice() ([]string, error) {
 	values, err := m.ToArray()
 	if err != nil {
@@ -871,8 +871,8 @@ func (m *ValkeyMessage) AsStrSlice() ([]string, error) {
 	return s, nil
 }
 
-// AsIntSlice check if message is a valkey array/set response, and convert to []int64.
-// valkey nil element and other non integer element will be present as zero.
+// AsIntSlice check if the message is a valkey array/set response and convert to []int64.
+// valkey nil element and other non-integer elements will be present as zero.
 func (m *ValkeyMessage) AsIntSlice() ([]int64, error) {
 	values, err := m.ToArray()
 	if err != nil {
@@ -891,8 +891,8 @@ func (m *ValkeyMessage) AsIntSlice() ([]int64, error) {
 	return s, nil
 }
 
-// AsFloatSlice check if message is a valkey array/set response, and convert to []float64.
-// valkey nil element and other non float element will be present as zero.
+// AsFloatSlice check if the message is a valkey array/set response and convert to []float64.
+// valkey nil element and other non-float elements will be present as zero.
 func (m *ValkeyMessage) AsFloatSlice() ([]float64, error) {
 	values, err := m.ToArray()
 	if err != nil {
@@ -911,7 +911,7 @@ func (m *ValkeyMessage) AsFloatSlice() ([]float64, error) {
 	return s, nil
 }
 
-// AsBoolSlice checks if message is a valkey array/set response, and converts it to []bool.
+// AsBoolSlice checks if the message is a valkey array/set response and converts it to []bool.
 // Valkey nil elements and other non-boolean elements will be represented as false.
 func (m *ValkeyMessage) AsBoolSlice() ([]bool, error) {
 	values, err := m.ToArray()
@@ -931,7 +931,7 @@ type XRangeEntry struct {
 	ID          string
 }
 
-// AsXRangeEntry check if message is a valkey array/set response of length 2, and convert to XRangeEntry
+// AsXRangeEntry check if the message is a valkey array/set response of length 2 and convert to XRangeEntry
 func (m *ValkeyMessage) AsXRangeEntry() (XRangeEntry, error) {
 	values, err := m.ToArray()
 	if err != nil {
@@ -957,7 +957,7 @@ func (m *ValkeyMessage) AsXRangeEntry() (XRangeEntry, error) {
 	}, nil
 }
 
-// AsXRange check if message is a valkey array/set response, and convert to []XRangeEntry
+// AsXRange check if the message is a valkey array/set response and convert to []XRangeEntry
 func (m *ValkeyMessage) AsXRange() ([]XRangeEntry, error) {
 	values, err := m.ToArray()
 	if err != nil {
@@ -1060,7 +1060,7 @@ type ScanEntry struct {
 	Cursor   uint64
 }
 
-// AsScanEntry check if message is a valkey array/set response of length 2, and convert to ScanEntry.
+// AsScanEntry check if the message is a valkey array/set response of length 2 and convert to ScanEntry.
 func (m *ValkeyMessage) AsScanEntry() (e ScanEntry, err error) {
 	msgs, err := m.ToArray()
 	if err != nil {
@@ -1076,7 +1076,7 @@ func (m *ValkeyMessage) AsScanEntry() (e ScanEntry, err error) {
 	return ScanEntry{}, fmt.Errorf("%w: valkey message type %s is not a scan response or its length is not at least 2", errParse, typeNames[typ])
 }
 
-// AsMap check if message is a valkey array/set response, and convert to map[string]ValkeyMessage
+// AsMap check if the message is a valkey array/set response and convert to map[string]ValkeyMessage
 func (m *ValkeyMessage) AsMap() (map[string]ValkeyMessage, error) {
 	if err := m.Error(); err != nil {
 		return nil, err
@@ -1088,8 +1088,8 @@ func (m *ValkeyMessage) AsMap() (map[string]ValkeyMessage, error) {
 	return nil, fmt.Errorf("%w: valkey message type %s is not a map/array/set or its length is not even", errParse, typeNames[typ])
 }
 
-// AsStrMap check if message is a valkey map/array/set response, and convert to map[string]string.
-// valkey nil element and other non string element will be present as zero.
+// AsStrMap check if the message is a valkey map/array/set response and convert to map[string]string.
+// valkey nil element and other non-string elements will be present as zero.
 func (m *ValkeyMessage) AsStrMap() (map[string]string, error) {
 	if err := m.Error(); err != nil {
 		return nil, err
@@ -1107,8 +1107,8 @@ func (m *ValkeyMessage) AsStrMap() (map[string]string, error) {
 	return nil, fmt.Errorf("%w: valkey message type %s is not a map/array/set or its length is not even", errParse, typeNames[typ])
 }
 
-// AsIntMap check if message is a valkey map/array/set response, and convert to map[string]int64.
-// valkey nil element and other non integer element will be present as zero.
+// AsIntMap check if the message is a valkey map/array/set response and convert to map[string]int64.
+// valkey nil element and other non-integer elements will be present as zero.
 func (m *ValkeyMessage) AsIntMap() (map[string]int64, error) {
 	if err := m.Error(); err != nil {
 		return nil, err
@@ -1351,7 +1351,7 @@ func (m *ValkeyMessage) AsGeosearch() ([]GeoLocation, error) {
 	return geoLocations, nil
 }
 
-// ToMap check if message is a valkey RESP3 map response, and return it
+// ToMap check if the message is a valkey RESP3 map response and return it
 func (m *ValkeyMessage) ToMap() (map[string]ValkeyMessage, error) {
 	if m.IsMap() {
 		return toMap(m.values())
@@ -1363,7 +1363,7 @@ func (m *ValkeyMessage) ToMap() (map[string]ValkeyMessage, error) {
 	return nil, fmt.Errorf("%w: valkey message type %s is not a RESP3 map", errParse, typeNames[typ])
 }
 
-// ToAny turns message into go any value
+// ToAny turns the message into go any value
 func (m *ValkeyMessage) ToAny() (any, error) {
 	if err := m.Error(); err != nil {
 		return nil, err
@@ -1402,7 +1402,7 @@ func (m *ValkeyMessage) ToAny() (any, error) {
 	return nil, fmt.Errorf("%w: valkey message type %s is not a supported in ToAny", errParse, typeNames[typ])
 }
 
-// IsCacheHit check if message is from client side cache
+// IsCacheHit check if the message is from the client side cache
 func (m *ValkeyMessage) IsCacheHit() bool {
 	return m.attrs == cacheMark
 }
@@ -1481,7 +1481,7 @@ func (m *ValkeyMessage) approximateSize() (s int) {
 	return
 }
 
-// String returns human-readable representation of ValkeyMessage
+// String returns the human-readable representation of ValkeyMessage
 func (m *ValkeyMessage) String() string {
 	v, _ := (*prettyValkeyMessage)(m).MarshalJSON()
 	return string(v)

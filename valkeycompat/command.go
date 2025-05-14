@@ -1684,7 +1684,7 @@ type Z struct {
 	Score  float64
 }
 
-// ZWithKey represents sorted set member including the name of the key where it was popped.
+// ZWithKey represents a sorted set member including the name of the key where it was popped.
 type ZWithKey struct {
 	Key string
 	Z
@@ -3293,7 +3293,7 @@ func (cmd *JSONCmd) from(res valkey.ValkeyResult) {
 		cmd.SetVal(str)
 	// JSON.NUMINCRBY
 	case msg.IsArray():
-		// we set marshaled string to cmd.val
+		// we set the marshaled string to cmd.val
 		// which will be used at cmd.Val()
 		// and also stored parsed result to cmd.expanded,
 		// which will be used at cmd.Expanded()
@@ -4631,7 +4631,7 @@ const (
 	ClientMulti            ClientFlags = 1 << 3  /* This client is in a MULTI context */
 	ClientBlocked          ClientFlags = 1 << 4  /* The client is waiting in a blocking operation */
 	ClientDirtyCAS         ClientFlags = 1 << 5  /* Watched keys modified. EXEC will fail. */
-	ClientCloseAfterReply  ClientFlags = 1 << 6  /* Close after writing entire reply. */
+	ClientCloseAfterReply  ClientFlags = 1 << 6  /* Close after writing the entire reply. */
 	ClientUnBlocked        ClientFlags = 1 << 7  /* This client was unblocked and is stored in server.unblocked_clients */
 	ClientScript           ClientFlags = 1 << 8  /* This is a non-connected client used by Lua */
 	ClientAsking           ClientFlags = 1 << 9  /* Client issued the ASKING command */
@@ -4640,27 +4640,27 @@ const (
 	ClientDirtyExec        ClientFlags = 1 << 12 /* EXEC will fail for errors while queueing */
 	ClientMasterForceReply ClientFlags = 1 << 13 /* Queue replies even if is master */
 	ClientForceAOF         ClientFlags = 1 << 14 /* Force AOF propagation of current cmd. */
-	ClientForceRepl        ClientFlags = 1 << 15 /* Force replication of current cmd. */
+	ClientForceRepl        ClientFlags = 1 << 15 /* Force replication of the current cmd. */
 	ClientPrePSync         ClientFlags = 1 << 16 /* Instance don't understand PSYNC. */
-	ClientReadOnly         ClientFlags = 1 << 17 /* Cluster client is in read-only state. */
+	ClientReadOnly         ClientFlags = 1 << 17 /* Cluster client is in the read-only state. */
 	ClientPubSub           ClientFlags = 1 << 18 /* Client is in Pub/Sub mode. */
 	ClientPreventAOFProp   ClientFlags = 1 << 19 /* Don't propagate to AOF. */
 	ClientPreventReplProp  ClientFlags = 1 << 20 /* Don't propagate to slaves. */
 	ClientPreventProp      ClientFlags = ClientPreventAOFProp | ClientPreventReplProp
-	ClientPendingWrite     ClientFlags = 1 << 21 /* Client has output to send but a-write handler is yet not installed. */
-	ClientReplyOff         ClientFlags = 1 << 22 /* Don't send replies to client. */
-	ClientReplySkipNext    ClientFlags = 1 << 23 /* Set ClientREPLY_SKIP for next cmd */
+	ClientPendingWrite     ClientFlags = 1 << 21 /* Client has output to send, but a-write handler is yet not installed. */
+	ClientReplyOff         ClientFlags = 1 << 22 /* Don't send replies to a client. */
+	ClientReplySkipNext    ClientFlags = 1 << 23 /* Set ClientREPLY_SKIP for the next cmd */
 	ClientReplySkip        ClientFlags = 1 << 24 /* Don't send just this reply. */
 	ClientLuaDebug         ClientFlags = 1 << 25 /* Run EVAL in debug mode. */
 	ClientLuaDebugSync     ClientFlags = 1 << 26 /* EVAL debugging without fork() */
-	ClientModule           ClientFlags = 1 << 27 /* Non connected client used by some module. */
+	ClientModule           ClientFlags = 1 << 27 /* Non-connected client used by some module. */
 	ClientProtected        ClientFlags = 1 << 28 /* Client should not be freed for now. */
 	ClientExecutingCommand ClientFlags = 1 << 29 /* Indicates that the client is currently in the process of handling
 	   a command. usually this will be marked only during call()
 	   however, blocked clients might have this flag kept until they
 	   will try to reprocess the command. */
 	ClientPendingCommand      ClientFlags = 1 << 30 /* Indicates the client has a fully * parsed command ready for execution. */
-	ClientTracking            ClientFlags = 1 << 31 /* Client enabled keys tracking in order to perform client side caching. */
+	ClientTracking            ClientFlags = 1 << 31 /* Client enabled key tracking in order to perform client side caching. */
 	ClientTrackingBrokenRedir ClientFlags = 1 << 32 /* Target client is invalid. */
 	ClientTrackingBCAST       ClientFlags = 1 << 33 /* Tracking in BCAST mode. */
 	ClientTrackingOptIn       ClientFlags = 1 << 34 /* Tracking in opt-in mode. */
@@ -4669,26 +4669,26 @@ const (
 	ClientTrackingNoLoop      ClientFlags = 1 << 37 /* Don't send invalidation messages about writes performed by myself.*/
 	ClientInTimeoutTable      ClientFlags = 1 << 38 /* This client is in the timeout table. */
 	ClientProtocolError       ClientFlags = 1 << 39 /* Protocol error chatting with it. */
-	ClientCloseAfterCommand   ClientFlags = 1 << 40 /* Close after executing commands * and writing entire reply. */
+	ClientCloseAfterCommand   ClientFlags = 1 << 40 /* Close after executing commands * and writing the entire reply. */
 	ClientDenyBlocking        ClientFlags = 1 << 41 /* Indicate that the client should not be blocked. currently, turned on inside MULTI, Lua, RM_Call, and AOF client */
-	ClientReplRDBOnly         ClientFlags = 1 << 42 /* This client is a replica that only wants RDB without replication buffer. */
+	ClientReplRDBOnly         ClientFlags = 1 << 42 /* This client is a replica that only wants RDB without a replication buffer. */
 	ClientNoEvict             ClientFlags = 1 << 43 /* This client is protected against client memory eviction. */
 	ClientAllowOOM            ClientFlags = 1 << 44 /* Client used by RM_Call is allowed to fully execute scripts even when in OOM */
 	ClientNoTouch             ClientFlags = 1 << 45 /* This client will not touch LFU/LRU stats. */
 	ClientPushing             ClientFlags = 1 << 46 /* This client is pushing notifications. */
 )
 
-// ClientInfo is redis-server ClientInfo
+// ClientInfo is valkey-server ClientInfo
 type ClientInfo struct {
 	Addr               string        // address/port of the client
-	LAddr              string        // address/port of local address client connected to (bind address)
+	LAddr              string        // address/port of a local address client connected to (bind address)
 	Name               string        // the name set by the client with CLIENT SETNAME
 	Events             string        // file descriptor events (see below)
 	LastCmd            string        // cmd, last command played
 	User               string        // the authenticated username of the client
-	LibName            string        // redis version 7.2, client library name
-	LibVer             string        // redis version 7.2, client library version
-	ID                 int64         // redis version 2.8.12, a unique 64-bit client ID
+	LibName            string        // valkey version 7.2, client library name
+	LibVer             string        // valkey version 7.2, client library version
+	ID                 int64         // valkey version 2.8.12, a unique 64-bit client ID
 	FD                 int64         // file descriptor corresponding to the socket
 	Age                time.Duration // total duration of the connection in seconds
 	Idle               time.Duration // idle time of the connection in seconds
@@ -4696,21 +4696,21 @@ type ClientInfo struct {
 	DB                 int           // current database ID
 	Sub                int           // number of channel subscriptions
 	PSub               int           // number of pattern matching subscriptions
-	SSub               int           // redis version 7.0.3, number of shard channel subscriptions
+	SSub               int           // valkey version 7.0.3, number of shard channel subscriptions
 	Multi              int           // number of commands in a MULTI/EXEC context
-	Watch              int           // redis version 7.4 RC1, number of keys this client is currently watching.
+	Watch              int           // valkey version 7.4 RC1, the number of keys this client is currently watching.
 	QueryBuf           int           // qbuf, query buffer length (0 means no query pending)
 	QueryBufFree       int           // qbuf-free, free space of the query buffer (0 means the buffer is full)
 	ArgvMem            int           // incomplete arguments for the next command (already extracted from query buffer)
-	MultiMem           int           // redis version 7.0, memory is used up by buffered multi commands
+	MultiMem           int           // valkey version 7.0, memory is used up by buffered multi commands
 	BufferSize         int           // rbs, usable size of buffer
-	BufferPeak         int           // rbp, peak used size of buffer in last 5 sec interval
+	BufferPeak         int           // rbp, peak used size of buffer in the last 5 sec interval
 	OutputBufferLength int           // obl, output buffer length
 	OutputListLength   int           // oll, output list length (replies are queued in this list when the buffer is full)
 	OutputMemory       int           // omem, output buffer memory usage
 	TotalMemory        int           // tot-mem, total memory consumed by this client in its various buffers
 	Redir              int64         // client id of current client tracking redirection
-	Resp               int           // redis version 7.0, client RESP protocol version
+	Resp               int           // valkey version 7.0, client RESP protocol version
 }
 
 type ClientInfoCmd struct {
@@ -4741,7 +4741,7 @@ func stringToClientInfo(txt string) (*ClientInfo, error) {
 	for _, s := range strings.Split(strings.TrimPrefix(strings.TrimSpace(txt), "txt:"), " ") {
 		kv := strings.Split(s, "=")
 		if len(kv) != 2 {
-			return nil, fmt.Errorf("redis: unexpected client info data (%s)", s)
+			return nil, fmt.Errorf("valkey: unexpected client info data (%s)", s)
 		}
 		key, val := kv[0], kv[1]
 
@@ -4808,7 +4808,7 @@ func stringToClientInfo(txt string) (*ClientInfo, error) {
 				case 'T':
 					info.Flags |= ClientNoTouch
 				default:
-					return nil, fmt.Errorf("redis: unexpected client info flags(%s)", string(val[i]))
+					return nil, fmt.Errorf("valkey: unexpected client info flags(%s)", string(val[i]))
 				}
 			}
 		case "db":
@@ -4960,7 +4960,7 @@ func newACLLogCmd(res valkey.ValkeyResult) *ACLLogCmd {
 	return cmd
 }
 
-// ModuleLoadexConfig struct is used to specify the arguments for the MODULE LOADEX command of redis.
+// ModuleLoadexConfig struct is used to specify the arguments for the MODULE LOADEX command of valkey.
 // `MODULE LOADEX path [CONFIG name value [CONFIG name value ...]] [ARGS args [args ...]]`
 type ModuleLoadexConfig struct {
 	Path string
@@ -5080,7 +5080,7 @@ func (cmd *SlowLogCmd) from(res valkey.ValkeyResult) {
 		}
 
 		if len(log) < 4 {
-			cmd.SetErr(fmt.Errorf("redis: got %d elements in slowlog get, expected at least 4", len(log)))
+			cmd.SetErr(fmt.Errorf("valkey: got %d elements in slowlog get, expected at least 4", len(log)))
 			return
 		}
 
@@ -5239,7 +5239,7 @@ func (cmd *LCSCmd) from(res valkey.ValkeyResult) {
 		} else {
 			// Validate length (should have exactly 2 keys: "matches" and "len")
 			if len(msgMap) != 2 {
-				cmd.SetErr(fmt.Errorf("redis: got %d elements in the map, wanted %d", len(msgMap), 2))
+				cmd.SetErr(fmt.Errorf("valkey: got %d elements in the map, wanted %d", len(msgMap), 2))
 				return
 			}
 
@@ -5247,7 +5247,7 @@ func (cmd *LCSCmd) from(res valkey.ValkeyResult) {
 			for key, value := range msgMap {
 				switch key {
 				case "matches":
-					// read array of matched positions
+					// read an array of matched positions
 					matches, err := cmd.readMatchedPositions(value)
 					if err != nil {
 						cmd.SetErr(err)
@@ -5324,7 +5324,7 @@ func (cmd *LCSCmd) readPosition(res valkey.ValkeyMessage) (LCSPosition, error) {
 		return LCSPosition{}, err
 	}
 	if len(posArray) != 2 {
-		return LCSPosition{}, fmt.Errorf("redis: got %d elements in the array, wanted %d", len(posArray), 2)
+		return LCSPosition{}, fmt.Errorf("valkey: got %d elements in the array, wanted %d", len(posArray), 2)
 	}
 
 	start, err := posArray[0].AsInt64()

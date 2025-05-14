@@ -14,7 +14,7 @@ import (
 	"github.com/valkey-io/valkey-go/internal/util"
 )
 
-// ErrNoSlot indicates that there is no valkey node owns the key slot.
+// ErrNoSlot indicates that there is no valkey node owning the key slot.
 var ErrNoSlot = errors.New("the slot has no valkey node")
 var ErrReplicaOnlyConflict = errors.New("ReplicaOnly conflicts with SendToReplicas option")
 var ErrInvalidShardsRefreshInterval = errors.New("ShardsRefreshInterval must be greater than or equal to 0")
@@ -117,7 +117,7 @@ func (c *clusterClient) init() error {
 			if err := cc.Dial(); err == nil {
 				c.mu.Lock()
 				if _, ok := c.conns[addr]; ok {
-					go cc.Close() // abort the new connection instead of closing the old one which may already been used
+					go cc.Close() // abort the new connection instead of closing the old one, which may already been used
 				} else {
 					c.conns[addr] = connrole{
 						conn: cc,
@@ -502,7 +502,7 @@ func (c *clusterClient) B() Builder {
 }
 
 func (c *clusterClient) Do(ctx context.Context, cmd Completed) (resp ValkeyResult) {
-	if resp = c.do(ctx, cmd); resp.NonValkeyError() == nil { // not recycle cmds if error, since cmds may be used later in pipe. consider recycle them by pipe
+	if resp = c.do(ctx, cmd); resp.NonValkeyError() == nil { // not recycle cmds if error, since cmds may be used later in the pipe.
 		cmds.PutCompleted(cmd)
 	}
 	return resp
@@ -516,7 +516,7 @@ retry:
 		return newErrResult(err)
 	}
 	resp = cc.Do(ctx, cmd)
-	if resp.NonRedisError() == errConnExpired {
+	if resp.NonValkeyError() == errConnExpired {
 		goto retry
 	}
 process:
@@ -525,7 +525,7 @@ process:
 		ncc := c.redirectOrNew(addr, cc, cmd.Slot(), mode)
 	recover1:
 		resp = ncc.Do(ctx, cmd)
-		if resp.NonRedisError() == errConnExpired {
+		if resp.NonValkeyError() == errConnExpired {
 			goto recover1
 		}
 		goto process
@@ -534,7 +534,7 @@ process:
 	recover2:
 		results := ncc.DoMulti(ctx, cmds.AskingCmd, cmd)
 		resp = results.s[1]
-		if resp.NonRedisError() == errConnExpired {
+		if resp.NonValkeyError() == errConnExpired {
 			goto recover2
 		}
 		resultsp.Put(results)
@@ -600,7 +600,7 @@ func (c *clusterClient) _pickMulti(multi []Completed) (retries *connretry, init 
 			} else {
 				cc = c.pslots[cmd.Slot()]
 			}
-			if cc == nil { // check cc == nil again in case of non-deterministic SendToReplicas.
+			if cc == nil { // check cc == nil again in the case of non-deterministic SendToReplicas.
 				return nil, false
 			}
 			re := retries.m[cc]
@@ -774,9 +774,9 @@ func (c *clusterClient) doretry(
 			var ml []Completed
 		recover:
 			ml = ml[:0]
-			var txIdx int // check transaction block, if zero then not in transaction
+			var txIdx int // check transaction block, if zero, then not in transaction
 			for i, resp := range resps.s {
-				if resp.NonRedisError() == errConnExpired {
+				if resp.NonValkeyError() == errConnExpired {
 					if txIdx > 0 {
 						ml = re.commands[txIdx:]
 					} else {
@@ -784,7 +784,7 @@ func (c *clusterClient) doretry(
 					}
 					break
 				}
-				// if no error then check if transaction block
+				// if no error, then check if transaction block
 				if isMulti(re.commands[i]) {
 					txIdx = i
 				} else if isExec(re.commands[i]) {
@@ -830,7 +830,7 @@ func (c *clusterClient) DoMulti(ctx context.Context, multi ...Completed) []Valke
 	attempts := 1
 
 retry:
-	retries.RetryDelay = -1 // Assume no retry. Because client retry flag can be set to false.
+	retries.RetryDelay = -1 // Assume no retry. Because a client retry flag can be set to false.
 
 	var cc1 conn
 	var re1 *retry
@@ -887,7 +887,7 @@ retry:
 		return newErrResult(err)
 	}
 	resp = cc.DoCache(ctx, cmd, ttl)
-	if resp.NonRedisError() == errConnExpired {
+	if resp.NonValkeyError() == errConnExpired {
 		goto retry
 	}
 process:
@@ -896,7 +896,7 @@ process:
 		ncc := c.redirectOrNew(addr, cc, cmd.Slot(), mode)
 	recover:
 		resp = ncc.DoCache(ctx, cmd, ttl)
-		if resp.NonRedisError() == errConnExpired {
+		if resp.NonValkeyError() == errConnExpired {
 			goto recover
 		}
 		goto process
@@ -948,7 +948,7 @@ func (c *clusterClient) askingMulti(cc conn, ctx context.Context, multi []Comple
 			if commands[i] == cmds.AskingCmd {
 				askingIdx = i
 			}
-			if resp.NonRedisError() == errConnExpired {
+			if resp.NonValkeyError() == errConnExpired {
 				ml = commands[askingIdx:]
 				break
 			}
@@ -981,7 +981,7 @@ func (c *clusterClient) askingMultiCache(cc conn, ctx context.Context, multi []C
 	recover:
 		ml = ml[:0]
 		for i := 5; i < len(resps.s); i += 6 { // check exec command error only
-			if resps.s[i].NonRedisError() == errConnExpired {
+			if resps.s[i].NonValkeyError() == errConnExpired {
 				ml = commands[i-5:]
 				break
 			}
@@ -1140,7 +1140,7 @@ func (c *clusterClient) doretrycache(
 		recover:
 			ml = ml[:0]
 			for i, resp := range resps.s {
-				if resp.NonRedisError() == errConnExpired {
+				if resp.NonValkeyError() == errConnExpired {
 					ml = re.commands[i:]
 					break
 				}
@@ -1184,7 +1184,7 @@ func (c *clusterClient) DoMultiCache(ctx context.Context, multi ...CacheableTTL)
 	attempts := 1
 
 retry:
-	retries.RetryDelay = -1 // Assume no retry. Because client retry flag can be set to false.
+	retries.RetryDelay = -1 // Assume no retry. Because a client retry flag can be set to false.
 
 	var cc1 conn
 	var re1 *retrycache

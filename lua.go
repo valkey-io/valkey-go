@@ -22,7 +22,7 @@ func NewLuaScriptReadOnly(script string) *Lua {
 
 // NewLuaScriptNoSha creates a Lua instance whose Lua.Exec uses EVAL.
 // Sha1 is not calculated, SCRIPT LOAD is not used, no EVALSHA is used.
-// The main motivation is to be FIPS compliant, also avoid tiny chance of SHA-1 collisions.
+// The main motivation is to be FIPS compliant, also avoid the tiny chance of SHA-1 collisions.
 // This comes with a performance cost as the script is sent to a server every time.
 func NewLuaScriptNoSha(script string) *Lua {
 	return newLuaScript(script, false, true)
@@ -30,7 +30,7 @@ func NewLuaScriptNoSha(script string) *Lua {
 
 // NewLuaScriptReadOnlyNoSha creates a Lua instance whose Lua.Exec uses EVAL_RO.
 // Sha1 is not calculated, SCRIPT LOAD is not used, no EVALSHA_RO is used.
-// The main motivation is to be FIPS compliant, also avoid tiny chance of SHA-1 collisions.
+// The main motivation is to be FIPS compliant, also avoid the tiny chance of SHA-1 collisions.
 // This comes with a performance cost as the script is sent to a server every time.
 func NewLuaScriptReadOnlyNoSha(script string) *Lua {
 	return newLuaScript(script, true, true)
@@ -52,7 +52,7 @@ func newLuaScript(script string, readonly bool, noSha1 bool) *Lua {
 	}
 }
 
-// Lua represents a redis lua script. It should be created from the NewLuaScript() or NewLuaScriptReadOnly().
+// Lua represents a valkey lua script. It should be created from the NewLuaScript() or NewLuaScriptReadOnly().
 type Lua struct {
 	script   string
 	sha1     string
@@ -62,9 +62,9 @@ type Lua struct {
 }
 
 // Exec the script to the given Client.
-// It will first try with the EVALSHA/EVALSHA_RO and then EVAL/EVAL_RO if first try failed.
-// If Lua is initialized with disabled SHA1, it will use EVAL/EVAL_RO without EVALSHA/EVALSHA_RO attempt.
-// Cross slot keys are prohibited if the Client is a cluster client.
+// It will first try with the EVALSHA/EVALSHA_RO and then EVAL/EVAL_RO if the first try failed.
+// If Lua is initialized with disabled SHA1, it will use EVAL/EVAL_RO without the EVALSHA/EVALSHA_RO attempt.
+// Cross-slot keys are prohibited if the Client is a cluster client.
 func (s *Lua) Exec(ctx context.Context, c Client, keys, args []string) (resp ValkeyResult) {
 	var isNoScript bool
 	if !s.nosha1 {
@@ -93,9 +93,9 @@ type LuaExec struct {
 }
 
 // ExecMulti exec the script multiple times by the provided LuaExec to the given Client.
-// It will first try SCRIPT LOAD the script to all redis nodes and then exec it with the EVALSHA/EVALSHA_RO.
+// It will first try SCRIPT LOAD the script to all valkey nodes and then exec it with the EVALSHA/EVALSHA_RO.
 // If Lua is initialized with disabled SHA1, it will use EVAL/EVAL_RO and no script loading.
-// Cross slot keys within single LuaExec are prohibited if the Client is a cluster client.
+// Cross-slot keys within the single LuaExec are prohibited if the Client is a cluster client.
 func (s *Lua) ExecMulti(ctx context.Context, c Client, multi ...LuaExec) (resp []ValkeyResult) {
 	if !s.nosha1 {
 		var e atomic.Value

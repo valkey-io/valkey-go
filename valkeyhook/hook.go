@@ -21,7 +21,7 @@ type Hook interface {
 	DoMultiStream(client valkey.Client, ctx context.Context, multi ...valkey.Completed) valkey.MultiValkeyResultStream
 }
 
-// WithHook wraps valkey.Client with Hook and allows user to intercept valkey.Client
+// WithHook wraps valkey.Client with Hook and allows the user to intercept valkey.Client
 func WithHook(client valkey.Client, hook Hook) valkey.Client {
 	return &hookclient{client: client, hook: hook}
 }

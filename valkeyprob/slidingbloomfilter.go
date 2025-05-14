@@ -218,7 +218,7 @@ type slidingBloomFilter struct {
 }
 
 // NewSlidingBloomFilter creates a new sliding window Bloom filter.
-// NOTE: 'name:c' is used as a counter key in the Valkey
+// NOTE: 'name:c' is used as a counter-key in the Valkey
 // 'name:n' is used as a next filter key in the Valkey
 // 'name:nc' is used as a next counter key in the Valkey
 // 'name:lr' is used as a last rotation key in the Valkey

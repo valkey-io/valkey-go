@@ -7,8 +7,8 @@ import (
 	"unsafe"
 )
 
-// BinaryString convert the provided []byte into a string without copy. It does what strings.Builder.String() does.
-// Valkey Strings are binary safe, this means that it is safe to store any []byte into Valkey directly.
+// BinaryString convert the provided []byte into a string without a copy. It does what strings.Builder.String() does.
+// Valkey Strings are binary safe; this means that it is safe to store any []byte into Valkey directly.
 // Users can use this BinaryString helper to insert a []byte as the part of valkey command. For example:
 //
 //	client.B().Set().Key(valkey.BinaryString([]byte{0})).Value(valkey.BinaryString([]byte{0})).Build()

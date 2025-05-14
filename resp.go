@@ -294,7 +294,7 @@ func readNextMessage(i *bufio.Reader) (m ValkeyMessage, err error) {
 		}
 		m.typ = typ
 		if m.typ == typeAttribute { // handle the attributes
-			a := m     // clone the original m first, and then take address of the clone
+			a := m     // clone the original m first, and then take the address of the clone
 			attrs = &a // to avoid go compiler allocating the m on heap which causing worse performance.
 			m = ValkeyMessage{}
 			continue
