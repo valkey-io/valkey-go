@@ -9,8 +9,8 @@ replace github.com/valkey-io/valkey-go => ../
 replace github.com/valkey-io/valkey-go/mock => ../mock
 
 require (
-	github.com/valkey-io/valkey-go v1.0.59
-	github.com/valkey-io/valkey-go/mock v1.0.59
+	github.com/valkey-io/valkey-go v1.0.60
+	github.com/valkey-io/valkey-go/mock v1.0.60
 	go.uber.org/mock v0.5.0
 )
 
