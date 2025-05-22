@@ -1034,7 +1034,7 @@ func (m *ValkeyMessage) AsXRead() (ret map[string][]XRangeEntry, err error) {
 	typ := m.typ
 	return nil, fmt.Errorf("%w: valkey message type %s is not a map/array/set", errParse, typeNames[typ])
 }
-// New slice-based structures that preserve order and handle duplicates
+// New slice-based structures that preserve order and duplicates
 type XRangeSlice struct {
     FieldValues []XRangeFieldValue
     ID          string
