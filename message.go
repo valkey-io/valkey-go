@@ -372,6 +372,36 @@ func (r ValkeyResult) AsXRead() (v map[string][]XRangeEntry, err error) {
 	return
 }
 
+// AsXRangeSlice delegates to ValkeyMessage.AsXRangeSlice
+func (r ValkeyResult) AsXRangeSlice() (v XRangeSlice, err error) {
+	if r.err != nil {
+		err = r.err
+	} else {
+		v, err = r.val.AsXRangeSlice()
+	}
+	return
+}
+
+// AsXRangeSlices delegates to ValkeyMessage.AsXRangeSlices
+func (r ValkeyResult) AsXRangeSlices() (v []XRangeSlice, err error) {
+	if r.err != nil {
+		err = r.err
+	} else {
+		v, err = r.val.AsXRangeSlices()
+	}
+	return
+}
+
+// AsXReadSlices delegates to ValkeyMessage.AsXReadSlices
+func (r ValkeyResult) AsXReadSlices() (v map[string][]XRangeSlice, err error) {
+	if r.err != nil {
+		err = r.err
+	} else {
+		v, err = r.val.AsXReadSlices()
+	}
+	return
+}
+
 func (r ValkeyResult) AsLMPop() (v KeyValues, err error) {
 	if r.err != nil {
 		err = r.err
@@ -380,6 +410,7 @@ func (r ValkeyResult) AsLMPop() (v KeyValues, err error) {
 	}
 	return
 }
+
 
 func (r ValkeyResult) AsZMPop() (v KeyZScores, err error) {
 	if r.err != nil {
@@ -1002,6 +1033,145 @@ func (m *ValkeyMessage) AsXRead() (ret map[string][]XRangeEntry, err error) {
 	}
 	typ := m.typ
 	return nil, fmt.Errorf("%w: valkey message type %s is not a map/array/set", errParse, typeNames[typ])
+}
+// New slice-based structures that preserve order and handle duplicates
+type XRangeSlice struct {
+    FieldValues []XRangeFieldValue
+    ID          string
+}
+
+type XRangeFieldValue struct {
+    Field string
+    Value string
+}
+
+// AsXRangeSlice converts a ValkeyMessage to XRangeSlice (preserves order and duplicates)
+func (m *ValkeyMessage) AsXRangeSlice() (XRangeSlice, error) {
+    values, err := m.ToArray()
+    if err != nil {
+        return XRangeSlice{}, err
+    }
+    if len(values) != 2 {
+        return XRangeSlice{}, fmt.Errorf("got %d, wanted 2", len(values))
+    }
+    
+    id, err := values[0].ToString()
+    if err != nil {
+        return XRangeSlice{}, err
+    }
+    
+    // Handle the field-values array
+    fieldArray, err := values[1].ToArray()
+    if err != nil {
+        if IsValkeyNil(err) {
+            return XRangeSlice{ID: id, FieldValues: nil}, nil
+        }
+        return XRangeSlice{}, err
+    }
+    
+    // Convert pairs to slice (preserving order)
+    if len(fieldArray)%2 != 0 {
+        return XRangeSlice{}, fmt.Errorf("field-values array length must be even, got %d", len(fieldArray))
+    }
+    
+    fieldValues := make([]XRangeFieldValue, 0, len(fieldArray)/2)
+    for i := 0; i < len(fieldArray); i += 2 {
+        field := fieldArray[i].string()
+        value := fieldArray[i+1].string()
+        fieldValues = append(fieldValues, XRangeFieldValue{
+            Field: field,
+            Value: value,
+        })
+    }
+    
+    return XRangeSlice{
+        ID:          id,
+        FieldValues: fieldValues,
+    }, nil
+}
+
+// AsXRangeSlices converts multiple XRange entries to slice format
+func (m *ValkeyMessage) AsXRangeSlices() ([]XRangeSlice, error) {
+    values, err := m.ToArray()
+    if err != nil {
+        return nil, err
+    }
+    
+    msgs := make([]XRangeSlice, 0, len(values))
+    for _, v := range values {
+        msg, err := v.AsXRangeSlice()
+        if err != nil {
+            return nil, err
+        }
+        msgs = append(msgs, msg)
+    }
+    return msgs, nil
+}
+
+// AsXReadSlices converts XREAD/XREADGROUP response to use slice format
+func (m *ValkeyMessage) AsXReadSlices() (map[string][]XRangeSlice, error) {
+    if err := m.Error(); err != nil {
+        return nil, err
+    }
+    
+    var ret map[string][]XRangeSlice
+    var err error
+    
+    if m.IsMap() {
+        ret = make(map[string][]XRangeSlice, len(m.values())/2)
+        for i := 0; i < len(m.values()); i += 2 {
+            if ret[m.values()[i].string()], err = m.values()[i+1].AsXRangeSlices(); err != nil {
+                return nil, err
+            }
+        }
+        return ret, nil
+    }
+    
+    if m.IsArray() {
+        ret = make(map[string][]XRangeSlice, len(m.values()))
+        for _, v := range m.values() {
+            if !v.IsArray() || len(v.values()) != 2 {
+                return nil, fmt.Errorf("got %d, wanted 2", len(v.values()))
+            }
+            if ret[v.values()[0].string()], err = v.values()[1].AsXRangeSlices(); err != nil {
+                return nil, err
+            }
+        }
+        return ret, nil
+    }
+    
+    typ := m.typ
+    return nil, fmt.Errorf("%w: valkey message type %s is not a map/array/set", errParse, typeNames[typ])
+}
+
+// Helper method to convert XRangeSlice back to map (loses duplicates but convenient)
+func (x XRangeSlice) ToMap() map[string]string {
+    result := make(map[string]string, len(x.FieldValues))
+    for _, fv := range x.FieldValues {
+        result[fv.Field] = fv.Value
+    }
+    return result
+}
+
+// Helper method to get all values for a specific field (useful for duplicates)
+func (x XRangeSlice) GetValues(field string) []string {
+    var values []string
+    for _, fv := range x.FieldValues {
+        if fv.Field == field {
+            values = append(values, fv.Value)
+        }
+    }
+    return values
+}
+
+// Helper method to get the first value for a field (most common use case)
+func (x XRangeSlice) GetValue(field string) (string, bool) {
+    for _, fv := range x.FieldValues {
+        if fv.Field == field {
+            return fv.Value, true
+        }
+    }
+    return "", false
 }
 
 // ZScore is the element type of ZRANGE WITHSCORES, ZDIFF WITHSCORES and ZPOPMAX command response
