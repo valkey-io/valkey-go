@@ -1070,14 +1070,13 @@ func (m *ValkeyMessage) AsXRangeSlice() (XRangeSlice, error) {
     }
     
     // Convert pairs to slice (preserving order)
-    if len(fieldArray)%2 != 0 {
-        return XRangeSlice{}, fmt.Errorf("field-values array length must be even, got %d", len(fieldArray))
-    }
-    
     fieldValues := make([]XRangeFieldValue, 0, len(fieldArray)/2)
     for i := 0; i < len(fieldArray); i += 2 {
         field := fieldArray[i].string()
-        value := fieldArray[i+1].string()
+        value := ""
+        if i+1 < len(fieldArray) {
+            value = fieldArray[i+1].string()
+        }
         fieldValues = append(fieldValues, XRangeFieldValue{
             Field: field,
             Value: value,
@@ -1142,36 +1141,6 @@ func (m *ValkeyMessage) AsXReadSlices() (map[string][]XRangeSlice, error) {
     
     typ := m.typ
     return nil, fmt.Errorf("%w: valkey message type %s is not a map/array/set", errParse, typeNames[typ])
-}
-
-// Helper method to convert XRangeSlice back to map (loses duplicates but convenient)
-func (x XRangeSlice) ToMap() map[string]string {
-    result := make(map[string]string, len(x.FieldValues))
-    for _, fv := range x.FieldValues {
-        result[fv.Field] = fv.Value
-    }
-    return result
-}
-
-// Helper method to get all values for a specific field (useful for duplicates)
-func (x XRangeSlice) GetValues(field string) []string {
-    var values []string
-    for _, fv := range x.FieldValues {
-        if fv.Field == field {
-            values = append(values, fv.Value)
-        }
-    }
-    return values
-}
-
-// Helper method to get the first value for a field (most common use case)
-func (x XRangeSlice) GetValue(field string) (string, bool) {
-    for _, fv := range x.FieldValues {
-        if fv.Field == field {
-            return fv.Value, true
-        }
-    }
-    return "", false
 }
 
 // ZScore is the element type of ZRANGE WITHSCORES, ZDIFF WITHSCORES and ZPOPMAX command response
