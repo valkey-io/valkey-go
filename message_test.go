@@ -2188,7 +2188,6 @@ func TestValkeyMessage_AsXRangeSlice(t *testing.T) {
 			ID: "1234567890-4",
 			FieldValues: []XRangeFieldValue{
 				{Field: "field1", Value: "value1"},
-				{Field: "field2", Value: ""},
 			},
 		}
 		
