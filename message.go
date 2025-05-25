@@ -1071,12 +1071,9 @@ func (m *ValkeyMessage) AsXRangeSlice() (XRangeSlice, error) {
     
     // Convert pairs to slice (preserving order)
     fieldValues := make([]XRangeFieldValue, 0, len(fieldArray)/2)
-    for i := 0; i < len(fieldArray); i += 2 {
-        field := fieldArray[i].string()
-        value := ""
-        if i+1 < len(fieldArray) {
-            value = fieldArray[i+1].string()
-        }
+    for i := 0; i < cap(fieldValues); i++ {
+        field := fieldArray[i*2].string()
+        value := fieldArray[i*2+1].string()
         fieldValues = append(fieldValues, XRangeFieldValue{
             Field: field,
             Value: value,
