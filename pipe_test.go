@@ -26,7 +26,7 @@ type valkeyExpect struct {
 }
 
 type valkeyMock struct {
-	t    *testing.T
+	t    testing.TB
 	buf  *bufio.Reader
 	conn net.Conn
 }
