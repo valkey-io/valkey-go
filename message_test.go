@@ -2082,7 +2082,7 @@ func TestValkeyMessage_AsXRangeSlice(t *testing.T) {
 				strmsg('+', "value2"),
 			}),
 		})
-		
+
 		want := XRangeSlice{
 			ID: "1234567890-0",
 			FieldValues: []XRangeFieldValue{
@@ -2090,7 +2090,7 @@ func TestValkeyMessage_AsXRangeSlice(t *testing.T) {
 				{Field: "field2", Value: "value2"},
 			},
 		}
-		
+
 		got, err := message.AsXRangeSlice()
 		if err != nil {
 			t.Fatalf("AsXRangeSlice() error = %v", err)
@@ -2114,7 +2114,7 @@ func TestValkeyMessage_AsXRangeSlice(t *testing.T) {
 				strmsg('+', "4"),
 			}),
 		})
-		
+
 		want := XRangeSlice{
 			ID: "1747784186966-0",
 			FieldValues: []XRangeFieldValue{
@@ -2124,7 +2124,7 @@ func TestValkeyMessage_AsXRangeSlice(t *testing.T) {
 				{Field: "bar", Value: "4"},
 			},
 		}
-		
+
 		got, err := message.AsXRangeSlice()
 		if err != nil {
 			t.Fatalf("AsXRangeSlice() error = %v", err)
@@ -2139,12 +2139,12 @@ func TestValkeyMessage_AsXRangeSlice(t *testing.T) {
 			strmsg('+', "1234567890-2"),
 			{typ: '_'},
 		})
-		
+
 		want := XRangeSlice{
 			ID:          "1234567890-2",
 			FieldValues: nil,
 		}
-		
+
 		got, err := message.AsXRangeSlice()
 		if err != nil {
 			t.Fatalf("AsXRangeSlice() error = %v", err)
@@ -2159,12 +2159,12 @@ func TestValkeyMessage_AsXRangeSlice(t *testing.T) {
 			strmsg('+', "1234567890-3"),
 			slicemsg('*', []ValkeyMessage{}),
 		})
-		
+
 		want := XRangeSlice{
 			ID:          "1234567890-3",
 			FieldValues: []XRangeFieldValue{},
 		}
-		
+
 		got, err := message.AsXRangeSlice()
 		if err != nil {
 			t.Fatalf("AsXRangeSlice() error = %v", err)
@@ -2183,14 +2183,14 @@ func TestValkeyMessage_AsXRangeSlice(t *testing.T) {
 				strmsg('+', "field2"),
 			}),
 		})
-		
+
 		want := XRangeSlice{
 			ID: "1234567890-4",
 			FieldValues: []XRangeFieldValue{
 				{Field: "field1", Value: "value1"},
 			},
 		}
-		
+
 		got, err := message.AsXRangeSlice()
 		if err != nil {
 			t.Fatalf("AsXRangeSlice() error = %v", err)
@@ -2204,7 +2204,7 @@ func TestValkeyMessage_AsXRangeSlice(t *testing.T) {
 		message := slicemsg('*', []ValkeyMessage{
 			strmsg('+', "1234567890-0"),
 		})
-		
+
 		_, err := message.AsXRangeSlice()
 		if err == nil {
 			t.Fatal("AsXRangeSlice() expected error but got none")
@@ -2216,7 +2216,7 @@ func TestValkeyMessage_AsXRangeSlice(t *testing.T) {
 
 	t.Run("not an array", func(t *testing.T) {
 		message := strmsg('+', "not-an-array")
-		
+
 		_, err := message.AsXRangeSlice()
 		if err == nil {
 			t.Fatal("AsXRangeSlice() expected error but got none")
@@ -2225,7 +2225,7 @@ func TestValkeyMessage_AsXRangeSlice(t *testing.T) {
 
 	t.Run("error response", func(t *testing.T) {
 		message := ValkeyMessage{typ: '_'}
-		
+
 		_, err := message.AsXRangeSlice()
 		if err == nil {
 			t.Fatal("AsXRangeSlice() expected error but got none")
@@ -2237,7 +2237,7 @@ func TestValkeyMessage_AsXRangeSlice(t *testing.T) {
 			{typ: '_'}, // ID that will cause error
 			slicemsg('*', []ValkeyMessage{}),
 		})
-		
+
 		_, err := message.AsXRangeSlice()
 		if err == nil {
 			t.Fatal("AsXRangeSlice() expected error but got none")
@@ -2249,7 +2249,7 @@ func TestValkeyMessage_AsXRangeSlice(t *testing.T) {
 			strmsg('+', "1234567890-0"),
 			{typ: '-'}, // Error type for field-values
 		})
-		
+
 		_, err := message.AsXRangeSlice()
 		if err == nil {
 			t.Fatal("AsXRangeSlice() expected error but got none")
@@ -2275,7 +2275,7 @@ func TestValkeyMessage_AsXRangeSlices(t *testing.T) {
 				}),
 			}),
 		})
-		
+
 		want := []XRangeSlice{
 			{
 				ID: "1234567890-0",
@@ -2290,7 +2290,7 @@ func TestValkeyMessage_AsXRangeSlices(t *testing.T) {
 				},
 			},
 		}
-		
+
 		got, err := message.AsXRangeSlices()
 		if err != nil {
 			t.Fatalf("AsXRangeSlices() error = %v", err)
@@ -2302,7 +2302,7 @@ func TestValkeyMessage_AsXRangeSlices(t *testing.T) {
 
 	t.Run("empty array", func(t *testing.T) {
 		message := slicemsg('*', []ValkeyMessage{})
-		
+
 		want := []XRangeSlice{}
 		got, err := message.AsXRangeSlices()
 		if err != nil {
@@ -2315,7 +2315,7 @@ func TestValkeyMessage_AsXRangeSlices(t *testing.T) {
 
 	t.Run("not an array", func(t *testing.T) {
 		message := strmsg('+', "not-an-array")
-		
+
 		_, err := message.AsXRangeSlices()
 		if err == nil {
 			t.Fatal("AsXRangeSlices() expected error but got none")
@@ -2326,7 +2326,7 @@ func TestValkeyMessage_AsXRangeSlices(t *testing.T) {
 		message := slicemsg('*', []ValkeyMessage{
 			strmsg('+', "invalid-entry"),
 		})
-		
+
 		_, err := message.AsXRangeSlices()
 		if err == nil {
 			t.Fatal("AsXRangeSlices() expected error but got none")
@@ -2335,7 +2335,7 @@ func TestValkeyMessage_AsXRangeSlices(t *testing.T) {
 
 	t.Run("error response", func(t *testing.T) {
 		message := ValkeyMessage{typ: '_'}
-		
+
 		_, err := message.AsXRangeSlices()
 		if err == nil {
 			t.Fatal("AsXRangeSlices() expected error but got none")
@@ -2367,7 +2367,7 @@ func TestValkeyMessage_AsXReadSlices(t *testing.T) {
 				}),
 			}),
 		})
-		
+
 		want := map[string][]XRangeSlice{
 			"stream1": {{
 				ID: "1234567890-0",
@@ -2382,7 +2382,7 @@ func TestValkeyMessage_AsXReadSlices(t *testing.T) {
 				},
 			}},
 		}
-		
+
 		got, err := message.AsXReadSlices()
 		if err != nil {
 			t.Fatalf("AsXReadSlices() error = %v", err)
@@ -2407,7 +2407,7 @@ func TestValkeyMessage_AsXReadSlices(t *testing.T) {
 				}),
 			}),
 		})
-		
+
 		want := map[string][]XRangeSlice{
 			"stream1": {{
 				ID: "1234567890-0",
@@ -2416,7 +2416,7 @@ func TestValkeyMessage_AsXReadSlices(t *testing.T) {
 				},
 			}},
 		}
-		
+
 		got, err := message.AsXReadSlices()
 		if err != nil {
 			t.Fatalf("AsXReadSlices() error = %v", err)
@@ -2428,7 +2428,7 @@ func TestValkeyMessage_AsXReadSlices(t *testing.T) {
 
 	t.Run("error response", func(t *testing.T) {
 		message := strmsg('-', "ERR some error")
-		
+
 		_, err := message.AsXReadSlices()
 		if err == nil {
 			t.Fatal("AsXReadSlices() expected error but got none")
@@ -2437,7 +2437,7 @@ func TestValkeyMessage_AsXReadSlices(t *testing.T) {
 
 	t.Run("invalid type", func(t *testing.T) {
 		message := strmsg('+', "invalid")
-		
+
 		_, err := message.AsXReadSlices()
 		if err == nil {
 			t.Fatal("AsXReadSlices() expected error but got none")
@@ -2453,7 +2453,7 @@ func TestValkeyMessage_AsXReadSlices(t *testing.T) {
 				strmsg('+', "stream1"),
 			}),
 		})
-		
+
 		_, err := message.AsXReadSlices()
 		if err == nil {
 			t.Fatal("AsXReadSlices() expected error but got none")
@@ -2468,7 +2468,7 @@ func TestValkeyMessage_AsXReadSlices(t *testing.T) {
 			strmsg('+', "stream1"),
 			strmsg('+', "invalid-range-data"), // This will cause AsXRangeSlices to fail
 		})
-		
+
 		_, err := message.AsXReadSlices()
 		if err == nil {
 			t.Fatal("AsXReadSlices() expected error but got none")
@@ -2482,7 +2482,7 @@ func TestValkeyMessage_AsXReadSlices(t *testing.T) {
 				strmsg('+', "invalid-range-data"), // This will cause AsXRangeSlices to fail
 			}),
 		})
-		
+
 		_, err := message.AsXReadSlices()
 		if err == nil {
 			t.Fatal("AsXReadSlices() expected error but got none")
@@ -2493,7 +2493,7 @@ func TestValkeyMessage_AsXReadSlices(t *testing.T) {
 		message := slicemsg('*', []ValkeyMessage{
 			strmsg('+', "not-an-array-entry"),
 		})
-		
+
 		_, err := message.AsXReadSlices()
 		if err == nil {
 			t.Fatal("AsXReadSlices() expected error but got none")
@@ -2506,7 +2506,7 @@ func TestValkeyMessage_AsXReadSlices(t *testing.T) {
 func TestValkeyResult_XRangeSlice_Methods(t *testing.T) {
 	t.Run("AsXRangeSlice with error", func(t *testing.T) {
 		result := ValkeyResult{err: errors.New("network error")}
-		
+
 		_, err := result.AsXRangeSlice()
 		if err == nil {
 			t.Fatal("AsXRangeSlice() expected error but got none")
@@ -2525,14 +2525,14 @@ func TestValkeyResult_XRangeSlice_Methods(t *testing.T) {
 			}),
 		})
 		result := ValkeyResult{val: message}
-		
+
 		want := XRangeSlice{
 			ID: "1234567890-0",
 			FieldValues: []XRangeFieldValue{
 				{Field: "field1", Value: "value1"},
 			},
 		}
-		
+
 		got, err := result.AsXRangeSlice()
 		if err != nil {
 			t.Fatalf("AsXRangeSlice() error = %v", err)
@@ -2544,7 +2544,7 @@ func TestValkeyResult_XRangeSlice_Methods(t *testing.T) {
 
 	t.Run("AsXRangeSlices with error", func(t *testing.T) {
 		result := ValkeyResult{err: errors.New("network error")}
-		
+
 		_, err := result.AsXRangeSlices()
 		if err == nil {
 			t.Fatal("AsXRangeSlices() expected error but got none")
@@ -2565,14 +2565,14 @@ func TestValkeyResult_XRangeSlice_Methods(t *testing.T) {
 			}),
 		})
 		result := ValkeyResult{val: message}
-		
+
 		want := []XRangeSlice{{
 			ID: "1234567890-0",
 			FieldValues: []XRangeFieldValue{
 				{Field: "field1", Value: "value1"},
 			},
 		}}
-		
+
 		got, err := result.AsXRangeSlices()
 		if err != nil {
 			t.Fatalf("AsXRangeSlices() error = %v", err)
@@ -2584,7 +2584,7 @@ func TestValkeyResult_XRangeSlice_Methods(t *testing.T) {
 
 	t.Run("AsXReadSlices with error", func(t *testing.T) {
 		result := ValkeyResult{err: errors.New("network error")}
-		
+
 		_, err := result.AsXReadSlices()
 		if err == nil {
 			t.Fatal("AsXReadSlices() expected error but got none")
@@ -2610,7 +2610,7 @@ func TestValkeyResult_XRangeSlice_Methods(t *testing.T) {
 			}),
 		})
 		result := ValkeyResult{val: message}
-		
+
 		want := map[string][]XRangeSlice{
 			"stream1": {{
 				ID: "1234567890-0",
@@ -2619,7 +2619,7 @@ func TestValkeyResult_XRangeSlice_Methods(t *testing.T) {
 				},
 			}},
 		}
-		
+
 		got, err := result.AsXReadSlices()
 		if err != nil {
 			t.Fatalf("AsXReadSlices() error = %v", err)
