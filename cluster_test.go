@@ -8147,6 +8147,19 @@ func TestClusterClient_SendToAlternatePrimaryAndReplicaNodes(t *testing.T) {
 		}
 	})
 
+	t.Run("DoMulti Multi Slot Large", func(t *testing.T) {
+		var cmds []Completed
+		for i := 0; i < 500; i++ {
+			cmds = append(cmds, client.B().Get().Key("K1{a}").Build())
+		}
+		resps := client.DoMulti(context.Background(), cmds...)
+		for _, resp := range resps {
+			if v, err := resp.ToString(); err != nil || v != "GET K1{a}" {
+				t.Fatalf("unexpected response %v %v", v, err)
+			}
+		}
+	})
+
 	t.Run("DoMultiCache Multi Slot", func(t *testing.T) {
 		c1 := client.B().Get().Key("K1{a}").Cache()
 		c2 := client.B().Get().Key("K2{b}").Cache()
@@ -8156,6 +8169,19 @@ func TestClusterClient_SendToAlternatePrimaryAndReplicaNodes(t *testing.T) {
 		}
 		if v, err := resps[1].ToString(); err != nil || v != "GET K2{b}" {
 			t.Fatalf("unexpected response %v %v", v, err)
+		}
+	})
+
+	t.Run("DoMultiCache Multi Slot Large", func(t *testing.T) {
+		var cmds []CacheableTTL
+		for i := 0; i < 500; i++ {
+			cmds = append(cmds, CT(client.B().Get().Key("K1{a}").Cache(), time.Second))
+		}
+		resps := client.DoMultiCache(context.Background(), cmds...)
+		for _, resp := range resps {
+			if v, err := resp.ToString(); err != nil || v != "GET K1{a}" {
+				t.Fatalf("unexpected response %v %v", v, err)
+			}
 		}
 	})
 }
