@@ -8045,3 +8045,117 @@ func TestClusterClientConnLifetime(t *testing.T) {
 		}
 	})
 }
+
+//gocyclo:ignore
+func TestClusterClient_SendToAlternatePrimaryAndReplicaNodes(t *testing.T) {
+	defer ShouldNotLeaked(SetupLeakDetection())
+
+	primaryNodeConn := &mockConn{
+		DoMultiFn: func(multi ...Completed) *valkeyresults {
+			resps := make([]ValkeyResult, len(multi))
+			for i, cmd := range multi {
+				resps[i] = newResult(strmsg('+', strings.Join(cmd.Commands(), " ")), nil)
+			}
+			return &valkeyresults{s: resps}
+		},
+		DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
+			resps := make([]ValkeyResult, len(multi))
+			for i, cmd := range multi {
+				resps[i] = newResult(strmsg('+', strings.Join(cmd.Cmd.Commands(), " ")), nil)
+			}
+			return &valkeyresults{s: resps}
+		},
+		DoOverride: map[string]func(cmd Completed) ValkeyResult{
+			"CLUSTER SLOTS": func(cmd Completed) ValkeyResult {
+				return slotsMultiResp
+			},
+			"INFO": func(cmd Completed) ValkeyResult {
+				return newResult(strmsg('+', "INFO"), nil)
+			},
+			"GET K1{a}": func(cmd Completed) ValkeyResult {
+				return newResult(strmsg('+', "GET K1{a}"), nil)
+			},
+			"GET K2{b}": func(cmd Completed) ValkeyResult {
+				return newResult(strmsg('+', "GET K2{b}"), nil)
+			},
+		},
+	}
+	replicaNodeConn := &mockConn{
+		DoMultiFn: func(multi ...Completed) *valkeyresults {
+			resps := make([]ValkeyResult, len(multi))
+			for i, cmd := range multi {
+				resps[i] = newResult(strmsg('+', strings.Join(cmd.Commands(), " ")), nil)
+			}
+			return &valkeyresults{s: resps}
+		},
+		DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
+			resps := make([]ValkeyResult, len(multi))
+			for i, cmd := range multi {
+				resps[i] = newResult(strmsg('+', strings.Join(cmd.Cmd.Commands(), " ")), nil)
+			}
+			return &valkeyresults{s: resps}
+		},
+		DoOverride: map[string]func(cmd Completed) ValkeyResult{
+			"GET Do": func(cmd Completed) ValkeyResult {
+				return newResult(strmsg('+', "GET Do"), nil)
+			},
+			"GET K1{a}": func(cmd Completed) ValkeyResult {
+				return newResult(strmsg('+', "GET K1{a}"), nil)
+			},
+			"GET K2{b}": func(cmd Completed) ValkeyResult {
+				return newResult(strmsg('+', "GET K2{b}"), nil)
+			},
+		},
+		DoCacheOverride: map[string]func(cmd Cacheable, ttl time.Duration) ValkeyResult{
+			"GET DoCache": func(cmd Cacheable, ttl time.Duration) ValkeyResult {
+				return newResult(strmsg('+', "GET DoCache"), nil)
+			},
+		},
+	}
+
+	nextNode := -1
+	client, err := newClusterClient(
+		&ClientOption{
+			InitAddress: []string{"127.0.0.1:0"},
+			SendToReplicas: func(cmd Completed) bool {
+				nextNode++
+				return (nextNode/2) % 2 == 0
+			},
+		},
+		func(dst string, opt *ClientOption) conn {
+			if dst == "127.0.0.1:0" || dst == "127.0.2.1:0" { // primary nodes
+				return primaryNodeConn
+			} else { // replica nodes
+				return replicaNodeConn
+			}
+		},
+		newRetryer(defaultRetryDelayFn),
+	)
+	if err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+
+	t.Run("DoMulti Multi Slot", func(t *testing.T) {
+		c1 := client.B().Get().Key("K1{a}").Build()
+		c2 := client.B().Get().Key("K2{b}").Build()
+		resps := client.DoMulti(context.Background(), c1, c2)
+		if v, err := resps[0].ToString(); err != nil || v != "GET K1{a}" {
+			t.Fatalf("unexpected response %v %v", v, err)
+		}
+		if v, err := resps[1].ToString(); err != nil || v != "GET K2{b}" {
+			t.Fatalf("unexpected response %v %v", v, err)
+		}
+	})
+
+	t.Run("DoMultiCache Multi Slot", func(t *testing.T) {
+		c1 := client.B().Get().Key("K1{a}").Cache()
+		c2 := client.B().Get().Key("K2{b}").Cache()
+		resps := client.DoMultiCache(context.Background(), CT(c1, time.Second), CT(c2, time.Second))
+		if v, err := resps[0].ToString(); err != nil || v != "GET K1{a}" {
+			t.Fatalf("unexpected response %v %v", v, err)
+		}
+		if v, err := resps[1].ToString(); err != nil || v != "GET K2{b}" {
+			t.Fatalf("unexpected response %v %v", v, err)
+		}
+	})
+}
