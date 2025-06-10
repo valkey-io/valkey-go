@@ -574,7 +574,13 @@ func (c *clusterClient) _pickMulti(multi []Completed) (retries *connretry, init 
 	count := conncountp.Get(len(c.conns), len(c.conns))
 
 	if !init && c.rslots != nil && c.opt.SendToReplicas != nil {
-		destination := make([]conn, len(multi))
+		var destination []conn
+		var stackDestination [32]conn
+		if len(multi) <= len(stackDestination) {
+			destination = stackDestination[:len(multi)]
+		} else {
+			destination = make([]conn, len(multi))
+		}
 		for i, cmd := range multi {
 			var cc conn
 			if c.opt.SendToReplicas(cmd) {
@@ -1029,7 +1035,13 @@ func (c *clusterClient) _pickMultiCache(multi []CacheableTTL) *connretrycache {
 
 		return retries
 	} else {
-		destination := make([]conn, len(multi))
+		var destination []conn
+		var stackDestination [32]conn
+		if len(multi) <= len(stackDestination) {
+			destination = stackDestination[:len(multi)]
+		} else {
+			destination = make([]conn, len(multi))
+		}
 		for i, cmd := range multi {
 			var p conn
 			if c.opt.SendToReplicas(Completed(cmd.Cmd)) {
