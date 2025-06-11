@@ -912,8 +912,8 @@ func (p *pipe) Version() int {
 }
 
 func (p *pipe) AZ() string {
-	infoAvaliabilityZone := p.info["availability_zone"]
-	return infoAvaliabilityZone.string()
+	infoAvailabilityZone := p.info["availability_zone"]
+	return infoAvailabilityZone.string()
 }
 
 func (p *pipe) Do(ctx context.Context, cmd Completed) (resp ValkeyResult) {
