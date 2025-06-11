@@ -202,7 +202,7 @@ func TestSentinelClientInit(t *testing.T) {
 				}}
 			},
 		}
-		sentinelWithFaultiSlave := &mockConn{
+		sentinelWithFaultySlave := &mockConn{
 			DoFn: func(cmd Completed) ValkeyResult { return ValkeyResult{} },
 			DoMultiFn: func(multi ...Completed) *valkeyresults {
 				return &valkeyresults{s: []ValkeyResult{
@@ -342,7 +342,7 @@ func TestSentinelClientInit(t *testing.T) {
 					return slaveWithReplicaResponseErr
 				}
 				if dst == ":2" {
-					return sentinelWithFaultiSlave
+					return sentinelWithFaultySlave
 				}
 				if dst == ":3" {
 					return sentinelWithHealthySlaveInSDown
