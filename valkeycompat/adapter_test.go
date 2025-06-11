@@ -12417,7 +12417,7 @@ func testAdapterSearchRESP2() {
 			Expect(resSpellCheck6).To(BeEmpty())
 		})
 
-		It("should FTDict opreations", Label("search", "ftdictdump", "ftdictdel", "ftdictadd"), func() {
+		It("should FTDict operations", Label("search", "ftdictdump", "ftdictdel", "ftdictadd"), func() {
 			text1 := &FieldSchema{FieldName: "f1", FieldType: SearchFieldTypeText}
 			text2 := &FieldSchema{FieldName: "f2", FieldType: SearchFieldTypeText}
 			val, err := adapter.FTCreate(ctx, "idx1", &FTCreateOptions{}, text1, text2).Result()
