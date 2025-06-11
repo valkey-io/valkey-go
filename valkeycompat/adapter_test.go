@@ -12240,7 +12240,7 @@ func testAdapterSearchRESP2() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(val).To(BeEquivalentTo("OK"))
 			WaitForIndexing(client, "txt", 2)
-			adapter.HSet(ctx, "doc1", "title", "RediSearch", "body", "Redisearch impements a search engine on top of redis")
+			adapter.HSet(ctx, "doc1", "title", "RediSearch", "body", "Redisearch implements a search engine on top of redis")
 			res1, err := adapter.FTSearchWithArgs(ctx, "txt", "search engine", &FTSearchOptions{NoContent: true, Verbatim: true, LimitOffset: 0, Limit: 5}).Result()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res1.Total).To(BeEquivalentTo(int64(1)))
@@ -12540,7 +12540,7 @@ func testAdapterSearchRESP2() {
 			WaitForIndexing(client, "idx1", 2)
 
 			adapter.HSet(ctx, "search", "title", "RediSearch",
-				"body", "Redisearch impements a search engine on top of redis",
+				"body", "Redisearch implements a search engine on top of redis",
 				"parent", "redis",
 				"random_num", 10)
 			adapter.HSet(ctx, "ai", "title", "RedisAI",
