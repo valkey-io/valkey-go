@@ -52,7 +52,7 @@ func IsValkeyErr(err error) (ret *ValkeyError, ok bool) {
 // ValkeyError is an error response or a nil message from the valkey instance
 type ValkeyError ValkeyMessage
 
-// string retrives the contained string of the ValkeyError
+// string retrieves the contained string of the ValkeyError
 func (m *ValkeyError) string() string {
 	if m.bytes == nil {
 		return ""
