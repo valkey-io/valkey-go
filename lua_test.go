@@ -37,7 +37,7 @@ func TestNewLuaScriptOnePass(t *testing.T) {
 	script := NewLuaScript(body)
 
 	if v, err := script.Exec(context.Background(), c, k, a).ToString(); err != nil || v != "OK" {
-		t.Fatalf("ret mistmatch")
+		t.Fatalf("ret mismatch")
 	}
 }
 
@@ -71,7 +71,7 @@ func TestNewLuaScript(t *testing.T) {
 	script := NewLuaScript(body)
 
 	if err, ok := IsValkeyErr(script.Exec(context.Background(), c, k, a).Error()); ok && !err.IsNil() {
-		t.Fatalf("ret mistmatch")
+		t.Fatalf("ret mismatch")
 	}
 }
 
@@ -102,7 +102,7 @@ func TestNewLuaScriptNoSha(t *testing.T) {
 	script := NewLuaScriptNoSha(body)
 
 	if err, ok := IsValkeyErr(script.Exec(context.Background(), c, k, a).Error()); ok && !err.IsNil() {
-		t.Fatalf("ret mistmatch")
+		t.Fatalf("ret mismatch")
 	}
 }
 
@@ -136,7 +136,7 @@ func TestNewLuaScriptReadOnly(t *testing.T) {
 	script := NewLuaScriptReadOnly(body)
 
 	if err, ok := IsValkeyErr(script.Exec(context.Background(), c, k, a).Error()); ok && !err.IsNil() {
-		t.Fatalf("ret mistmatch")
+		t.Fatalf("ret mismatch")
 	}
 }
 
@@ -167,7 +167,7 @@ func TestNewLuaScriptReadOnlyNoSha(t *testing.T) {
 	script := NewLuaScriptReadOnlyNoSha(body)
 
 	if err, ok := IsValkeyErr(script.Exec(context.Background(), c, k, a).Error()); ok && !err.IsNil() {
-		t.Fatalf("ret mistmatch")
+		t.Fatalf("ret mismatch")
 	}
 }
 
@@ -189,7 +189,7 @@ func TestNewLuaScriptExecMultiError(t *testing.T) {
 
 	script := NewLuaScript(body)
 	if script.ExecMulti(context.Background(), c, LuaExec{Keys: k, Args: a})[0].Error().Error() != "ANY ERR" {
-		t.Fatalf("ret mistmatch")
+		t.Fatalf("ret mismatch")
 	}
 }
 
@@ -221,7 +221,7 @@ func TestNewLuaScriptExecMulti(t *testing.T) {
 
 	script := NewLuaScript(body)
 	if v, err := script.ExecMulti(context.Background(), c, LuaExec{Keys: k, Args: a})[0].ToString(); err != nil || v != "OK" {
-		t.Fatalf("ret mistmatch")
+		t.Fatalf("ret mismatch")
 	}
 }
 
@@ -251,7 +251,7 @@ func TestNewLuaScriptExecMultiNoSha(t *testing.T) {
 
 	script := NewLuaScriptNoSha(body)
 	if v, err := script.ExecMulti(context.Background(), c, LuaExec{Keys: k, Args: a})[0].ToString(); err != nil || v != "OK" {
-		t.Fatalf("ret mistmatch")
+		t.Fatalf("ret mismatch")
 	}
 }
 
@@ -283,7 +283,7 @@ func TestNewLuaScriptExecMultiRo(t *testing.T) {
 
 	script := NewLuaScriptReadOnly(body)
 	if v, err := script.ExecMulti(context.Background(), c, LuaExec{Keys: k, Args: a})[0].ToString(); err != nil || v != "OK" {
-		t.Fatalf("ret mistmatch")
+		t.Fatalf("ret mismatch")
 	}
 }
 
@@ -313,7 +313,7 @@ func TestNewLuaScriptExecMultiRoNoSha(t *testing.T) {
 
 	script := NewLuaScriptReadOnlyNoSha(body)
 	if v, err := script.ExecMulti(context.Background(), c, LuaExec{Keys: k, Args: a})[0].ToString(); err != nil || v != "OK" {
-		t.Fatalf("ret mistmatch")
+		t.Fatalf("ret mismatch")
 	}
 }
 

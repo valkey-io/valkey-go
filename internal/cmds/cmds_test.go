@@ -222,7 +222,7 @@ func TestMGets(t *testing.T) {
 		cp := ret[slot(key)]
 		cp.cs.Verify()
 		if cp.ks != ks {
-			t.Fatalf("ks mistmatch %v %v", cp.ks, ks)
+			t.Fatalf("ks mismatch %v %v", cp.ks, ks)
 		}
 		if cp.cf != mtGetTag {
 			t.Fatalf("cf should be mtGetTag")
@@ -241,7 +241,7 @@ func TestMDels(t *testing.T) {
 		cp := ret[slot(key)]
 		cp.cs.Verify()
 		if cp.ks != ks {
-			t.Fatalf("ks mistmatch %v %v", cp.ks, ks)
+			t.Fatalf("ks mismatch %v %v", cp.ks, ks)
 		}
 		if cp.cf == mtGetTag {
 			t.Fatalf("cf should not be mtGetTag")
@@ -260,7 +260,7 @@ func TestJsonMGets(t *testing.T) {
 		cp := ret[slot(key)]
 		cp.cs.Verify()
 		if cp.ks != ks {
-			t.Fatalf("ks mistmatch %v %v", cp.ks, ks)
+			t.Fatalf("ks mismatch %v %v", cp.ks, ks)
 		}
 		if cp.cf != mtGetTag {
 			t.Fatalf("cf should be mtGetTag")
@@ -279,7 +279,7 @@ func TestJsonMSets(t *testing.T) {
 		cp := ret[slot(key)]
 		cp.cs.Verify()
 		if cp.ks != ks {
-			t.Fatalf("ks mistmatch %v %v", cp.ks, ks)
+			t.Fatalf("ks mismatch %v %v", cp.ks, ks)
 		}
 		if cp.IsReadOnly() {
 			t.Fatalf("cf should not be readonly")
@@ -301,7 +301,7 @@ func TestMSets(t *testing.T) {
 		cp := ret[slot(key)]
 		cp.cs.Verify()
 		if cp.ks != ks {
-			t.Fatalf("ks mistmatch %v %v", cp.ks, ks)
+			t.Fatalf("ks mismatch %v %v", cp.ks, ks)
 		}
 		if cp.IsReadOnly() {
 			t.Fatalf("cf should not be readonly")
@@ -323,7 +323,7 @@ func TestMSetNXs(t *testing.T) {
 		cp := ret[slot(key)]
 		cp.cs.Verify()
 		if cp.ks != ks {
-			t.Fatalf("ks mistmatch %v %v", cp.ks, ks)
+			t.Fatalf("ks mismatch %v %v", cp.ks, ks)
 		}
 		if cp.IsReadOnly() {
 			t.Fatalf("cf should not be readonly")
