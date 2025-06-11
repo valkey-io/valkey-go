@@ -90,7 +90,7 @@
     "group": "gears"
   },
   "RG.CONFIGSET": {
-    "summary": "The RG.CONFIGGET command sets the value of one ore more built-in configuration or a user-defined options.",
+    "summary": "The RG.CONFIGGET command sets the value of one or more built-in configuration or a user-defined options.",
     "complexity": [
       "O(1)"
     ],
