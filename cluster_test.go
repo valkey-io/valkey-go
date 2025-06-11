@@ -7766,7 +7766,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 				return &valkeyresults{s: []ValkeyResult{newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired)}}
 			case 2: // errConnExpired at Multi command
 				if len(multi) != 6 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[0].Commands()) {
-					t.Fatalf("unexpected multi when errConnExpired occurred at the head of proccessing, %v", multi)
+					t.Fatalf("unexpected multi when errConnExpired occurred at the head of processing, %v", multi)
 				}
 				return &valkeyresults{s: []ValkeyResult{
 					newResult(strmsg('+', "1"), nil),
@@ -7904,7 +7904,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 				return &valkeyresults{s: []ValkeyResult{newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired)}}
 			case 3: // errConnExpired at Asking command before Multi command
 				if len(multi) != 9 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[0].Commands()) {
-					t.Fatalf("unexpected multi when errConnExpired occurred at the head of proccessing, %v", multi)
+					t.Fatalf("unexpected multi when errConnExpired occurred at the head of processing, %v", multi)
 				}
 				return &valkeyresults{s: []ValkeyResult{
 					newResult(strmsg('+', "OK"), nil),
