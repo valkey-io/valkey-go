@@ -268,7 +268,7 @@ func TestNewHashRepository(t *testing.T) {
 				return search.Query("*").Sortby("JSON").Build()
 			})
 			if err == nil {
-				t.Fatalf("search by property not loaded nor in schema")
+				t.Fatalf("search by property neither loaded nor in schema")
 			}
 			err = repo.AlterIndex(ctx, func(alter FtAlterIndex) valkey.Completed {
 				return alter.
