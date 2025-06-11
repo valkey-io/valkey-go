@@ -48,7 +48,7 @@ func TestNewHashRepositoryPanic(t *testing.T) {
 	if v := recovered(func() {
 		NewHashRepository("hash", Unsupported{}, nil)
 	}); !strings.Contains(v, "should not contain unsupported field type") {
-		t.Fatalf("unexpeceted message %v", v)
+		t.Fatalf("unexpected message %v", v)
 	}
 }
 

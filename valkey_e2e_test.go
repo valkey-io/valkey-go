@@ -556,7 +556,7 @@ func testMultiSETGETHelpers(t *testing.T, client Client, csc bool) {
 	validate(resp)
 	for _, ret := range resp {
 		if ret.IsCacheHit() {
-			t.Fatalf("unexpeceted cache hit %v\n", ret)
+			t.Fatalf("unexpected cache hit %v\n", ret)
 		}
 	}
 	resp, err = MGetCache(client, ctx, time.Minute, cmdKeys)
@@ -566,7 +566,7 @@ func testMultiSETGETHelpers(t *testing.T, client Client, csc bool) {
 	validate(resp)
 	for _, ret := range resp {
 		if csc && !ret.IsCacheHit() {
-			t.Fatalf("unexpeceted cache miss %v\n", ret)
+			t.Fatalf("unexpected cache miss %v\n", ret)
 		}
 	}
 
@@ -586,7 +586,7 @@ func testMultiSETGETHelpers(t *testing.T, client Client, csc bool) {
 	}
 	for _, ret := range resp {
 		if !ret.IsNil() {
-			t.Fatalf("unexpeceted cache hit %v\n", ret)
+			t.Fatalf("unexpected cache hit %v\n", ret)
 		}
 	}
 }
