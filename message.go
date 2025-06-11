@@ -1156,7 +1156,7 @@ func (m *ValkeyMessage) AsZScore() (s ZScore, err error) {
 	return toZScore(arr)
 }
 
-// AsZScores converts ZRANGE WITHSCROES, ZDIFF WITHSCROES and ZPOPMAX/ZPOPMIN command with count > 1 responses to []ZScore
+// AsZScores converts ZRANGE WITHSCORES, ZDIFF WITHSCORES and ZPOPMAX/ZPOPMIN command with count > 1 responses to []ZScore
 func (m *ValkeyMessage) AsZScores() ([]ZScore, error) {
 	arr, err := m.ToArray()
 	if err != nil {
