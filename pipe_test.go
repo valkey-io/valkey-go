@@ -2749,7 +2749,7 @@ func TestOnInvalidations(t *testing.T) {
 	}()
 
 	if messages := <-ch; messages[0].string() != "a" {
-		t.Fatalf("unexpected invlidation %v", messages)
+		t.Fatalf("unexpected invalidation %v", messages)
 	}
 
 	go func() {
@@ -2763,13 +2763,13 @@ func TestOnInvalidations(t *testing.T) {
 	}()
 
 	if messages := <-ch; messages != nil {
-		t.Fatalf("unexpected invlidation %v", messages)
+		t.Fatalf("unexpected invalidation %v", messages)
 	}
 
 	go cancel()
 
 	if messages := <-ch; messages != nil {
-		t.Fatalf("unexpected invlidation %v", messages)
+		t.Fatalf("unexpected invalidation %v", messages)
 	}
 }
 
