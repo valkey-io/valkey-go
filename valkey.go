@@ -342,7 +342,7 @@ type Client interface {
 }
 
 // DedicatedClient is obtained from Client.Dedicated() and it will be bound to a single valkey connection, and
-// no other commands can be pipelined in to this connection during Client.Dedicated().
+// no other commands can be pipelined into this connection during Client.Dedicated().
 // If the DedicatedClient is obtained from a cluster client, the first command to it must have a Key() to identify the valkey node.
 type DedicatedClient interface {
 	CoreClient
