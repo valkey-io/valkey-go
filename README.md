@@ -112,7 +112,7 @@ cmd := client.B().Get().Key("key").Build().ToPipe()
 client.Do(ctx, cmd)
 ```
 
-This allows you to use connection pooling approach by default but opt in auto pipelining for a subset of requests.
+This allows you to use connection pooling approach by default but opt-in auto pipelining for a subset of requests.
 
 ### Manual Pipelining
 

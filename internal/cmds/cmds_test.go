@@ -85,13 +85,13 @@ func TestCompleted_ToBlock(t *testing.T) {
 
 func TestCompleted_IsOptIn(t *testing.T) {
 	if cmd := NewCompleted([]string{"a", "b"}); cmd.IsOptIn() {
-		t.Fatalf("should not be opt in command")
+		t.Fatalf("should not be opt-in command")
 	}
 	if cmd := OptInCmd; !cmd.IsOptIn() {
-		t.Fatalf("should be opt in command")
+		t.Fatalf("should be opt-in command")
 	}
 	if cmd := OptInNopCmd; !cmd.IsOptIn() {
-		t.Fatalf("should be opt in command")
+		t.Fatalf("should be opt-in command")
 	}
 }
 

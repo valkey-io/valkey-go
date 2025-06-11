@@ -4665,7 +4665,7 @@ const (
 	ClientTrackingBCAST       ClientFlags = 1 << 33 /* Tracking in BCAST mode. */
 	ClientTrackingOptIn       ClientFlags = 1 << 34 /* Tracking in opt-in mode. */
 	ClientTrackingOptOut      ClientFlags = 1 << 35 /* Tracking in opt-out mode. */
-	ClientTrackingCaching     ClientFlags = 1 << 36 /* CACHING yes/no was given, depending on optin/optout mode. */
+	ClientTrackingCaching     ClientFlags = 1 << 36 /* CACHING yes/no was given, depending on opt-in/optout mode. */
 	ClientTrackingNoLoop      ClientFlags = 1 << 37 /* Don't send invalidation messages about writes performed by myself.*/
 	ClientInTimeoutTable      ClientFlags = 1 << 38 /* This client is in the timeout table. */
 	ClientProtocolError       ClientFlags = 1 << 39 /* Protocol error chatting with it. */
