@@ -1976,10 +1976,10 @@ func TestClusterClient(t *testing.T) {
 			t.Fatalf("unexpected err %v", err)
 		}
 		if !stored {
-			t.Fatalf("Dedicated desn't put back the wire")
+			t.Fatalf("Dedicated doesn't put back the wire")
 		}
 		if !closed {
-			t.Fatalf("Dedicated desn't delegate Close")
+			t.Fatalf("Dedicated doesn't delegate Close")
 		}
 	})
 
@@ -2082,10 +2082,10 @@ func TestClusterClient(t *testing.T) {
 		cancel()
 
 		if !stored {
-			t.Fatalf("Dedicated desn't put back the wire")
+			t.Fatalf("Dedicated doesn't put back the wire")
 		}
 		if !closed {
-			t.Fatalf("Dedicated desn't delegate Close")
+			t.Fatalf("Dedicated doesn't delegate Close")
 		}
 	})
 
@@ -2576,10 +2576,10 @@ func TestClusterClient_SendToOnlyPrimaryNodes(t *testing.T) {
 			t.Fatalf("unexpected err %v", err)
 		}
 		if !stored {
-			t.Fatalf("Dedicated desn't put back the wire")
+			t.Fatalf("Dedicated doesn't put back the wire")
 		}
 		if !closed {
-			t.Fatalf("Dedicated desn't delegate Close")
+			t.Fatalf("Dedicated doesn't delegate Close")
 		}
 	})
 
@@ -2682,10 +2682,10 @@ func TestClusterClient_SendToOnlyPrimaryNodes(t *testing.T) {
 		cancel()
 
 		if !stored {
-			t.Fatalf("Dedicated desn't put back the wire")
+			t.Fatalf("Dedicated doesn't put back the wire")
 		}
 		if !closed {
-			t.Fatalf("Dedicated desn't delegate Close")
+			t.Fatalf("Dedicated doesn't delegate Close")
 		}
 	})
 }
@@ -3068,10 +3068,10 @@ func TestClusterClient_SendToOnlyReplicaNodes(t *testing.T) {
 			t.Fatalf("unexpected err %v", err)
 		}
 		if !stored {
-			t.Fatalf("Dedicated desn't put back the wire")
+			t.Fatalf("Dedicated doesn't put back the wire")
 		}
 		if !closed {
-			t.Fatalf("Dedicated desn't delegate Close")
+			t.Fatalf("Dedicated doesn't delegate Close")
 		}
 	})
 
@@ -3174,10 +3174,10 @@ func TestClusterClient_SendToOnlyReplicaNodes(t *testing.T) {
 		cancel()
 
 		if !stored {
-			t.Fatalf("Dedicated desn't put back the wire")
+			t.Fatalf("Dedicated doesn't put back the wire")
 		}
 		if !closed {
-			t.Fatalf("Dedicated desn't delegate Close")
+			t.Fatalf("Dedicated doesn't delegate Close")
 		}
 	})
 }
@@ -3658,10 +3658,10 @@ func TestClusterClient_SendReadOperationToReplicaNodesWriteOperationToPrimaryNod
 			t.Fatalf("unexpected err %v", err)
 		}
 		if !stored {
-			t.Fatalf("Dedicated desn't put back the wire")
+			t.Fatalf("Dedicated doesn't put back the wire")
 		}
 		if !closed {
-			t.Fatalf("Dedicated desn't delegate Close")
+			t.Fatalf("Dedicated doesn't delegate Close")
 		}
 	})
 
@@ -3764,10 +3764,10 @@ func TestClusterClient_SendReadOperationToReplicaNodesWriteOperationToPrimaryNod
 		cancel()
 
 		if !stored {
-			t.Fatalf("Dedicated desn't put back the wire")
+			t.Fatalf("Dedicated doesn't put back the wire")
 		}
 		if !closed {
-			t.Fatalf("Dedicated desn't delegate Close")
+			t.Fatalf("Dedicated doesn't delegate Close")
 		}
 	})
 }
@@ -6959,10 +6959,10 @@ func TestClusterClient_SendReadOperationToReplicaNodeWriteOperationToPrimaryNode
 			t.Fatalf("unexpected err %v", err)
 		}
 		if !stored {
-			t.Fatalf("Dedicated desn't put back the wire")
+			t.Fatalf("Dedicated doesn't put back the wire")
 		}
 		if !closed {
-			t.Fatalf("Dedicated desn't delegate Close")
+			t.Fatalf("Dedicated doesn't delegate Close")
 		}
 	})
 
@@ -7065,10 +7065,10 @@ func TestClusterClient_SendReadOperationToReplicaNodeWriteOperationToPrimaryNode
 		cancel()
 
 		if !stored {
-			t.Fatalf("Dedicated desn't put back the wire")
+			t.Fatalf("Dedicated doesn't put back the wire")
 		}
 		if !closed {
-			t.Fatalf("Dedicated desn't delegate Close")
+			t.Fatalf("Dedicated doesn't delegate Close")
 		}
 	})
 }
@@ -7461,10 +7461,10 @@ func TestClusterClient_SendToOnlyPrimaryNodeWhenPrimaryNodeSelected(t *testing.T
 			t.Fatalf("unexpected err %v", err)
 		}
 		if !stored {
-			t.Fatalf("Dedicated desn't put back the wire")
+			t.Fatalf("Dedicated doesn't put back the wire")
 		}
 		if !closed {
-			t.Fatalf("Dedicated desn't delegate Close")
+			t.Fatalf("Dedicated doesn't delegate Close")
 		}
 	})
 
@@ -7567,10 +7567,10 @@ func TestClusterClient_SendToOnlyPrimaryNodeWhenPrimaryNodeSelected(t *testing.T
 		cancel()
 
 		if !stored {
-			t.Fatalf("Dedicated desn't put back the wire")
+			t.Fatalf("Dedicated doesn't put back the wire")
 		}
 		if !closed {
-			t.Fatalf("Dedicated desn't delegate Close")
+			t.Fatalf("Dedicated doesn't delegate Close")
 		}
 	})
 }

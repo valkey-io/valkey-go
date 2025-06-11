@@ -957,7 +957,7 @@ func TestSentinelClientDelegate(t *testing.T) {
 			t.Fatalf("unexpected err %v", err)
 		}
 		if !stored {
-			t.Fatalf("Dedicated desn't put back the wire")
+			t.Fatalf("Dedicated doesn't put back the wire")
 		}
 	})
 
@@ -1003,7 +1003,7 @@ func TestSentinelClientDelegate(t *testing.T) {
 		}
 		cancel()
 		if !stored {
-			t.Fatalf("Dedicated desn't put back the wire")
+			t.Fatalf("Dedicated doesn't put back the wire")
 		}
 	})
 }
