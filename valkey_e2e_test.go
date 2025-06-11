@@ -221,7 +221,7 @@ func testSETGET(t *testing.T, client Client, csc bool) {
 		return
 	}
 
-	t.Logf("testing client side caching with %d interations and %d parallelism\n", keys*5, para)
+	t.Logf("testing client side caching with %d iterations and %d parallelism\n", keys*5, para)
 	jobs, wait = parallel(para)
 	hits, miss := int64(0), int64(0)
 	for i := 0; i < keys*10 && !t.Failed(); i++ {
@@ -418,7 +418,7 @@ func testMultiSETGET(t *testing.T, client Client, csc bool) {
 		return
 	}
 
-	t.Logf("testing client side caching with %d interations and %d parallelism\n", keys*5, para)
+	t.Logf("testing client side caching with %d iterations and %d parallelism\n", keys*5, para)
 	jobs, wait = parallel(para)
 	hits, miss := int64(0), int64(0)
 	for i := 0; i < keys*10 && !t.Failed(); i += batch {
