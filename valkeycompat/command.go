@@ -1823,7 +1823,7 @@ func (cmd *ClusterSlotsCmd) from(res valkey.ValkeyResult) {
 			return
 		}
 		if len(slot) < 2 {
-			cmd.SetErr(fmt.Errorf("got %d, excpected atleast 2", len(slot)))
+			cmd.SetErr(fmt.Errorf("got %d, excpected at least 2", len(slot)))
 			return
 		}
 		start, err := slot[0].AsInt64()
