@@ -442,7 +442,7 @@ client, err := valkey.NewClient(valkey.ClientOption{
 client, err := valkey.NewClient(valkey.ClientOption{
     InitAddress: []string{"127.0.0.1:6379"},
     Standalone: valkey.StandaloneOption{
-        // Note that these addresses must be online and can not be promoted.
+        // Note that these addresses must be online and cannot be promoted.
         // An example use case is the reader endpoint provided by cloud vendors.
         ReplicaAddress: []string{"reader_endpoint:port"},
     },
