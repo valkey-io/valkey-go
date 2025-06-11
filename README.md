@@ -91,7 +91,7 @@ func BenchmarkPipelining(b *testing.B, client valkey.Client) {
 
 Compared to go-redis, valkey-go has higher throughput across 1, 8, and 64 parallelism settings.
 
-It is even able to achieve **~14x** throughput over go-redis in a local benchmark of Macbook Pro 16" M1 Pro 2021. (see `parallelism(64)-key(16)-value(64)-10`)
+It is even able to achieve **~14x** throughput over go-redis in a local benchmark of MacBook Pro 16" M1 Pro 2021. (see `parallelism(64)-key(16)-value(64)-10`)
 
 ![client_test_set](https://github.com/rueian/rueidis-benchmark/blob/master/client_test_set_10.png)
 
