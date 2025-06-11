@@ -697,7 +697,7 @@ var singleShardWithoutIP = newResult(slicemsg(typeArray, []ValkeyMessage{
 
 //gocyclo:ignore
 func TestClusterClientInit(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 	t.Run("Init no nodes", func(t *testing.T) {
 		if _, err := newClusterClient(
 			&ClientOption{InitAddress: []string{}},
@@ -1527,7 +1527,7 @@ func TestClusterClientInit(t *testing.T) {
 
 //gocyclo:ignore
 func TestClusterClient(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 	m := &mockConn{
 		DoFn: func(cmd Completed) ValkeyResult {
 			if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
@@ -2193,7 +2193,7 @@ func TestClusterClient(t *testing.T) {
 
 //gocyclo:ignore
 func TestClusterClient_SendToOnlyPrimaryNodes(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 
 	primaryNodeConn := &mockConn{
 		DoOverride: map[string]func(cmd Completed) ValkeyResult{
@@ -2692,7 +2692,7 @@ func TestClusterClient_SendToOnlyPrimaryNodes(t *testing.T) {
 
 //gocyclo:ignore
 func TestClusterClient_SendToOnlyReplicaNodes(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 
 	primaryNodeConn := &mockConn{
 		DoOverride: map[string]func(cmd Completed) ValkeyResult{
@@ -3184,7 +3184,7 @@ func TestClusterClient_SendToOnlyReplicaNodes(t *testing.T) {
 
 //gocyclo:ignore
 func TestClusterClient_SendReadOperationToReplicaNodesWriteOperationToPrimaryNodes(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 
 	primaryNodeConn := &mockConn{
 		DoOverride: map[string]func(cmd Completed) ValkeyResult{
@@ -3774,7 +3774,7 @@ func TestClusterClient_SendReadOperationToReplicaNodesWriteOperationToPrimaryNod
 
 //gocyclo:ignore
 func TestClusterClient_SendPrimaryNodeOnlyButOneSlotAssigned(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 
 	primaryNodeConn := &mockConn{
 		DoOverride: map[string]func(cmd Completed) ValkeyResult{
@@ -3836,7 +3836,7 @@ func TestClusterClient_SendPrimaryNodeOnlyButOneSlotAssigned(t *testing.T) {
 
 //gocyclo:ignore
 func TestClusterClientErr(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 
 	t.Run("not refresh on context error", func(t *testing.T) {
 		var count int64
@@ -5758,7 +5758,7 @@ func TestClusterClientErr(t *testing.T) {
 }
 
 func TestClusterClientRetry(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 	SetupClientRetry(t, func(m *mockConn) Client {
 		m.DoOverride = map[string]func(cmd Completed) ValkeyResult{
 			"CLUSTER SLOTS": func(cmd Completed) ValkeyResult { return slotsMultiResp },
@@ -5776,7 +5776,7 @@ func TestClusterClientRetry(t *testing.T) {
 }
 
 func TestClusterClientReplicaOnly_PickReplica(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 	m := &mockConn{
 		DoFn: func(cmd Completed) ValkeyResult {
 			if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
@@ -5814,7 +5814,7 @@ func TestClusterClientReplicaOnly_PickReplica(t *testing.T) {
 }
 
 func TestClusterClientReplicaOnly_PickMasterIfNoReplica(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 	t.Run("replicas should be picked", func(t *testing.T) {
 		m := &mockConn{
 			DoFn: func(cmd Completed) ValkeyResult {
@@ -5904,7 +5904,7 @@ func TestClusterClientReplicaOnly_PickMasterIfNoReplica(t *testing.T) {
 }
 
 func TestClusterShardsParsing(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 	t.Run("master selection", func(t *testing.T) {
 		result := parseShards(shardsRespTls.val, "127.0.0.1:5", true)
 		if len(result) != 1 {
@@ -5966,7 +5966,7 @@ func TestClusterShardsParsing(t *testing.T) {
 
 // https://github.com/redis/rueidis/issues/543
 func TestConnectToNonAvailableCluster(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 	var wg sync.WaitGroup
 	for i := 0; i < 4; i++ {
 		wg.Add(1)
@@ -5986,7 +5986,7 @@ func TestConnectToNonAvailableCluster(t *testing.T) {
 }
 
 func TestClusterTopologyRefreshment(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 
 	t.Run("no refreshment", func(t *testing.T) {
 		var callCount int64
@@ -6168,7 +6168,7 @@ func TestClusterTopologyRefreshment(t *testing.T) {
 }
 
 func TestClusterClientLoadingRetry(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 
 	setup := func() (*clusterClient, *mockConn) {
 		m := &mockConn{
@@ -6348,7 +6348,7 @@ func TestClusterClientLoadingRetry(t *testing.T) {
 }
 
 func TestClusterClientMovedRetry(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 
 	setup := func() (*clusterClient, *mockConn) {
 		m := &mockConn{
@@ -6416,7 +6416,7 @@ func TestClusterClientMovedRetry(t *testing.T) {
 }
 
 func TestClusterClientCacheASKRetry(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 
 	setup := func() (*clusterClient, *mockConn) {
 		m := &mockConn{
@@ -6486,7 +6486,7 @@ func TestClusterClientCacheASKRetry(t *testing.T) {
 
 //gocyclo:ignore
 func TestClusterClient_SendReadOperationToReplicaNodeWriteOperationToPrimaryNode(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 
 	primaryNodeConn := &mockConn{
 		DoOverride: map[string]func(cmd Completed) ValkeyResult{
@@ -7075,7 +7075,7 @@ func TestClusterClient_SendReadOperationToReplicaNodeWriteOperationToPrimaryNode
 
 //gocyclo:ignore
 func TestClusterClient_SendToOnlyPrimaryNodeWhenPrimaryNodeSelected(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 
 	primaryNodeConn := &mockConn{
 		DoOverride: map[string]func(cmd Completed) ValkeyResult{
@@ -7576,7 +7576,7 @@ func TestClusterClient_SendToOnlyPrimaryNodeWhenPrimaryNodeSelected(t *testing.T
 }
 
 func TestClusterClientConnLifetime(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 
 	setup := func() (*clusterClient, *mockConn) {
 		m := &mockConn{
@@ -8048,7 +8048,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 
 //gocyclo:ignore
 func TestClusterClient_SendToAlternatePrimaryAndReplicaNodes(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 
 	primaryNodeConn := &mockConn{
 		DoMultiFn: func(multi ...Completed) *valkeyresults {

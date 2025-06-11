@@ -14,7 +14,7 @@ import (
 
 //gocyclo:ignore
 func TestSentinelClientInit(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 	t.Run("Init no nodes", func(t *testing.T) {
 		if _, err := newSentinelClient(
 			&ClientOption{InitAddress: []string{}},
@@ -605,7 +605,7 @@ func TestSentinelClientInit(t *testing.T) {
 }
 
 func TestSentinelRefreshAfterClose(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 	first := true
 	s0 := &mockConn{
 		DoFn: func(cmd Completed) ValkeyResult { return ValkeyResult{} },
@@ -650,7 +650,7 @@ func TestSentinelRefreshAfterClose(t *testing.T) {
 }
 
 func TestSentinelSwitchAfterClose(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 	first := true
 	s0 := &mockConn{
 		DoFn: func(cmd Completed) ValkeyResult { return ValkeyResult{} },
@@ -696,7 +696,7 @@ func TestSentinelSwitchAfterClose(t *testing.T) {
 
 //gocyclo:ignore
 func TestSentinelClientDelegate(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 	s0 := &mockConn{
 		DoFn: func(cmd Completed) ValkeyResult { return ValkeyResult{} },
 		DoMultiFn: func(multi ...Completed) *valkeyresults {
@@ -1010,7 +1010,7 @@ func TestSentinelClientDelegate(t *testing.T) {
 
 //gocyclo:ignore
 func TestSentinelClientDelegateRetry(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 	setup := func(t *testing.T) (client *sentinelClient, cb func()) {
 		retry := uint32(0)
 		trigger := make(chan error)
@@ -1173,7 +1173,7 @@ func TestSentinelClientDelegateRetry(t *testing.T) {
 
 //gocyclo:ignore
 func TestSentinelClientPubSub(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 	var s0count, s0close, m1close, m2close, m4close int32
 
 	messages := make(chan PubSubMessage)
@@ -1325,7 +1325,7 @@ func TestSentinelClientPubSub(t *testing.T) {
 
 //gocyclo:ignore
 func TestSentinelReplicaOnlyClientPubSub(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 	var s0count, s0close, slave1close, slave2close, slave4close int32
 
 	messages := make(chan PubSubMessage)
@@ -1518,7 +1518,7 @@ func TestSentinelReplicaOnlyClientPubSub(t *testing.T) {
 }
 
 func TestSentinelClientRetry(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 	SetupClientRetry(t, func(m *mockConn) Client {
 		m.DoOverride = map[string]func(cmd Completed) ValkeyResult{
 			"SENTINEL SENTINELS masters": func(cmd Completed) ValkeyResult {
@@ -1556,7 +1556,7 @@ func TestSentinelClientRetry(t *testing.T) {
 }
 
 func TestSentinelClientLoadingRetry(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 
 	setup := func() (*sentinelClient, *mockConn, *mockConn) {
 		s0 := &mockConn{
@@ -1755,7 +1755,7 @@ func TestSentinelClientLoadingRetry(t *testing.T) {
 }
 
 func TestSentinelClientConnLifetime(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 
 	setup := func() (*sentinelClient, *mockConn, *mockConn) {
 		s0 := &mockConn{

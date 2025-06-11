@@ -198,7 +198,7 @@ func (m *mockConn) OptInCmd() cmds.Completed {
 }
 
 func TestNewSingleClientNoNode(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 	if _, err := newSingleClient(
 		&ClientOption{}, nil, func(dst string, opt *ClientOption) conn {
 			return nil
@@ -209,7 +209,7 @@ func TestNewSingleClientNoNode(t *testing.T) {
 }
 
 func TestNewSingleClientReplicaOnlyNotSupported(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 	if _, err := newSingleClient(
 		&ClientOption{ReplicaOnly: true, InitAddress: []string{"localhost"}}, nil, func(dst string, opt *ClientOption) conn { return nil }, newRetryer(defaultRetryDelayFn),
 	); err != ErrReplicaOnlyNotSupported {
@@ -218,7 +218,7 @@ func TestNewSingleClientReplicaOnlyNotSupported(t *testing.T) {
 }
 
 func TestNewSingleClientError(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 	v := errors.New("dial err")
 	if _, err := newSingleClient(
 		&ClientOption{InitAddress: []string{""}}, nil, func(dst string, opt *ClientOption) conn { return &mockConn{DialFn: func() error { return v }} }, newRetryer(defaultRetryDelayFn),
@@ -228,7 +228,7 @@ func TestNewSingleClientError(t *testing.T) {
 }
 
 func TestNewSingleClientOverride(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 	m1 := &mockConn{}
 	var m2 conn
 	if _, err := newSingleClient(
@@ -248,7 +248,7 @@ func TestNewSingleClientOverride(t *testing.T) {
 
 //gocyclo:ignore
 func TestSingleClient(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 	m := &mockConn{
 		AddrFn: func() string { return "myaddr" },
 	}
@@ -622,7 +622,7 @@ func TestSingleClient(t *testing.T) {
 }
 
 func TestSingleClientRetry(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 	SetupClientRetry(t, func(m *mockConn) Client {
 		c, err := newSingleClient(
 			&ClientOption{InitAddress: []string{""}},
@@ -1260,7 +1260,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 }
 
 func TestSingleClientLoadingRetry(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 
 	setup := func() (*singleClient, *mockConn) {
 		m := &mockConn{}
@@ -1425,7 +1425,7 @@ func TestSingleClientLoadingRetry(t *testing.T) {
 }
 
 func TestSingleClientConnLifetime(t *testing.T) {
-	defer ShouldNotLeaked(SetupLeakDetection())
+	defer ShouldNotLeak(SetupLeakDetection())
 
 	setup := func() (*singleClient, *mockConn) {
 		m := &mockConn{}
