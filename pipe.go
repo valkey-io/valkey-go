@@ -555,7 +555,7 @@ func (p *pipe) _backgroundRead() (err error) {
 		}
 		if ff == len(multi) {
 			ff = 0
-			ones[0], multi, ch, resps, cond = p.queue.NextResultCh() // ch should not be nil, otherwise it must be a protocol bug
+			ones[0], multi, ch, resps, cond = p.queue.NextResultCh() // ch should not be nil; otherwise, it must be a protocol bug
 			if ch == nil {
 				cond.L.Unlock()
 				// Valkey will send sunsubscribe notification proactively in the event of slot migration.

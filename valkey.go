@@ -225,7 +225,7 @@ type ClientOption struct {
 	DisableAutoPipelining bool
 	// AlwaysPipelining makes valkey.Client always pipeline valkey commands even if they are not issued concurrently.
 	AlwaysPipelining bool
-	// AlwaysRESP2 makes valkey.Client always uses RESP2, otherwise it will try using RESP3 first.
+	// AlwaysRESP2 makes valkey.Client always uses RESP2; otherwise, it will try using RESP3 first.
 	AlwaysRESP2 bool
 	//  ForceSingleClient force the usage of a single client connection, without letting the lib guessing
 	//  if valkey instance is a cluster or a single valkey instance.

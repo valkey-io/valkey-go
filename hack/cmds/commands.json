@@ -5693,7 +5693,7 @@
   },
   "SPOP": {
     "summary": "Remove and return one or multiple random members from a set",
-    "complexity": "Without the count argument O(1), otherwise O(N) where N is the value of the passed count.",
+    "complexity": "Without the count argument O(1); otherwise, O(N) where N is the value of the passed count.",
     "arguments": [
       {
         "name": "key",
@@ -5723,7 +5723,7 @@
   },
   "SRANDMEMBER": {
     "summary": "Get one or multiple random members from a set",
-    "complexity": "Without the count argument O(1), otherwise O(N) where N is the absolute value of the passed count.",
+    "complexity": "Without the count argument O(1); otherwise, O(N) where N is the absolute value of the passed count.",
     "arguments": [
       {
         "name": "key",
