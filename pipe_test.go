@@ -4237,7 +4237,7 @@ func TestExitOnRingFullAndConnError(t *testing.T) {
 	}
 }
 
-func TestExitOnRingFullAndPingTimout(t *testing.T) {
+func TestExitOnRingFullAndPingTimeout(t *testing.T) {
 	defer ShouldNotLeak(SetupLeakDetection())
 	p, mock, _, _ := setup(t, ClientOption{
 		RingScaleEachConn: 1,
