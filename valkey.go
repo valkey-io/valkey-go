@@ -201,7 +201,7 @@ type ClientOption struct {
 	// to Valkey. Adding this delay increases latency, reduces throughput – but in most cases may significantly reduce
 	// application and Valkey CPU utilization due to less executed system calls. By default, Valkey flushes data to the
 	// connection without extra delays. Depending on network latency and application-specific conditions, the value
-	// of MaxFlushDelay may vary, sth like 20 microseconds should not affect latency/throughput a lot but still
+	// of MaxFlushDelay may vary, something like 20 microseconds should not affect latency/throughput a lot but still
 	// produce notable CPU usage reduction under load. Ref: https://github.com/redis/rueidis/issues/156
 	MaxFlushDelay time.Duration
 
