@@ -192,7 +192,7 @@ type ClientOption struct {
 	// This default is ClientOption.Dialer.KeepAlive * (9+1), where 9 is the default of tcp_keepalive_probes on Linux.
 	ConnWriteTimeout time.Duration
 
-	// ConnLiftime is a lifetime for each connection. If specified,
+	// ConnLifetime is a lifetime for each connection. If specified,
 	// connections will close after passing lifetime. Note that the connection which a dedicated client and blocking use is not closed.
 	ConnLifetime time.Duration
 
