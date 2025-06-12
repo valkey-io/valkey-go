@@ -2895,7 +2895,7 @@ func TestPubSub(t *testing.T) {
 		for _, c := range commands {
 			p.Do(context.Background(), c)
 			if v, _ := p.Do(context.Background(), builder.Get().Key("k").Build()).ToMessage(); v.string() != "v" {
-				t.Fatalf("no-reply commands should not affect nornal commands")
+				t.Fatalf("no-reply commands should not affect normal commands")
 			}
 		}
 	})
@@ -2930,7 +2930,7 @@ func TestPubSub(t *testing.T) {
 
 		p.DoMulti(context.Background(), commands...)
 		if v, _ := p.Do(context.Background(), builder.Get().Key("k").Build()).ToMessage(); v.string() != "v" {
-			t.Fatalf("no-reply commands should not affect nornal commands")
+			t.Fatalf("no-reply commands should not affect normal commands")
 		}
 	})
 
