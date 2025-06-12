@@ -91,7 +91,7 @@ func BenchmarkPipelining(b *testing.B, client valkey.Client) {
 
 Compared to go-redis, valkey-go has higher throughput across 1, 8, and 64 parallelism settings.
 
-It is even able to achieve **~14x** throughput over go-redis in a local benchmark of Macbook Pro 16" M1 Pro 2021. (see `parallelism(64)-key(16)-value(64)-10`)
+It is even able to achieve **~14x** throughput over go-redis in a local benchmark of MacBook Pro 16" M1 Pro 2021. (see `parallelism(64)-key(16)-value(64)-10`)
 
 ![client_test_set](https://github.com/rueian/rueidis-benchmark/blob/master/client_test_set_10.png)
 
@@ -112,7 +112,7 @@ cmd := client.B().Get().Key("key").Build().ToPipe()
 client.Do(ctx, cmd)
 ```
 
-This allows you to use connection pooling approach by default but opt in auto pipelining for a subset of requests.
+This allows you to use connection pooling approach by default but opt-in auto pipelining for a subset of requests.
 
 ### Manual Pipelining
 
@@ -442,7 +442,7 @@ client, err := valkey.NewClient(valkey.ClientOption{
 client, err := valkey.NewClient(valkey.ClientOption{
     InitAddress: []string{"127.0.0.1:6379"},
     Standalone: valkey.StandaloneOption{
-        // Note that these addresses must be online and can not be promoted.
+        // Note that these addresses must be online and cannot be promoted.
         // An example use case is the reader endpoint provided by cloud vendors.
         ReplicaAddress: []string{"reader_endpoint:port"},
     },

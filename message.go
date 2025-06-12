@@ -52,7 +52,7 @@ func IsValkeyErr(err error) (ret *ValkeyError, ok bool) {
 // ValkeyError is an error response or a nil message from the valkey instance
 type ValkeyError ValkeyMessage
 
-// string retrives the contained string of the ValkeyError
+// string retrieves the contained string of the ValkeyError
 func (m *ValkeyError) string() string {
 	if m.bytes == nil {
 		return ""
@@ -1156,7 +1156,7 @@ func (m *ValkeyMessage) AsZScore() (s ZScore, err error) {
 	return toZScore(arr)
 }
 
-// AsZScores converts ZRANGE WITHSCROES, ZDIFF WITHSCROES and ZPOPMAX/ZPOPMIN command with count > 1 responses to []ZScore
+// AsZScores converts ZRANGE WITHSCORES, ZDIFF WITHSCORES and ZPOPMAX/ZPOPMIN command with count > 1 responses to []ZScore
 func (m *ValkeyMessage) AsZScores() ([]ZScore, error) {
 	arr, err := m.ToArray()
 	if err != nil {

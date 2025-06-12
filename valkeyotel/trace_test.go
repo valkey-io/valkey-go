@@ -128,8 +128,8 @@ func testWithClient(t *testing.T, client valkey.Client, exp *tracetest.InMemoryE
 	}
 	validateTrace(t, exp, "", codes.Ok)
 
-	var emtpyCacheableArr []valkey.CacheableTTL
-	resps = client.DoMultiCache(ctx, emtpyCacheableArr...)
+	var emptyCacheableArr []valkey.CacheableTTL
+	resps = client.DoMultiCache(ctx, emptyCacheableArr...)
 	if resps != nil {
 		t.Error("unexpected response : ", resps)
 	}
@@ -305,7 +305,7 @@ func validateTrace(t *testing.T, exp *tracetest.InMemoryExporter, op string, cod
 		t.Fatalf("unexpected custom attr %v", customAttr)
 	}
 	if c := exp.GetSpans().Snapshots()[0].Status().Code; c != code {
-		t.Fatalf("unexpected span statuc code %v", c)
+		t.Fatalf("unexpected span status code %v", c)
 	}
 	exp.Reset()
 }
