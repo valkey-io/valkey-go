@@ -219,7 +219,7 @@ func TestNewSingleClientReplicaOnlyNotSupported(t *testing.T) {
 
 func TestNewSingleClientError(t *testing.T) {
 	defer ShouldNotLeaked(SetupLeakDetection())
-	v := errors.New("dail err")
+	v := errors.New("dial err")
 	if _, err := newSingleClient(
 		&ClientOption{InitAddress: []string{""}}, nil, func(dst string, opt *ClientOption) conn { return &mockConn{DialFn: func() error { return v }} }, newRetryer(defaultRetryDelayFn),
 	); err != v {

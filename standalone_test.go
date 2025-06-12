@@ -22,7 +22,7 @@ func TestNewStandaloneClientNoNode(t *testing.T) {
 
 func TestNewStandaloneClientError(t *testing.T) {
 	defer ShouldNotLeaked(SetupLeakDetection())
-	v := errors.New("dail err")
+	v := errors.New("dial err")
 	if _, err := newStandaloneClient(
 		&ClientOption{InitAddress: []string{""}}, func(dst string, opt *ClientOption) conn { return &mockConn{DialFn: func() error { return v }} }, newRetryer(defaultRetryDelayFn),
 	); err != v {
@@ -32,7 +32,7 @@ func TestNewStandaloneClientError(t *testing.T) {
 
 func TestNewStandaloneClientReplicasError(t *testing.T) {
 	defer ShouldNotLeaked(SetupLeakDetection())
-	v := errors.New("dail err")
+	v := errors.New("dial err")
 	if _, err := newStandaloneClient(
 		&ClientOption{
 			InitAddress: []string{"1"},
