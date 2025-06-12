@@ -67,7 +67,7 @@ func TestPool(t *testing.T) {
 			t.Fatalf("c3.Error() is not nil")
 		}
 		if atomic.LoadInt32(count) != 3 {
-			t.Fatalf("pool does not clean borken connections")
+			t.Fatalf("pool does not clean broken connections")
 		}
 		pool.cond.L.Lock()
 		defer pool.cond.L.Unlock()
