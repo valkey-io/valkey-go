@@ -206,15 +206,28 @@ func (c *clusterClient) _refresh() (err error) {
 	pending = nil
 
 	groups := result.parse(c.opt.TLSConfig != nil)
+
 	conns := make(map[string]connrole, len(groups))
 	for master, g := range groups {
 		conns[master] = connrole{conn: c.connFn(master, c.opt)}
 		if c.rOpt != nil {
 			for _, nodeInfo := range g.nodes[1:] {
+				// do not include unhealhty connections in this refresh cycle
+				if cc, ok := c.conns[nodeInfo.Addr]; ok {
+					if cc.conn.IsServerUnHealthy() {
+						continue
+					}
+				}
 				conns[nodeInfo.Addr] = connrole{conn: c.connFn(nodeInfo.Addr, c.rOpt)}
 			}
 		} else {
 			for _, nodeInfo := range g.nodes[1:] {
+				// do not include unhealhty connections in this refresh cycle
+				if cc, ok := c.conns[nodeInfo.Addr]; ok {
+					if cc.conn.IsServerUnHealthy() {
+						continue
+					}
+				}
 				conns[nodeInfo.Addr] = connrole{conn: c.connFn(nodeInfo.Addr, c.opt)}
 			}
 		}
@@ -524,6 +537,11 @@ process:
 		resp = results.s[1]
 		resultsp.Put(results)
 		goto process
+	case RedirectLoadingRetry:
+		// mark the associated node temporarily unhealthy
+		cc.SetServerUnHealthy()
+		c.refresh(ctx) // on-demand refresh
+		fallthrough
 	case RedirectRetry:
 		if c.retry && cmd.IsReadOnly() {
 			shouldRetry := c.retryHandler.WaitOrSkipRetry(ctx, attempts, cmd, resp.Error())
@@ -1229,8 +1247,13 @@ func (c *clusterClient) shouldRefreshRetry(err error, ctx context.Context) (addr
 				mode = RedirectMove
 			} else if addr, ok = err.IsAsk(); ok {
 				mode = RedirectAsk
-			} else if err.IsClusterDown() || err.IsTryAgain() || err.IsLoading() {
+			} else if err.IsClusterDown() || err.IsTryAgain() {
 				mode = RedirectRetry
+				// if err.IsLoading() {
+				// 	c.refresh(ctx) // refresh the cluster topology if loading.
+				// }
+			} else if err.IsLoading() {
+				mode = RedirectLoadingRetry
 			}
 		} else if ctx.Err() == nil {
 			mode = RedirectRetry
@@ -1447,6 +1470,7 @@ const (
 	RedirectMove
 	RedirectAsk
 	RedirectRetry
+	RedirectLoadingRetry
 
 	panicMsgCxSlot = "cross slot command in Dedicated is prohibited"
 	panicMixCxSlot = "Mixing no-slot and cross slot commands in DoMulti is prohibited"
