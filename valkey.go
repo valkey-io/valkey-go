@@ -279,9 +279,8 @@ type StandaloneOption struct {
 
 // ReplicaInfo is the information of a replica node in a valkey cluster.
 type ReplicaInfo struct {
-	Addr      string
-	AZ        string
-	IsHealthy bool // IsHealthy indicates whether the replica is healthy and can be used for read operations.
+	Addr string
+	AZ   string
 }
 
 type ClientMode string
