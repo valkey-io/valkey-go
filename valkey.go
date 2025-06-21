@@ -242,6 +242,10 @@ type ClientOption struct {
 	// EnableReplicaAZInfo enables the client to load the replica node's availability zone.
 	// If true, the client will set the `AZ` field in `ReplicaInfo`.
 	EnableReplicaAZInfo bool
+
+	// The interval to mark a node as unhealty during temporary degraded state, defaults to 15 seconds
+	// Note: Only used for cluster client.
+	UnHealthyNodeInterval time.Duration
 }
 
 // SentinelOption contains MasterSet,
@@ -444,6 +448,9 @@ func NewClient(option ClientOption) (client Client, err error) {
 	}
 	if option.RetryDelay == nil {
 		option.RetryDelay = defaultRetryDelayFn
+	}
+	if option.UnHealthyNodeInterval == 0 {
+		option.UnHealthyNodeInterval = 15 * time.Second // default to 15 seconds
 	}
 	if option.Sentinel.MasterSet != "" {
 		option.PipelineMultiplex = singleClientMultiplex(option.PipelineMultiplex)

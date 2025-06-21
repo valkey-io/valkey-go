@@ -43,6 +43,8 @@ type conn interface {
 	Addr() string
 	SetOnCloseHook(func(error))
 	OptInCmd() cmds.Completed
+	SetServerUnHealthy()
+	IsServerUnHealthy() bool
 }
 
 var _ conn = (*mux)(nil)
@@ -61,8 +63,10 @@ type mux struct {
 	maxp   int
 	maxm   int
 
-	usePool bool
-	optIn   bool
+	usePool                bool
+	optIn                  bool
+	serverUnhealthystatus  atomic.Uint32
+	unhealthyServerTimeout time.Duration
 }
 
 func makeMux(dst string, option *ClientOption, dialFn dialFn) *mux {
@@ -107,6 +111,7 @@ func newMux(dst string, option *ClientOption, init, dead wire, wireFn wireFn, wi
 
 	m.dpool = newPool(option.BlockingPoolSize, dead, option.BlockingPoolCleanup, option.BlockingPoolMinSize, wireFn)
 	m.spool = newPool(option.BlockingPoolSize, dead, option.BlockingPoolCleanup, option.BlockingPoolMinSize, wireNoBgFn)
+	m.unhealthyServerTimeout = option.UnHealthyNodeInterval
 	return m
 }
 
@@ -409,6 +414,23 @@ func (m *mux) Close() {
 
 func (m *mux) Addr() string {
 	return m.dst
+}
+
+func (m *mux) SetServerUnHealthy() {
+	m.serverUnhealthystatus.Store(uint32(time.Now().Unix()))
+}
+
+func (m *mux) IsServerUnHealthy() bool {
+
+	unhealthy := m.serverUnhealthystatus.Load()
+	if unhealthy == 0 {
+		return false
+	}
+	if time.Now().Unix()-int64(unhealthy) < int64(m.unhealthyServerTimeout) {
+		return true
+	}
+	m.serverUnhealthystatus.Store(0) // reset the status if the timeout has passed
+	return false
 }
 
 func isBroken(err error, w wire) bool {
