@@ -1,8 +1,8 @@
 package valkey
 
 type bitmap struct {
-	bits [3]uint64 // 24 bytes
 	exts []uint64  // 24 bytes
+	bits [3]uint64 // 24 bytes
 }
 
 func (b *bitmap) Init(n int) {
