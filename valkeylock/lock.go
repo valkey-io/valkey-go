@@ -24,7 +24,7 @@ type LockerOption struct {
 	ClientOption valkey.ClientOption
 	// KeyValidity is the validity duration of locks and will be extended periodically by the ExtendInterval. The default value is 5s.
 	KeyValidity time.Duration
-	// ExtendInterval is the interval to extend KeyValidity. Default value is 1s.
+	// ExtendInterval is the interval to extend KeyValidity. Default value is 1/2 of KeyValidity.
 	ExtendInterval time.Duration
 	// TryNextAfter is the timeout duration before trying the next valkey key for locks. The default value is 20ms.
 	TryNextAfter time.Duration
