@@ -274,6 +274,10 @@ type StandaloneOption struct {
 	// Note that these addresses must be online and cannot be promoted.
 	// An example use case is the reader endpoint provided by cloud vendors.
 	ReplicaAddress []string
+	// EnableRedirect enables the CLIENT CAPA redirect feature for Valkey 8+
+	// When enabled, the client will send CLIENT CAPA redirect during connection
+	// initialization and handle REDIRECT responses from the server.
+	EnableRedirect bool
 }
 
 // ReplicaInfo is the information of a replica node in a valkey cluster.

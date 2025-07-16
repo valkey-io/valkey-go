@@ -43,6 +43,14 @@ func IsValkeyBusyGroup(err error) bool {
 	return false
 }
 
+// IsValkeyRedirect checks if it is a valkey REDIRECT message.
+func IsValkeyRedirect(err error) (addr string, ok bool) {
+	if ret, yes := IsValkeyErr(err); yes {
+		return ret.IsRedirect()
+	}
+	return "", false
+}
+
 // IsValkeyErr is a handy method to check if the error is a valkey ERR response.
 func IsValkeyErr(err error) (ret *ValkeyError, ok bool) {
 	ret, ok = err.(*ValkeyError)
@@ -84,6 +92,14 @@ func (r *ValkeyError) IsMoved() (addr string, ok bool) {
 func (r *ValkeyError) IsAsk() (addr string, ok bool) {
 	if ok = strings.HasPrefix(r.string(), "ASK"); ok {
 		addr = fixIPv6HostPort(strings.Split(r.string(), " ")[2])
+	}
+	return
+}
+
+// IsRedirect checks if it is a valkey REDIRECT message and returns redirect address.
+func (r *ValkeyError) IsRedirect() (addr string, ok bool) {
+	if ok = strings.HasPrefix(r.string(), "REDIRECT"); ok {
+		addr = fixIPv6HostPort(strings.Split(r.string(), " ")[1])
 	}
 	return
 }

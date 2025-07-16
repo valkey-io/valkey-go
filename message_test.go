@@ -109,6 +109,35 @@ func TestValkeyErrorIsAsk(t *testing.T) {
 	}
 }
 
+func TestValkeyErrorIsRedirect(t *testing.T) {
+	for _, c := range []struct {
+		err  string
+		addr string
+	}{
+		{err: "REDIRECT 127.0.0.1:6380", addr: "127.0.0.1:6380"},
+		{err: "REDIRECT [::1]:6380", addr: "[::1]:6380"},
+		{err: "REDIRECT ::1:6380", addr: "[::1]:6380"},
+	} {
+		e := ValkeyError(strmsg('-', c.err))
+		if addr, ok := e.IsRedirect(); !ok || addr != c.addr {
+			t.Fail()
+		}
+	}
+}
+
+func TestIsValkeyRedirect(t *testing.T) {
+	err := errors.New("other")
+	if addr, ok := IsValkeyRedirect(err); ok {
+		t.Fatalf("TestIsValkeyRedirect fail: expected false, got addr=%s", addr)
+	}
+
+	valkeyErr := ValkeyError(strmsg('-', "REDIRECT 127.0.0.1:6380"))
+	err = &valkeyErr
+	if addr, ok := IsValkeyRedirect(err); !ok || addr != "127.0.0.1:6380" {
+		t.Fatalf("TestIsValkeyRedirect fail: expected addr=127.0.0.1:6380, got addr=%s, ok=%t", addr, ok)
+	}
+}
+
 func TestIsValkeyBusyGroup(t *testing.T) {
 	err := errors.New("other")
 	if IsValkeyBusyGroup(err) {

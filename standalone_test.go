@@ -241,3 +241,103 @@ func TestNewStandaloneClientMultiReplicasDelegation(t *testing.T) {
 		}
 	}
 }
+
+func TestStandaloneRedirectHandling(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+	
+	// Create a mock redirect response
+	redirectErr := ValkeyError(strmsg('-', "REDIRECT 127.0.0.1:6380"))
+	
+	// Mock primary connection that returns redirect
+	primaryConn := &mockConn{
+		DoFn: func(cmd Completed) ValkeyResult {
+			return newErrResult(&redirectErr)
+		},
+	}
+	
+	// Mock redirect target connection that returns success
+	redirectConn := &mockConn{
+		DoFn: func(cmd Completed) ValkeyResult {
+			return ValkeyResult{val: strmsg('+', "OK")}
+		},
+	}
+	
+	// Track which connection is being used
+	var connUsed string
+	
+	s, err := newStandaloneClient(&ClientOption{
+		InitAddress: []string{"primary"},
+		Standalone: StandaloneOption{
+			EnableRedirect: true,
+		},
+		DisableRetry: true,
+	}, func(dst string, opt *ClientOption) conn {
+		connUsed = dst
+		if dst == "primary" {
+			return primaryConn
+		}
+		return redirectConn
+	}, newRetryer(defaultRetryDelayFn))
+	
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer s.Close()
+	
+	ctx := context.Background()
+	result := s.Do(ctx, s.B().Get().Key("test").Build())
+	
+	if result.Error() != nil {
+		t.Errorf("expected no error after redirect, got: %v", result.Error())
+	}
+	
+	if str, _ := result.ToString(); str != "OK" {
+		t.Errorf("expected OK response after redirect, got: %s", str)
+	}
+	
+	// Verify that the redirect target was used
+	if connUsed != "127.0.0.1:6380" {
+		t.Errorf("expected redirect to use 127.0.0.1:6380, got: %s", connUsed)
+	}
+}
+
+func TestStandaloneRedirectDisabled(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+	
+	// Create a mock redirect response
+	redirectErr := ValkeyError(strmsg('-', "REDIRECT 127.0.0.1:6380"))
+	
+	// Mock primary connection that returns redirect
+	primaryConn := &mockConn{
+		DoFn: func(cmd Completed) ValkeyResult {
+			return newErrResult(&redirectErr)
+		},
+	}
+	
+	s, err := newStandaloneClient(&ClientOption{
+		InitAddress: []string{"primary"},
+		Standalone: StandaloneOption{
+			EnableRedirect: false, // Redirect disabled
+		},
+		DisableRetry: true,
+	}, func(dst string, opt *ClientOption) conn {
+		return primaryConn
+	}, newRetryer(defaultRetryDelayFn))
+	
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer s.Close()
+	
+	ctx := context.Background()
+	result := s.Do(ctx, s.B().Get().Key("test").Build())
+	
+	// Should return the original redirect error since redirect is disabled
+	if result.Error() == nil {
+		t.Error("expected redirect error to be returned when redirect is disabled")
+	}
+	
+	if result.Error().Error() != "REDIRECT 127.0.0.1:6380" {
+		t.Errorf("expected redirect error, got: %v", result.Error())
+	}
+}
