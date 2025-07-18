@@ -453,6 +453,10 @@ func NewClient(option ClientOption) (client Client, err error) {
 		option.PipelineMultiplex = singleClientMultiplex(option.PipelineMultiplex)
 		return newSentinelClient(&option, makeConn, newRetryer(option.RetryDelay))
 	}
+	if option.Standalone.EnableRedirect {
+		option.PipelineMultiplex = singleClientMultiplex(option.PipelineMultiplex)
+		return newStandaloneClient(&option, makeConn, newRetryer(option.RetryDelay))
+	}
 	if len(option.Standalone.ReplicaAddress) > 0 {
 		if option.SendToReplicas == nil {
 			return nil, ErrNoSendToReplicas
