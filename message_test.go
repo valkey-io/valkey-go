@@ -127,14 +127,20 @@ func TestValkeyErrorIsRedirect(t *testing.T) {
 
 func TestIsValkeyRedirect(t *testing.T) {
 	err := errors.New("other")
-	if addr, ok := IsValkeyRedirect(err); ok {
-		t.Fatalf("TestIsValkeyRedirect fail: expected false, got addr=%s", addr)
+	if ret, yes := IsValkeyErr(err); yes {
+		if addr, ok := ret.IsRedirect(); ok {
+			t.Fatalf("TestIsValkeyRedirect fail: expected false, got addr=%s", addr)
+		}
 	}
 
 	valkeyErr := ValkeyError(strmsg('-', "REDIRECT 127.0.0.1:6380"))
 	err = &valkeyErr
-	if addr, ok := IsValkeyRedirect(err); !ok || addr != "127.0.0.1:6380" {
-		t.Fatalf("TestIsValkeyRedirect fail: expected addr=127.0.0.1:6380, got addr=%s, ok=%t", addr, ok)
+	if ret, yes := IsValkeyErr(err); yes {
+		if addr, ok := ret.IsRedirect(); !ok || addr != "127.0.0.1:6380" {
+			t.Fatalf("TestIsValkeyRedirect fail: expected addr=127.0.0.1:6380, got addr=%s, ok=%t", addr, ok)
+		}
+	} else {
+		t.Fatal("TestIsValkeyRedirect fail: expected ValkeyError")
 	}
 }
 

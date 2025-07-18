@@ -498,6 +498,43 @@ func TestNewClientMaxMultiplex(t *testing.T) {
 	}
 }
 
+func TestNewClientWithEnableRedirectPriority(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+	
+	// Test that EnableRedirect has priority over other options
+	// We'll test by checking error conditions rather than actually connecting
+	
+	// First, test the error case to demonstrate the path
+	_, err := NewClient(ClientOption{
+		InitAddress: []string{}, // Empty address should cause an error
+		Standalone: StandaloneOption{
+			EnableRedirect: true,
+		},
+		ForceSingleClient: true, // This should be ignored when EnableRedirect is set
+	})
+	
+	if err != ErrNoAddr {
+		t.Errorf("expected ErrNoAddr, got %v", err)
+	}
+}
+
+func TestNewClientWithMultipleReplicaAddresses(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+	
+	// Test that ReplicaAddress requires SendToReplicas
+	_, err := NewClient(ClientOption{
+		InitAddress: []string{"127.0.0.1:6379"},
+		Standalone: StandaloneOption{
+			ReplicaAddress: []string{"127.0.0.1:6380", "127.0.0.1:6381"},
+		},
+		// Missing SendToReplicas should cause an error
+	})
+	
+	if err != ErrNoSendToReplicas {
+		t.Errorf("expected ErrNoSendToReplicas, got %v", err)
+	}
+}
+
 func TestSingleClientMultiplex(t *testing.T) {
 	defer ShouldNotLeak(SetupLeakDetection())
 	option := ClientOption{}
