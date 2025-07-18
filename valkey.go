@@ -274,6 +274,10 @@ type StandaloneOption struct {
 	// Note that these addresses must be online and cannot be promoted.
 	// An example use case is the reader endpoint provided by cloud vendors.
 	ReplicaAddress []string
+	// EnableRedirect enables the CLIENT CAPA redirect feature for Valkey 8+
+	// When enabled, the client will send CLIENT CAPA redirect during connection
+	// initialization and handle REDIRECT responses from the server.
+	EnableRedirect bool
 }
 
 // ReplicaInfo is the information of a replica node in a valkey cluster.
@@ -448,6 +452,10 @@ func NewClient(option ClientOption) (client Client, err error) {
 	if option.Sentinel.MasterSet != "" {
 		option.PipelineMultiplex = singleClientMultiplex(option.PipelineMultiplex)
 		return newSentinelClient(&option, makeConn, newRetryer(option.RetryDelay))
+	}
+	if option.Standalone.EnableRedirect {
+		option.PipelineMultiplex = singleClientMultiplex(option.PipelineMultiplex)
+		return newStandaloneClient(&option, makeConn, newRetryer(option.RetryDelay))
 	}
 	if len(option.Standalone.ReplicaAddress) > 0 {
 		if option.SendToReplicas == nil {
