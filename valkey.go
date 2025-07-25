@@ -453,6 +453,11 @@ func NewClient(option ClientOption) (client Client, err error) {
 		option.PipelineMultiplex = singleClientMultiplex(option.PipelineMultiplex)
 		return newSentinelClient(&option, makeConn, newRetryer(option.RetryDelay))
 	}
+
+	if option.Standalone.EnableRedirect && len(option.Standalone.ReplicaAddress) > 0 {
+		return nil, errors.New("EnableRedirect and ReplicaAddress cannot be used together")
+	}
+
 	if option.Standalone.EnableRedirect {
 		option.PipelineMultiplex = singleClientMultiplex(option.PipelineMultiplex)
 		return newStandaloneClient(&option, makeConn, newRetryer(option.RetryDelay))

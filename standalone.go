@@ -2,7 +2,6 @@ package valkey
 
 import (
 	"context"
-	"errors"
 	"math/rand/v2"
 	"time"
 
@@ -13,11 +12,7 @@ func newStandaloneClient(opt *ClientOption, connFn connFn, retryer retryHandler)
 	if len(opt.InitAddress) == 0 {
 		return nil, ErrNoAddr
 	}
-	
-	// Validate that EnableRedirect and ReplicaAddress cannot be used together
-	if opt.Standalone.EnableRedirect && len(opt.Standalone.ReplicaAddress) > 0 {
-		return nil, errors.New("EnableRedirect and ReplicaAddress cannot be used together")
-	}
+
 	p := connFn(opt.InitAddress[0], opt)
 	if err := p.Dial(); err != nil {
 		return nil, err
@@ -71,7 +66,7 @@ func (s *standalone) handleRedirect(ctx context.Context, cmd Completed, result V
 	if !s.enableRedirect {
 		return result
 	}
-	
+
 	if ret, yes := IsValkeyErr(result.Error()); yes {
 		if addr, ok := ret.IsRedirect(); ok {
 			// Create a new connection to the redirect address
@@ -83,16 +78,16 @@ func (s *standalone) handleRedirect(ctx context.Context, cmd Completed, result V
 				return result
 			}
 			defer redirectConn.Close()
-			
+
 			// Create a temporary client for the redirect
 			redirectClient := newSingleClientWithConn(redirectConn, cmds.NewBuilder(cmds.NoSlot), !s.opt.DisableRetry, s.opt.DisableCache, s.retryer, false)
 			defer redirectClient.Close()
-			
+
 			// Execute the command on the redirect target
 			return redirectClient.Do(ctx, cmd)
 		}
 	}
-	
+
 	return result
 }
 
@@ -102,7 +97,7 @@ func (s *standalone) Do(ctx context.Context, cmd Completed) (resp ValkeyResult) 
 	} else {
 		resp = s.primary.Do(ctx, cmd)
 	}
-	
+
 	return s.handleRedirect(ctx, cmd, resp)
 }
 
@@ -119,7 +114,7 @@ func (s *standalone) DoMulti(ctx context.Context, multi ...Completed) (resp []Va
 	} else {
 		resp = s.primary.DoMulti(ctx, multi...)
 	}
-	
+
 	// Handle redirects for each command in the multi
 	if s.enableRedirect {
 		for i, result := range resp {
@@ -128,7 +123,7 @@ func (s *standalone) DoMulti(ctx context.Context, multi ...Completed) (resp []Va
 			}
 		}
 	}
-	
+
 	return resp
 }
 
@@ -161,7 +156,7 @@ func (s *standalone) DoStream(ctx context.Context, cmd Completed) ValkeyResultSt
 	} else {
 		stream = s.primary.DoStream(ctx, cmd)
 	}
-	
+
 	// Check if there's a redirect error in the stream
 	if s.enableRedirect && stream.Error() != nil {
 		if ret, yes := IsValkeyErr(stream.Error()); yes {
@@ -175,17 +170,17 @@ func (s *standalone) DoStream(ctx context.Context, cmd Completed) ValkeyResultSt
 					return stream
 				}
 				defer redirectConn.Close()
-				
+
 				// Create a temporary client for the redirect
 				redirectClient := newSingleClientWithConn(redirectConn, cmds.NewBuilder(cmds.NoSlot), !s.opt.DisableRetry, s.opt.DisableCache, s.retryer, false)
 				defer redirectClient.Close()
-				
+
 				// Execute the command on the redirect target
 				return redirectClient.DoStream(ctx, cmd)
 			}
 		}
 	}
-	
+
 	return stream
 }
 
@@ -203,7 +198,7 @@ func (s *standalone) DoMultiStream(ctx context.Context, multi ...Completed) Mult
 	} else {
 		stream = s.primary.DoMultiStream(ctx, multi...)
 	}
-	
+
 	// Check if there's a redirect error in the stream
 	if s.enableRedirect && stream.Error() != nil {
 		if ret, yes := IsValkeyErr(stream.Error()); yes {
@@ -217,17 +212,17 @@ func (s *standalone) DoMultiStream(ctx context.Context, multi ...Completed) Mult
 					return stream
 				}
 				defer redirectConn.Close()
-				
+
 				// Create a temporary client for the redirect
 				redirectClient := newSingleClientWithConn(redirectConn, cmds.NewBuilder(cmds.NoSlot), !s.opt.DisableRetry, s.opt.DisableCache, s.retryer, false)
 				defer redirectClient.Close()
-				
+
 				// Execute the command on the redirect target
 				return redirectClient.DoMultiStream(ctx, multi...)
 			}
 		}
 	}
-	
+
 	return stream
 }
 
