@@ -529,6 +529,7 @@ func (cmd *SliceCmd) from(res valkey.ValkeyResult) {
 		}
 	}
 	cmd.SetVal(vals)
+	cmd.SetErr(err)
 }
 
 // newSliceCmd returns SliceCmd according to input arguments, if the caller is JSONObjKeys,
@@ -616,6 +617,7 @@ func (cmd *BoolSliceCmd) from(res valkey.ValkeyResult) {
 		val = append(val, i == 1)
 	}
 	cmd.SetVal(val)
+	cmd.SetErr(err)
 }
 
 func newBoolSliceCmd(res valkey.ValkeyResult) *BoolSliceCmd {
