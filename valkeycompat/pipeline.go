@@ -3210,6 +3210,7 @@ func (c *Pipeline) Exec(ctx context.Context) ([]Cmder, error) {
 		if r.NonValkeyError() != nil {
 			err = r.NonValkeyError()
 		}
+		rets[i].SetErr(nil)
 		rets[i].from(r)
 	}
 
