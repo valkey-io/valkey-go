@@ -42,14 +42,15 @@ func newStandaloneClient(opt *ClientOption, connFn connFn, retryer retryHandler)
 }
 
 type standalone struct {
-	toReplicas     func(Completed) bool
-	primary        *singleClient
-	replicas       []*singleClient
-	enableRedirect bool
-	connFn         connFn
-	opt            *ClientOption
-	retryer        retryHandler
-	redirectCall   call
+	toReplicas       func(Completed) bool
+	primary          *singleClient
+	replicas         []*singleClient
+	enableRedirect   bool
+	connFn           connFn
+	opt              *ClientOption
+	retryer          retryHandler
+	redirectCall     call
+	lastRedirectAddr string
 }
 
 func (s *standalone) B() Builder {
@@ -70,9 +71,18 @@ func (s *standalone) handleRedirect(ctx context.Context, cmd Completed, result V
 
 	if ret, yes := IsValkeyErr(result.Error()); yes {
 		if addr, ok := ret.IsRedirect(); ok {
+			// Update the latest redirect address before singleflight
+			s.lastRedirectAddr = addr
+			
 			// Use singleflight to ensure only one redirect operation happens at a time
+			// Only proceed if the address matches the latest seen redirect address
 			if err := s.redirectCall.Do(ctx, func() error {
-				return s.redirectToPrimary(addr)
+				// Double-check that this is still the latest redirect address
+				if s.lastRedirectAddr == addr {
+					return s.redirectToPrimary(addr)
+				}
+				// If address doesn't match, another redirect happened, skip this one
+				return nil
 			}); err != nil {
 				// If redirect fails, return the original result
 				return result
@@ -176,9 +186,18 @@ func (s *standalone) DoStream(ctx context.Context, cmd Completed) ValkeyResultSt
 	if s.enableRedirect && stream.Error() != nil {
 		if ret, yes := IsValkeyErr(stream.Error()); yes {
 			if addr, ok := ret.IsRedirect(); ok {
+				// Update the latest redirect address before singleflight
+				s.lastRedirectAddr = addr
+				
 				// Use singleflight to ensure only one redirect operation happens at a time
+				// Only proceed if the address matches the latest seen redirect address
 				if err := s.redirectCall.Do(ctx, func() error {
-					return s.redirectToPrimary(addr)
+					// Double-check that this is still the latest redirect address
+					if s.lastRedirectAddr == addr {
+						return s.redirectToPrimary(addr)
+					}
+					// If address doesn't match, another redirect happened, skip this one
+					return nil
 				}); err != nil {
 					// If redirect fails, return the original stream
 					return stream
@@ -212,9 +231,18 @@ func (s *standalone) DoMultiStream(ctx context.Context, multi ...Completed) Mult
 	if s.enableRedirect && stream.Error() != nil {
 		if ret, yes := IsValkeyErr(stream.Error()); yes {
 			if addr, ok := ret.IsRedirect(); ok {
+				// Update the latest redirect address before singleflight
+				s.lastRedirectAddr = addr
+				
 				// Use singleflight to ensure only one redirect operation happens at a time
+				// Only proceed if the address matches the latest seen redirect address
 				if err := s.redirectCall.Do(ctx, func() error {
-					return s.redirectToPrimary(addr)
+					// Double-check that this is still the latest redirect address
+					if s.lastRedirectAddr == addr {
+						return s.redirectToPrimary(addr)
+					}
+					// If address doesn't match, another redirect happened, skip this one
+					return nil
 				}); err != nil {
 					// If redirect fails, return the original stream
 					return stream
