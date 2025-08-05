@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -11,6 +12,10 @@ import (
 
 	"github.com/valkey-io/valkey-go/internal/cmds"
 	"github.com/valkey-io/valkey-go/internal/util"
+)
+
+const (
+	loadingEtaSecondsKey = "loading_eta_seconds:"
 )
 
 type connFn func(dst string, opt *ClientOption) conn
@@ -43,6 +48,7 @@ type conn interface {
 	Addr() string
 	SetOnCloseHook(func(error))
 	OptInCmd() cmds.Completed
+	IsLoading() bool
 }
 
 var _ conn = (*mux)(nil)
@@ -65,8 +71,9 @@ type mux struct {
 	maxp     int
 	maxm     int
 
-	usePool bool
-	optIn   bool
+	usePool           bool
+	optIn             bool
+	nodeLoadingStatus atomic.Uint32
 }
 
 func makeMux(dst string, option *ClientOption, dialFn dialFn) *mux {
@@ -269,6 +276,10 @@ func (m *mux) blocking(pool *pool, ctx context.Context, cmd Completed) (resp Val
 	if resp.NonValkeyError() != nil { // abort the wire if blocking command return early (ex. context.DeadlineExceeded)
 		wire.Close()
 	}
+	// check loading status of the node
+	if !m.IsLoading() && isLoadingError(resp.Error()) {
+		m.setLoadingStatus(ctx)
+	}
 	pool.Store(wire)
 	return resp
 }
@@ -281,6 +292,10 @@ func (m *mux) blockingMulti(pool *pool, ctx context.Context, cmd []Completed) (r
 			wire.Close()
 			break
 		}
+		// check loading status of the node
+		if !m.IsLoading() && isLoadingError(res.Error()) {
+			m.setLoadingStatus(ctx)
+		}
 	}
 	pool.Store(wire)
 	return resp
@@ -291,6 +306,10 @@ func (m *mux) pipeline(ctx context.Context, cmd Completed) (resp ValkeyResult) {
 	wire := m.pipe(ctx, slot)
 	if resp = wire.Do(ctx, cmd); isBroken(resp.NonValkeyError(), wire) {
 		m.muxwires[slot].wire.CompareAndSwap(wire, m.init)
+	}
+	// check loading status of the node
+	if !m.IsLoading() && isLoadingError(resp.Error()) {
+		m.setLoadingStatus(ctx)
 	}
 	return resp
 }
@@ -304,6 +323,10 @@ func (m *mux) pipelineMulti(ctx context.Context, cmd []Completed) (resp *valkeyr
 			m.muxwires[slot].wire.CompareAndSwap(wire, m.init)
 			return resp
 		}
+		// check loading status of the node
+		if !m.IsLoading() && isLoadingError(r.Error()) {
+			m.setLoadingStatus(ctx)
+		}
 	}
 	return resp
 }
@@ -314,6 +337,10 @@ func (m *mux) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) Val
 	resp := wire.DoCache(ctx, cmd, ttl)
 	if isBroken(resp.NonValkeyError(), wire) {
 		m.muxwires[slot].wire.CompareAndSwap(wire, m.init)
+	}
+	// check loading status of the node
+	if !m.IsLoading() && isLoadingError(resp.Error()) {
+		m.setLoadingStatus(ctx)
 	}
 	return resp
 }
@@ -375,6 +402,10 @@ func (m *mux) doMultiCache(ctx context.Context, slot uint16, multi []CacheableTT
 			m.muxwires[slot].wire.CompareAndSwap(wire, m.init)
 			return resps
 		}
+		// check loading status of the node
+		if !m.IsLoading() && isLoadingError(r.Error()) {
+			m.setLoadingStatus(ctx)
+		}
 	}
 	return resps
 }
@@ -413,8 +444,51 @@ func (m *mux) Addr() string {
 	return m.dst
 }
 
+func (m *mux) setLoadingStatus(ctx context.Context) {
+	w := m.pipe(ctx, 0)
+	res := w.Do(ctx, cmds.InfoPersistenceCmd)
+	r := res.String()
+	loadingEtaIdx := strings.Index(r, loadingEtaSecondsKey)
+	if loadingEtaIdx > 0 {
+		eta, _ := strconv.Atoi(string(r[loadingEtaIdx+len(loadingEtaSecondsKey)]))
+		if eta > 0 {
+			// this sets when the loading status will be expired
+			etaTime := time.Now().Add(time.Duration(eta) * time.Second).Unix()
+			m.nodeLoadingStatus.CompareAndSwap(0, uint32(etaTime))
+
+		}
+	}
+
+}
+
+func (m *mux) IsLoading() bool {
+
+	status := m.nodeLoadingStatus.Load()
+	if status == 0 {
+		return false
+	}
+
+	if time.Now().Unix() < int64(status) {
+		return true
+	}
+
+	m.nodeLoadingStatus.Store(0) // reset the status if expired
+
+	return false
+}
+
 func isBroken(err error, w wire) bool {
 	return err != nil && err != ErrClosing && w.Error() != nil
+}
+
+func isLoadingError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if verr, ok := err.(*ValkeyError); ok {
+		return verr.IsLoading()
+	}
+	return false
 }
 
 func slotfn(n int, ks uint16, noreply bool) uint16 {
