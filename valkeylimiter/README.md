@@ -5,7 +5,7 @@ This module provides an interface for token bucket rate limiting with precise co
 
 ## Features
 
-- **Token Bucket Algorithm**: Implements a token bucket algorithm to control the number of actions (e.g., API requests) a user can perform within a specified time window.
+- **Fixed Window Algorithm**: Implements a fixed window algorithm to control the number of actions (e.g., API requests) a user can perform within a specified time window.
 - **Customizable Limits**: Allows configuration of request limits and time windows to suit various application requirements.
 - **Distributed Rate Limiting**: Leverages Valkey to maintain rate limit counters, ensuring consistency across distributed environments.
 - **Reset Information**: Provides `ResetAtMs` timestamps to inform clients when they can retry requests.
