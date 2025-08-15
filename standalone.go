@@ -117,16 +117,32 @@ func (s *standalone) redirectToPrimary(addr string) error {
 }
 
 func (s *standalone) Do(ctx context.Context, cmd Completed) (resp ValkeyResult) {
+	attempts := 1
+retry:
 	if s.toReplicas != nil && s.toReplicas(cmd) {
 		resp = s.replicas[s.pick()].Do(ctx, cmd)
 	} else {
 		resp = s.primary.Do(ctx, cmd)
 	}
 
-	return s.handleRedirect(ctx, cmd, resp)
+	// Handle redirects with retry until context deadline
+	resp = s.handleRedirect(ctx, cmd, resp)
+	if ret, yes := IsValkeyErr(resp.Error()); yes {
+		if _, ok := ret.IsRedirect(); ok && s.enableRedirect {
+			// Use retryHandler to handle multiple redirects with context deadline
+			if s.retryer.WaitOrSkipRetry(ctx, attempts, cmd, resp.Error()) {
+				attempts++
+				goto retry
+			}
+		}
+	}
+
+	return resp
 }
 
 func (s *standalone) DoMulti(ctx context.Context, multi ...Completed) (resp []ValkeyResult) {
+	attempts := 1
+retry:
 	toReplica := true
 	for _, cmd := range multi {
 		if s.toReplicas == nil || !s.toReplicas(cmd) {
@@ -141,10 +157,24 @@ func (s *standalone) DoMulti(ctx context.Context, multi ...Completed) (resp []Va
 	}
 
 	// Handle redirects for each command in the multi
+	hasRedirect := false
 	if s.enableRedirect {
 		for i, result := range resp {
 			if i < len(multi) {
 				resp[i] = s.handleRedirect(ctx, multi[i], result)
+				// Check if we still have a redirect error after handling
+				if ret, yes := IsValkeyErr(resp[i].Error()); yes {
+					if _, ok := ret.IsRedirect(); ok {
+						hasRedirect = true
+					}
+				}
+			}
+		}
+		// If any command still has a redirect error, retry the entire multi
+		if hasRedirect {
+			if s.retryer.WaitOrSkipRetry(ctx, attempts, multi[0], resp[0].Error()) {
+				attempts++
+				goto retry
 			}
 		}
 	}
