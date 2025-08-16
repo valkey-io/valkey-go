@@ -126,11 +126,12 @@ retry:
 	}
 
 	// Handle redirects with retry until context deadline
-	resp = s.handleRedirect(ctx, cmd, resp)
-	if ret, yes := IsValkeyErr(resp.Error()); yes {
-		if _, ok := ret.IsRedirect(); ok && s.enableRedirect {
+    if s.enableRedirect {
+      if ret, yes := IsValkeyErr(resp.Error()); yes {
+		if addr, ok := ret.IsRedirect(); ok {
+		    err := s.redirectCall(ctx, func() {return s.redirectToPrimary(adde)})
 			// Use retryHandler to handle multiple redirects with context deadline
-			if s.retryer.WaitOrSkipRetry(ctx, attempts, cmd, resp.Error()) {
+			if err == nil || s.retryer.WaitOrSkipRetry(ctx, attempts, cmd, resp.Error()) {
 				attempts++
 				goto retry
 			}
