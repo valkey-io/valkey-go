@@ -38,6 +38,10 @@ type mockConn struct {
 	ReceiveOverride map[string]func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error
 }
 
+func (m *mockConn) IsLoading() bool {
+	return true
+}
+
 func (m *mockConn) Override(c conn) {
 	if m.OverrideFn != nil {
 		m.OverrideFn(c)

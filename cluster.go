@@ -208,6 +208,7 @@ func (c *clusterClient) _refresh() (err error) {
 	pending = nil
 
 	groups := result.parse(c.opt.TLSConfig != nil)
+
 	conns := make(map[string]connrole, len(groups))
 	for master, g := range groups {
 		conns[master] = connrole{conn: c.connFn(master, c.opt)}
@@ -247,30 +248,41 @@ func (c *clusterClient) _refresh() (err error) {
 	pslots := [16384]conn{}
 	var rslots []conn
 	for master, g := range groups {
+
+		var replicaNodesToConsider []ReplicaInfo
+		// consider only healthy replica nodes for conn assignment to slots
+		for i := 1; i < len(g.nodes); i++ {
+			if cc, ok := conns[g.nodes[i].Addr]; ok {
+				if !cc.conn.IsLoading() {
+					replicaNodesToConsider = append(replicaNodesToConsider, g.nodes[i])
+				}
+			}
+		}
+		replicaNodeCount := len(replicaNodesToConsider)
+
 		switch {
-		case c.opt.ReplicaOnly && len(g.nodes) > 1:
-			nodesCount := len(g.nodes)
+		case c.opt.ReplicaOnly && len(replicaNodesToConsider) > 0:
 			for _, slot := range g.slots {
 				for i := slot[0]; i <= slot[1] && i >= 0 && i < 16384; i++ {
-					pslots[i] = conns[g.nodes[1+util.FastRand(nodesCount-1)].Addr].conn
+					pslots[i] = conns[replicaNodesToConsider[util.FastRand(replicaNodeCount)].Addr].conn
 				}
 			}
 		case c.rOpt != nil:
 			if len(rslots) == 0 { // lazy init
 				rslots = make([]conn, 16384)
 			}
-			if len(g.nodes) > 1 {
-				n := len(g.nodes) - 1
+			if len(replicaNodesToConsider) > 0 {
+				n := len(replicaNodesToConsider)
 
 				if c.opt.EnableReplicaAZInfo {
 					var wg sync.WaitGroup
-					for i := 1; i <= n; i += 4 { // batch AZ() for every 4 connections
+					for i := 0; i <= n; i += 4 { // batch AZ() for every 4 connections
 						for j := i; j <= i+4 && j <= n; j++ {
 							wg.Add(1)
 							go func(wg *sync.WaitGroup, conn conn, info *ReplicaInfo) {
 								info.AZ = conn.AZ()
 								wg.Done()
-							}(&wg, conns[g.nodes[j].Addr].conn, &g.nodes[j])
+							}(&wg, conns[replicaNodesToConsider[j].Addr].conn, &replicaNodesToConsider[j])
 						}
 						wg.Wait()
 					}
@@ -279,9 +291,9 @@ func (c *clusterClient) _refresh() (err error) {
 				for _, slot := range g.slots {
 					for i := slot[0]; i <= slot[1] && i >= 0 && i < 16384; i++ {
 						pslots[i] = conns[master].conn
-						rIndex := c.opt.ReplicaSelector(uint16(i), g.nodes[1:])
+						rIndex := c.opt.ReplicaSelector(uint16(i), replicaNodesToConsider)
 						if rIndex >= 0 && rIndex < n {
-							rslots[i] = conns[g.nodes[1+rIndex].Addr].conn
+							rslots[i] = conns[replicaNodesToConsider[rIndex].Addr].conn
 						} else {
 							rslots[i] = conns[master].conn
 						}
@@ -539,6 +551,10 @@ process:
 		}
 		resultsp.Put(results)
 		goto process
+	case RedirectLoadingRetry:
+
+		c.refresh(ctx) // on-demand refresh
+		fallthrough
 	case RedirectRetry:
 		if c.retry && cmd.IsReadOnly() {
 			shouldRetry := c.retryHandler.WaitOrSkipRetry(ctx, attempts, cmd, resp.Error())
@@ -1337,8 +1353,10 @@ func (c *clusterClient) shouldRefreshRetry(err error, ctx context.Context) (addr
 				mode = RedirectMove
 			} else if addr, ok = err.IsAsk(); ok {
 				mode = RedirectAsk
-			} else if err.IsClusterDown() || err.IsTryAgain() || err.IsLoading() {
+			} else if err.IsClusterDown() || err.IsTryAgain() {
 				mode = RedirectRetry
+			} else if err.IsLoading() {
+				mode = RedirectLoadingRetry
 			}
 		} else if ctx.Err() == nil {
 			mode = RedirectRetry
@@ -1555,6 +1573,7 @@ const (
 	RedirectMove
 	RedirectAsk
 	RedirectRetry
+	RedirectLoadingRetry
 
 	panicMsgCxSlot = "cross slot command in Dedicated is prohibited"
 	panicMixCxSlot = "Mixing no-slot and cross slot commands in DoMulti is prohibited"

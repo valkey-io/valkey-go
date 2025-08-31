@@ -61,6 +61,11 @@ var (
 	PingCmd = Completed{
 		cs: newCommandSlice([]string{"PING"}),
 	}
+	// InfoCmd is predefined INFO
+	InfoPersistenceCmd = Completed{
+		cs: newCommandSlice([]string{"INFO", "Persistence"}),
+	}
+
 	// SlotCmd is predefined CLUSTER SLOTS
 	SlotCmd = Completed{
 		cs: newCommandSlice([]string{"CLUSTER", "SLOTS"}),
