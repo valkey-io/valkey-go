@@ -5385,13 +5385,6 @@
         "optional": true
       },
       {
-        "name": "safe",
-        "type": "pure-token",
-        "token": "SAFE",
-        "optional": true,
-        "since": "9.0.0"
-      },
-      {
         "name": "force",
         "type": "enum",
         "enum": [
@@ -5399,6 +5392,13 @@
         ],
         "since": "7.0.0",
         "optional": true
+      },
+      {
+        "name": "safe",
+        "type": "pure-token",
+        "token": "SAFE",
+        "optional": true,
+        "since": "9.0.0"
       },
       {
         "name": "abort",
