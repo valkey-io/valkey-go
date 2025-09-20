@@ -495,7 +495,7 @@ client, err = valkey.NewClient(valkey.MustParseURL("redis://127.0.0.1:26379/0?ma
 
 Starting from Valkey 8.1, Valkey server provides the `availability-zone` information for clients to know where the server is located.
 For using this information to route requests to the replica located in the same availability zone,
-set the `EnableReplicaAZInfo` option and your `ReplicaSelector` function. For example:
+set the `EnableReplicaAZInfo` option and your `ReadNodeSelector` function. For example:
 
 ```go
 client, err := valkey.NewClient(valkey.ClientOption{
@@ -504,7 +504,7 @@ client, err := valkey.NewClient(valkey.ClientOption{
 	SendToReplicas: func(cmd valkey.Completed) bool {
 		return cmd.IsReadOnly()
 	},
-	ReplicaSelector: func(slot uint16, replicas []valkey.ReplicaInfo) int {
+	ReadNodeSelector: func(slot uint16, replicas []valkey.NodeInfo) int {
 		for i, replica := range replicas {
 			if replica.AZ == "us-east-1a" {
 				return i // return the index of the replica.
