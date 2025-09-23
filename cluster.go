@@ -502,7 +502,7 @@ func (c *clusterClient) redirectOrNew(addr string, prev conn, slot uint16, mode 
 		p := c.connFn(addr, c.opt)
 		cc = connrole{conn: p}
 		c.conns[addr] = cc
-		if mode == RedirectMove {
+		if mode == RedirectMove && slot != cmds.InitSlot {
 			c.wslots[slot] = p
 		}
 	} else if prev == cc.conn {
@@ -516,7 +516,7 @@ func (c *clusterClient) redirectOrNew(addr string, prev conn, slot uint16, mode 
 		p := c.connFn(addr, c.opt)
 		cc = connrole{conn: p}
 		c.conns[addr] = cc
-		if mode == RedirectMove { // MOVED should always point to the primary.
+		if mode == RedirectMove && slot != cmds.InitSlot { // MOVED should always point to the primary.
 			c.wslots[slot] = p
 		}
 	}
@@ -746,14 +746,7 @@ func (c *clusterClient) doresultfn(
 				}
 				retryDelay = c.retryHandler.RetryDelay(attempts, cm, resp.Error())
 			} else {
-				slotToRedirect := cm.Slot()
-				if slotToRedirect == cmds.InitSlot && ei < i {
-					// This block will be triggered in case we've got a MOVED response for a cmd which we assigned cmds.InitSlot to.
-					// For example, it can happen on EXEC within transaction during cluster reshard.
-					// We need to invoke redirectOrNew() with a slot from a previous command.
-					slotToRedirect = commands[i-1].Slot()
-				}
-				nc = c.redirectOrNew(addr, cc, slotToRedirect, mode)
+				nc = c.redirectOrNew(addr, cc, cm.Slot(), mode)
 			}
 			if hasInit && ei < i { // find out if there is a transaction block or not.
 				for mi = i; mi >= 0 && !isMulti(commands[mi]) && !isExec(commands[mi]); mi-- {
