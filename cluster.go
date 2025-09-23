@@ -746,7 +746,14 @@ func (c *clusterClient) doresultfn(
 				}
 				retryDelay = c.retryHandler.RetryDelay(attempts, cm, resp.Error())
 			} else {
-				nc = c.redirectOrNew(addr, cc, cm.Slot(), mode)
+				slotToRedirect := cm.Slot()
+				if slotToRedirect == cmds.InitSlot && ei < i {
+					// This block will be triggered in case we've got a MOVED response for a cmd which we assigned cmds.InitSlot to.
+					// For example, it can happen on EXEC within transaction during cluster reshard.
+					// We need to invoke redirectOrNew() with a slot from a previous command.
+					slotToRedirect = commands[i-1].Slot()
+				}
+				nc = c.redirectOrNew(addr, cc, slotToRedirect, mode)
 			}
 			if hasInit && ei < i { // find out if there is a transaction block or not.
 				for mi = i; mi >= 0 && !isMulti(commands[mi]) && !isExec(commands[mi]); mi-- {
