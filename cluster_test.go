@@ -6522,7 +6522,7 @@ func TestClusterClientMovedRetry(t *testing.T) {
 						results[i] = newResult(strmsg('-', "MOVED 1 127.0.0.1"), nil)
 					} else {
 						// return a successful transaction result for the retry
-						results[i] = newResult(strmsg('*', "1\r\n+some_value\r\n"), nil)
+						results[i] = newResult(slicemsg('*', []ValkeyMessage{strmsg('+', "some_value")}), nil)
 					}
 				} else {
 					results[i] = newResult(strmsg('+', "QUEUED"), nil)
@@ -6544,6 +6544,10 @@ func TestClusterClientMovedRetry(t *testing.T) {
 
 		if len(resps) != 3 {
 			t.Fatalf("unexpected response length %v", len(resps))
+		}
+
+		if vs, err := resps[2].AsStrSlice(); err != nil || vs[0] != "some_value" {
+			t.Fatalf("unexpected response %v %v", vs, err)
 		}
 	})
 
