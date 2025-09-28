@@ -420,13 +420,21 @@ does not support pipelining keys across multiple slots when connecting to a valk
 
 ## Memory Consumption Consideration
 
-Each underlying connection in valkey allocates a ring buffer for pipelining.
+Each underlying connection in valkey-go allocates a ring buffer for pipelining.
 Its size is controlled by the `ClientOption.RingScaleEachConn` and the default value is 10 which results into each ring of size 2^10.
 
 If you have many valkey connections, you may find that they occupy quite an amount of memory.
 In that case, you may consider reducing `ClientOption.RingScaleEachConn` to 8 or 9 at the cost of potential throughput degradation.
 
 You may also consider setting the value of `ClientOption.PipelineMultiplex` to `-1`, which will let valkey use only 1 connection for pipelining to each valkey node.
+
+In addition, each connection also allocates read and write buffers to reduce system calls during high concurrency
+or large pipelines. These buffers are controlled by:
+
+- `ClientOption.ReadBufferEachConn` (default: 0.5 MiB)
+- `ClientOption.WriteBufferEachConn` (default: 0.5 MiB)
+
+You can adjust these values in memory-sensitive environments to lower memory usage, at the cost of potential throughput.
 
 ## Instantiating a new Valkey Client
 
