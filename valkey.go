@@ -453,6 +453,11 @@ type AuthCredentials struct {
 // It will first try to connect as a cluster client. If the len(ClientOption.InitAddress) == 1 and
 // the address does not enable cluster mode, the NewClient() will use single client instead.
 func NewClient(option ClientOption) (client Client, err error) {
+	// Validate configuration conflicts early
+	if option.Standalone.EnableRedirect && len(option.Standalone.ReplicaAddress) > 0 {
+		return nil, errors.New("EnableRedirect and ReplicaAddress cannot be used together")
+	}
+	
 	if option.ReadBufferEachConn < 32 { // the buffer should be able to hold an int64 string at least
 		option.ReadBufferEachConn = DefaultReadBuffer
 	}
@@ -491,10 +496,6 @@ func NewClient(option ClientOption) (client Client, err error) {
 	if option.Sentinel.MasterSet != "" {
 		option.PipelineMultiplex = singleClientMultiplex(option.PipelineMultiplex)
 		return newSentinelClient(&option, makeConn, newRetryer(option.RetryDelay))
-	}
-
-	if option.Standalone.EnableRedirect && len(option.Standalone.ReplicaAddress) > 0 {
-		return nil, errors.New("EnableRedirect and ReplicaAddress cannot be used together")
 	}
 
 	if option.Standalone.EnableRedirect {
