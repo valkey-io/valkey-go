@@ -585,6 +585,28 @@ func TestNewClientWithMultipleReplicaAddresses(t *testing.T) {
 	}
 }
 
+func TestNewClientEnableRedirectAndReplicaAddressConflict(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+	
+	// Test that EnableRedirect and ReplicaAddress cannot be used together
+	_, err := NewClient(ClientOption{
+		InitAddress: []string{"127.0.0.1:6379"},
+		Standalone: StandaloneOption{
+			EnableRedirect: true,
+			ReplicaAddress: []string{"127.0.0.1:6380"},
+		},
+	})
+	
+	if err == nil {
+		t.Error("expected error when EnableRedirect and ReplicaAddress are both used")
+	}
+	
+	expectedMsg := "EnableRedirect and ReplicaAddress cannot be used together"
+	if err.Error() != expectedMsg {
+		t.Errorf("expected error message '%s', got '%s'", expectedMsg, err.Error())
+	}
+}
+
 func TestSingleClientMultiplex(t *testing.T) {
 	defer ShouldNotLeak(SetupLeakDetection())
 	option := ClientOption{}
