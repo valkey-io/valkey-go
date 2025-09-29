@@ -3,7 +3,9 @@ package valkey
 import (
 	"context"
 	"math/rand/v2"
+	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/valkey-io/valkey-go/internal/cmds"
 )
@@ -75,16 +77,22 @@ func (s *standalone) redirectToPrimary(addr string) error {
 	// Create a new primary client with the redirect connection
 	newPrimary := newSingleClientWithConn(redirectConn, cmds.NewBuilder(cmds.NoSlot), !s.opt.DisableRetry, s.opt.DisableCache, s.retryer, false)
 
-	// Close the old primary and swap to the new one
-	oldPrimary := s.primary
-	s.primary = newPrimary
-	oldPrimary.Close()
+	// Atomically swap the primary and close the old one
+	oldPrimary := atomic.SwapPointer(
+		(*unsafe.Pointer)(unsafe.Pointer(&s.primary)),
+		unsafe.Pointer(newPrimary),
+	)
+	(*singleClient)(oldPrimary).Close()
 
 	return nil
 }
 
 func (s *standalone) Do(ctx context.Context, cmd Completed) (resp ValkeyResult) {
 	attempts := 1
+	if s.enableRedirect {
+		cmd = cmd.Pin()
+	}
+
 retry:
 	if s.toReplicas != nil && s.toReplicas(cmd) {
 		resp = s.replicas[s.pick()].Do(ctx, cmd)
@@ -92,12 +100,11 @@ retry:
 		resp = s.primary.Do(ctx, cmd)
 	}
 
-	// Handle redirects with retry until context deadline  
+	// Handle redirects with retry until context deadline
 	if s.enableRedirect {
 		if ret, yes := IsValkeyErr(resp.Error()); yes {
 			if addr, ok := ret.IsRedirect(); ok {
-				// Pin the command to prevent recycling during retries
-				cmd = cmd.Pin()
+				// Command is already pinned at this point
 				err := s.redirectCall.Do(ctx, func() error {
 					return s.redirectToPrimary(addr)
 				})
