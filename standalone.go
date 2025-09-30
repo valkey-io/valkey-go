@@ -27,7 +27,6 @@ func newStandaloneClient(opt *ClientOption, connFn connFn, retryer retryHandler)
 		retryer:        retryer,
 	}
 	s.primary.Store(newSingleClientWithConn(p, cmds.NewBuilder(cmds.NoSlot), !opt.DisableRetry, opt.DisableCache, retryer, false))
-	opt.ReplicaOnly = true
 
 	for i := range s.replicas {
 		replicaConn := connFn(opt.Standalone.ReplicaAddress[i], opt)
@@ -119,6 +118,14 @@ retry:
 
 func (s *standalone) DoMulti(ctx context.Context, multi ...Completed) (resp []ValkeyResult) {
 	attempts := 1
+
+	// Pin all commands at the beginning if redirect is enabled
+	if s.enableRedirect {
+		for i := range multi {
+			multi[i] = multi[i].Pin()
+		}
+	}
+
 retry:
 	toReplica := true
 	for _, cmd := range multi {
@@ -139,10 +146,6 @@ retry:
 			if i < len(multi) {
 				if ret, yes := IsValkeyErr(result.Error()); yes {
 					if addr, ok := ret.IsRedirect(); ok {
-						// Pin all commands to prevent recycling during retries
-						for j := range multi {
-							multi[j] = multi[j].Pin()
-						}
 						err := s.redirectCall.Do(ctx, func() error {
 							return s.redirectToPrimary(addr)
 						})
@@ -180,10 +183,18 @@ func (s *standalone) DoCache(ctx context.Context, cmd Cacheable, ttl time.Durati
 }
 
 func (s *standalone) DoMultiCache(ctx context.Context, multi ...CacheableTTL) (resp []ValkeyResult) {
+	if s.enableRedirect {
+		for i := range multi {
+			multi[i].Cmd = multi[i].Cmd.Pin()
+		}
+	}
 	return s.primary.Load().DoMultiCache(ctx, multi...)
 }
 
 func (s *standalone) DoStream(ctx context.Context, cmd Completed) ValkeyResultStream {
+	if s.enableRedirect {
+		cmd = cmd.Pin()
+	}
 	var stream ValkeyResultStream
 	if s.toReplicas != nil && s.toReplicas(cmd) {
 		stream = s.replicas[s.pick()].DoStream(ctx, cmd)
