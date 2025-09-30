@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/valkey-io/valkey-go/internal/cmds"
 )
 
 func TestNewStandaloneClientNoNode(t *testing.T) {
@@ -917,5 +919,196 @@ func TestStandaloneDoToReplicaWithRedirect(t *testing.T) {
 	// Just test that we can create the client successfully
 	if s.Mode() != ClientModeStandalone {
 		t.Errorf("expected standalone mode, got %v", s.Mode())
+	}
+}
+
+func TestStandaloneDoMultiCacheWithRedirect(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	primaryConn := &mockConn{
+		DialFn: func() error { return nil },
+		DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
+			return &valkeyresults{s: []ValkeyResult{ValkeyResult{val: strmsg('+', "OK")}}}
+		},
+	}
+
+	s, err := newStandaloneClient(&ClientOption{
+		InitAddress: []string{"primary"},
+		Standalone: StandaloneOption{
+			EnableRedirect: true,
+		},
+		DisableRetry: true,
+	}, func(dst string, opt *ClientOption) conn {
+		return primaryConn
+	}, newRetryer(defaultRetryDelayFn))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer s.Close()
+
+	// Test DoMultiCache with redirect enabled - this exercises the Pin() code path
+	// Create a CacheableTTL manually to avoid the build-twice issue
+	cacheable := Cacheable(cmds.NewCompleted([]string{"GET", "k"}))
+	results := s.DoMultiCache(context.Background(), CacheableTTL{Cmd: cacheable, TTL: time.Second})
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	if results[0].Error() != nil {
+		t.Errorf("unexpected error: %v", results[0].Error())
+	}
+}
+
+func TestStandaloneDoMultiWithRedirectRetry(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	redirectErr := ValkeyError(strmsg('-', "REDIRECT 127.0.0.1:6380"))
+	attempts := 0
+
+	primaryConn := &mockConn{
+		DialFn: func() error { return nil },
+		DoMultiFn: func(multi ...Completed) *valkeyresults {
+			attempts++
+			// First attempt returns redirect error, second returns success
+			if attempts == 1 {
+				return &valkeyresults{s: []ValkeyResult{newErrResult(&redirectErr)}}
+			}
+			return &valkeyresults{s: []ValkeyResult{ValkeyResult{val: strmsg('+', "OK")}}}
+		},
+	}
+
+	redirectConnCalled := false
+	redirectConn := &mockConn{
+		DialFn: func() error {
+			redirectConnCalled = true
+			return nil
+		},
+		DoMultiFn: func(multi ...Completed) *valkeyresults {
+			return &valkeyresults{s: []ValkeyResult{ValkeyResult{val: strmsg('+', "OK")}}}
+		},
+		CloseFn: func() {},
+	}
+
+	// Mock retry handler that allows one retry
+	mockRetry := &mockRetryHandler{
+		WaitOrSkipRetryFunc: func(ctx context.Context, attempts int, cmd Completed, err error) bool {
+			return attempts < 2 // Allow one retry
+		},
+		RetryDelayFn: func(attempts int, _ Completed, err error) time.Duration {
+			return time.Millisecond
+		},
+		WaitForRetryFn: func(ctx context.Context, duration time.Duration) {
+			time.Sleep(duration)
+		},
+	}
+
+	s, err := newStandaloneClient(&ClientOption{
+		InitAddress: []string{"primary"},
+		Standalone: StandaloneOption{
+			EnableRedirect: true,
+		},
+		DisableRetry: false,
+	}, func(dst string, opt *ClientOption) conn {
+		if dst == "primary" {
+			return primaryConn
+		}
+		return redirectConn
+	}, mockRetry)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer s.Close()
+
+	// Create a simple command using the internal cmds package
+	cmd := cmds.NewCompleted([]string{"SET", "k", "v"})
+
+	// Test DoMulti with redirect and retry
+	results := s.DoMulti(context.Background(), cmd)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	if results[0].Error() != nil {
+		t.Errorf("expected success after retry, got error: %v", results[0].Error())
+	}
+
+	// The primary connection should have been called once, then redirected
+	if attempts != 1 {
+		t.Errorf("expected 1 attempt on primary before redirect, got %d", attempts)
+	}
+
+	if !redirectConnCalled {
+		t.Error("expected redirect connection to be called")
+	}
+}
+
+func TestStandaloneDoMultiWithRedirectRetryFailure(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	redirectErr := ValkeyError(strmsg('-', "REDIRECT 127.0.0.1:6380"))
+
+	primaryConn := &mockConn{
+		DialFn: func() error { return nil },
+		DoMultiFn: func(multi ...Completed) *valkeyresults {
+			return &valkeyresults{s: []ValkeyResult{newErrResult(&redirectErr)}}
+		},
+	}
+
+	// Redirect connection fails to dial
+	redirectConn := &mockConn{
+		DialFn: func() error {
+			return errors.New("redirect connection failed")
+		},
+	}
+
+	// Mock retry handler that doesn't allow retries after connection failure
+	mockRetry := &mockRetryHandler{
+		WaitOrSkipRetryFunc: func(ctx context.Context, attempts int, cmd Completed, err error) bool {
+			return false // Don't retry
+		},
+		RetryDelayFn: func(attempts int, _ Completed, err error) time.Duration {
+			return time.Millisecond
+		},
+		WaitForRetryFn: func(ctx context.Context, duration time.Duration) {
+			time.Sleep(duration)
+		},
+	}
+
+	s, err := newStandaloneClient(&ClientOption{
+		InitAddress: []string{"primary"},
+		Standalone: StandaloneOption{
+			EnableRedirect: true,
+		},
+		DisableRetry: false,
+	}, func(dst string, opt *ClientOption) conn {
+		if dst == "primary" {
+			return primaryConn
+		}
+		return redirectConn
+	}, mockRetry)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer s.Close()
+
+	// Create a simple command using the internal cmds package
+	cmd := cmds.NewCompleted([]string{"SET", "k", "v"})
+
+	// Test DoMulti with redirect failure
+	results := s.DoMulti(context.Background(), cmd)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	// Should return the original redirect error since retry is not allowed
+	if results[0].Error() == nil {
+		t.Error("expected error to be returned")
+	}
+
+	if verr, ok := results[0].Error().(*ValkeyError); !ok || !strings.Contains(verr.Error(), "REDIRECT") {
+		t.Errorf("expected REDIRECT error, got %v", results[0].Error())
 	}
 }
