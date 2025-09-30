@@ -28,6 +28,8 @@ func newStandaloneClient(opt *ClientOption, connFn connFn, retryer retryHandler)
 	}
 	s.primary.Store(newSingleClientWithConn(p, cmds.NewBuilder(cmds.NoSlot), !opt.DisableRetry, opt.DisableCache, retryer, false))
 	opt.ReplicaOnly = true
+
+  
 	for i := range s.replicas {
 		replicaConn := connFn(opt.Standalone.ReplicaAddress[i], opt)
 		if err := replicaConn.Dial(); err != nil {
