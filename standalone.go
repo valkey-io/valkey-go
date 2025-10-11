@@ -113,7 +113,7 @@ retry:
 				}
 			}
 		}
-		if resp.NonRedisError() == nil {
+		if resp.NonValkeyError() == nil {
 			cmds.PutCompletedForce(cmd)
 		}
 	}
@@ -147,7 +147,7 @@ retry:
 	// Handle redirects with retry until context deadline
 	if s.enableRedirect {
 		for i, result := range resp {
-			if ret, yes := IsRedisErr(result.Error()); yes {
+			if ret, yes := IsValkeyErr(result.Error()); yes {
 				if addr, ok := ret.IsRedirect(); ok {
 					err := s.redirectCall.Do(ctx, func() error {
 						return s.redirectToPrimary(addr)
@@ -161,7 +161,7 @@ retry:
 			}
 		}
 		for i, result := range resp {
-			if result.NonRedisError() == nil {
+			if result.NonValkeyError() == nil {
 				cmds.PutCompletedForce(multi[i])
 			}
 		}
@@ -184,7 +184,7 @@ func (s *standalone) Close() {
 	}
 }
 
-func (s *standalone) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) (resp RedisResult) {
+func (s *standalone) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) (resp ValkeyResult) {
 	attempts := 1
 
 	if s.enableRedirect {
@@ -195,7 +195,7 @@ retry:
 	resp = s.primary.Load().DoCache(ctx, cmd, ttl)
 
 	if s.enableRedirect {
-		if ret, yes := IsRedisErr(resp.Error()); yes {
+		if ret, yes := IsValkeyErr(resp.Error()); yes {
 			if addr, ok := ret.IsRedirect(); ok {
 				err := s.redirectCall.Do(ctx, func() error {
 					return s.redirectToPrimary(addr)
@@ -206,14 +206,14 @@ retry:
 				}
 			}
 		}
-		if resp.NonRedisError() == nil {
+		if resp.NonValkeyError() == nil {
 			cmds.PutCompletedForce(Completed(cmd))
 		}
 	}
 	return
 }
 
-func (s *standalone) DoMultiCache(ctx context.Context, multi ...CacheableTTL) (resp []RedisResult) {
+func (s *standalone) DoMultiCache(ctx context.Context, multi ...CacheableTTL) (resp []ValkeyResult) {
 	attempts := 1
 
 	if s.enableRedirect {
@@ -227,7 +227,7 @@ retry:
 
 	if s.enableRedirect {
 		for i, result := range resp {
-			if ret, yes := IsRedisErr(result.Error()); yes {
+			if ret, yes := IsValkeyErr(result.Error()); yes {
 				if addr, ok := ret.IsRedirect(); ok {
 					err := s.redirectCall.Do(ctx, func() error {
 						return s.redirectToPrimary(addr)
@@ -241,7 +241,7 @@ retry:
 			}
 		}
 		for i, result := range resp {
-			if result.NonRedisError() == nil {
+			if result.NonValkeyError() == nil {
 				cmds.PutCompletedForce(Completed(multi[i].Cmd))
 			}
 		}
@@ -249,8 +249,8 @@ retry:
 	return
 }
 
-func (s *standalone) DoStream(ctx context.Context, cmd Completed) RedisResultStream {
-	var stream RedisResultStream
+func (s *standalone) DoStream(ctx context.Context, cmd Completed) ValkeyResultStream {
+	var stream ValkeyResultStream
 	if s.toReplicas != nil && s.toReplicas(cmd) {
 		stream = s.replicas[s.pick()].DoStream(ctx, cmd)
 	} else {

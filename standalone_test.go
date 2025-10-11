@@ -308,19 +308,19 @@ func TestStandaloneDoCacheRedirectHandling(t *testing.T) {
 	defer ShouldNotLeak(SetupLeakDetection())
 
 	// Create a mock redirect response
-	redirectErr := RedisError(strmsg('-', "REDIRECT 127.0.0.1:6380"))
+	redirectErr := ValkeyError(strmsg('-', "REDIRECT 127.0.0.1:6380"))
 
 	// Mock primary connection that returns redirect
 	primaryConn := &mockConn{
-		DoCacheFn: func(cmd Cacheable, ttl time.Duration) RedisResult {
+		DoCacheFn: func(cmd Cacheable, ttl time.Duration) ValkeyResult {
 			return newErrResult(&redirectErr)
 		},
 	}
 
 	// Mock redirect target connection that returns success
 	redirectConn := &mockConn{
-		DoCacheFn: func(cmd Cacheable, ttl time.Duration) RedisResult {
-			return RedisResult{val: strmsg('+', "OK")}
+		DoCacheFn: func(cmd Cacheable, ttl time.Duration) ValkeyResult {
+			return ValkeyResult{val: strmsg('+', "OK")}
 		},
 	}
 
@@ -408,11 +408,11 @@ func TestStandaloneDoCacheRedirectDisabled(t *testing.T) {
 	defer ShouldNotLeak(SetupLeakDetection())
 
 	// Create a mock redirect response
-	redirectErr := RedisError(strmsg('-', "REDIRECT 127.0.0.1:6380"))
+	redirectErr := ValkeyError(strmsg('-', "REDIRECT 127.0.0.1:6380"))
 
 	// Mock primary connection that returns redirect
 	primaryConn := &mockConn{
-		DoCacheFn: func(cmd Cacheable, ttl time.Duration) RedisResult {
+		DoCacheFn: func(cmd Cacheable, ttl time.Duration) ValkeyResult {
 			return newErrResult(&redirectErr)
 		},
 	}
@@ -846,18 +846,18 @@ func TestStandaloneDoMultiWithRedirectRetryFailure(t *testing.T) {
 func TestStandaloneDoMultiCacheWithRedirectRetry(t *testing.T) {
 	defer ShouldNotLeak(SetupLeakDetection())
 
-	redirectErr := RedisError(strmsg('-', "REDIRECT 127.0.0.1:6380"))
+	redirectErr := ValkeyError(strmsg('-', "REDIRECT 127.0.0.1:6380"))
 	attempts := 0
 
 	primaryConn := &mockConn{
 		DialFn: func() error { return nil },
-		DoMultiCacheFn: func(multi ...CacheableTTL) *redisresults {
+		DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
 			attempts++
 			// First attempt returns redirect error, second returns success
 			if attempts == 1 {
-				return &redisresults{s: []RedisResult{newErrResult(&redirectErr)}}
+				return &valkeyresults{s: []ValkeyResult{newErrResult(&redirectErr)}}
 			}
-			return &redisresults{s: []RedisResult{RedisResult{val: strmsg('+', "OK")}}}
+			return &valkeyresults{s: []ValkeyResult{ValkeyResult{val: strmsg('+', "OK")}}}
 		},
 	}
 
@@ -867,8 +867,8 @@ func TestStandaloneDoMultiCacheWithRedirectRetry(t *testing.T) {
 			redirectConnCalled = true
 			return nil
 		},
-		DoMultiCacheFn: func(multi ...CacheableTTL) *redisresults {
-			return &redisresults{s: []RedisResult{RedisResult{val: strmsg('+', "OK")}}}
+		DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
+			return &valkeyresults{s: []ValkeyResult{ValkeyResult{val: strmsg('+', "OK")}}}
 		},
 		CloseFn: func() {},
 	}
@@ -930,12 +930,12 @@ func TestStandaloneDoMultiCacheWithRedirectRetry(t *testing.T) {
 func TestStandaloneDoMultiCacheWithRedirectRetryFailure(t *testing.T) {
 	defer ShouldNotLeak(SetupLeakDetection())
 
-	redirectErr := RedisError(strmsg('-', "REDIRECT 127.0.0.1:6380"))
+	redirectErr := ValkeyError(strmsg('-', "REDIRECT 127.0.0.1:6380"))
 
 	primaryConn := &mockConn{
 		DialFn: func() error { return nil },
-		DoMultiCacheFn: func(multi ...CacheableTTL) *redisresults {
-			return &redisresults{s: []RedisResult{newErrResult(&redirectErr)}}
+		DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
+			return &valkeyresults{s: []ValkeyResult{newErrResult(&redirectErr)}}
 		},
 	}
 
@@ -991,7 +991,7 @@ func TestStandaloneDoMultiCacheWithRedirectRetryFailure(t *testing.T) {
 		t.Error("expected error to be returned")
 	}
 
-	if verr, ok := results[0].Error().(*RedisError); !ok || !strings.Contains(verr.Error(), "REDIRECT") {
+	if verr, ok := results[0].Error().(*ValkeyError); !ok || !strings.Contains(verr.Error(), "REDIRECT") {
 		t.Errorf("expected REDIRECT error, got %v", results[0].Error())
 	}
 }
