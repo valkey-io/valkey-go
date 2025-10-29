@@ -20,6 +20,28 @@ var (
 	dbstmt = attribute.Key("db.statement")
 )
 
+type contextKey struct{}
+
+var cacheKeyPatternContextKey = contextKey{}
+
+// WithCacheKeyPattern adds a key pattern label to the context that will be attached
+// to cache hit/miss metrics (valkey_do_cache_hits and valkey_do_cache_miss).
+// This is useful for tracking cache performance by resource type (e.g., "book", "author").
+//
+// Example:
+//
+//	ctx := valkeyotel.WithCacheKeyPattern(ctx, "book")
+//	client.DoCache(ctx, client.B().Get().Key("book:123").Cache(), time.Minute)
+func WithCacheKeyPattern(ctx context.Context, pattern string) context.Context {
+	return context.WithValue(ctx, cacheKeyPatternContextKey, pattern)
+}
+
+// getCacheKeyPattern retrieves the key pattern from the context, if set.
+func getCacheKeyPattern(ctx context.Context) (string, bool) {
+	pattern, ok := ctx.Value(cacheKeyPatternContextKey).(string)
+	return pattern, ok
+}
+
 var _ valkey.Client = (*otelclient)(nil)
 
 // WithClient creates a new valkey.Client with OpenTelemetry tracing enabled.
@@ -167,9 +189,9 @@ func (o *otelclient) DoCache(ctx context.Context, cmd valkey.Cacheable, ttl time
 	resp = o.client.DoCache(ctx, cmd, ttl)
 	if resp.NonValkeyError() == nil {
 		if resp.IsCacheHit() {
-			o.cscHits.Add(ctx, 1, o.addOpts...)
+			o.recordCacheHit(ctx)
 		} else {
-			o.cscMiss.Add(ctx, 1, o.addOpts...)
+			o.recordCacheMiss(ctx)
 		}
 	}
 	o.end(span, resp.Error())
@@ -185,9 +207,9 @@ func (o *otelclient) DoMultiCache(ctx context.Context, multi ...valkey.Cacheable
 	for _, resp := range resps {
 		if resp.NonValkeyError() == nil {
 			if resp.IsCacheHit() {
-				o.cscHits.Add(ctx, 1, o.addOpts...)
+				o.recordCacheHit(ctx)
 			} else {
-				o.cscMiss.Add(ctx, 1, o.addOpts...)
+				o.recordCacheMiss(ctx)
 			}
 		}
 	}
@@ -259,6 +281,22 @@ func (o *otelclient) Mode() valkey.ClientMode {
 
 func (o *otelclient) Close() {
 	o.client.Close()
+}
+
+func (o *otelclient) recordCacheHit(ctx context.Context) {
+	opts := o.addOpts
+	if pattern, ok := getCacheKeyPattern(ctx); ok && pattern != "" {
+		opts = append(o.addOpts, metric.WithAttributeSet(attribute.NewSet(attribute.String("key_pattern", pattern))))
+	}
+	o.cscHits.Add(ctx, 1, opts...)
+}
+
+func (o *otelclient) recordCacheMiss(ctx context.Context) {
+	opts := o.addOpts
+	if pattern, ok := getCacheKeyPattern(ctx); ok && pattern != "" {
+		opts = append(o.addOpts, metric.WithAttributeSet(attribute.NewSet(attribute.String("key_pattern", pattern))))
+	}
+	o.cscMiss.Add(ctx, 1, opts...)
 }
 
 var _ valkey.DedicatedClient = (*dedicated)(nil)

@@ -7,6 +7,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
@@ -275,4 +276,101 @@ func float64HistogramMetric(metrics metricdata.ResourceMetrics, name string) flo
 		return data.DataPoints[0].Sum
 	}
 	return 0
+}
+
+func int64CountMetricWithAttrs(metrics metricdata.ResourceMetrics, name string, attrKey string, attrValue string) int64 {
+	m := findMetric(metrics, name)
+	if data, ok := m.(metricdata.Sum[int64]); ok {
+		for _, dp := range data.DataPoints {
+			for _, attr := range dp.Attributes.ToSlice() {
+				if string(attr.Key) == attrKey && attr.Value.AsString() == attrValue {
+					return dp.Value
+				}
+			}
+		}
+	}
+	return 0
+}
+
+func TestWithCacheKeyPattern(t *testing.T) {
+	t.Run("cache metrics with key pattern", func(t *testing.T) {
+		ctx := context.Background()
+
+		// Test WithCacheKeyPattern
+		ctxWithPattern := WithCacheKeyPattern(ctx, "book")
+		pattern, ok := getCacheKeyPattern(ctxWithPattern)
+		if !ok || pattern != "book" {
+			t.Errorf("getCacheKeyPattern: got (%s, %v), want (book, true)", pattern, ok)
+		}
+
+		// Test without pattern
+		pattern, ok = getCacheKeyPattern(ctx)
+		if ok || pattern != "" {
+			t.Errorf("getCacheKeyPattern without pattern: got (%s, %v), want ('', false)", pattern, ok)
+		}
+	})
+
+	t.Run("cache metrics with different key patterns", func(t *testing.T) {
+		client, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{"127.0.0.1:6379"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		mxp := metric.NewManualReader()
+		meterProvider := metric.NewMeterProvider(metric.WithReader(mxp))
+
+		oclient := WithClient(client, WithMeterProvider(meterProvider))
+		defer oclient.Close()
+
+		ctx := context.Background()
+
+		// Set up some test data
+		oclient.Do(ctx, oclient.B().Set().Key("book:1").Value("Book One").Build())
+		oclient.Do(ctx, oclient.B().Set().Key("author:1").Value("Author One").Build())
+
+		// DoCache with "book" pattern - cache miss
+		ctxBook := WithCacheKeyPattern(ctx, "book")
+		oclient.DoCache(ctxBook, oclient.B().Get().Key("book:1").Cache(), time.Minute)
+
+		// DoCache with "book" pattern again - cache hit
+		oclient.DoCache(ctxBook, oclient.B().Get().Key("book:1").Cache(), time.Minute)
+
+		// DoCache with "author" pattern - cache miss
+		ctxAuthor := WithCacheKeyPattern(ctx, "author")
+		oclient.DoCache(ctxAuthor, oclient.B().Get().Key("author:1").Cache(), time.Minute)
+
+		// DoCache with "author" pattern again - cache hit
+		oclient.DoCache(ctxAuthor, oclient.B().Get().Key("author:1").Cache(), time.Minute)
+
+		// DoCache without pattern - cache miss
+		oclient.DoCache(ctx, oclient.B().Get().Key("other:1").Cache(), time.Minute)
+
+		// Collect metrics
+		metrics := metricdata.ResourceMetrics{}
+		if err := mxp.Collect(ctx, &metrics); err != nil {
+			t.Fatal(err)
+		}
+
+		// Validate "book" metrics
+		bookMiss := int64CountMetricWithAttrs(metrics, "valkey_do_cache_miss", "key_pattern", "book")
+		if bookMiss != 1 {
+			t.Errorf("book cache miss: got %d, want 1", bookMiss)
+		}
+
+		bookHits := int64CountMetricWithAttrs(metrics, "valkey_do_cache_hits", "key_pattern", "book")
+		if bookHits != 1 {
+			t.Errorf("book cache hits: got %d, want 1", bookHits)
+		}
+
+		// Validate "author" metrics
+		authorMiss := int64CountMetricWithAttrs(metrics, "valkey_do_cache_miss", "key_pattern", "author")
+		if authorMiss != 1 {
+			t.Errorf("author cache miss: got %d, want 1", authorMiss)
+		}
+
+		authorHits := int64CountMetricWithAttrs(metrics, "valkey_do_cache_hits", "key_pattern", "author")
+		if authorHits != 1 {
+			t.Errorf("author cache hits: got %d, want 1", authorHits)
+		}
+	})
 }

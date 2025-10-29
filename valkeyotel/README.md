@@ -11,6 +11,8 @@ Client side caching metrics:
 - `valkey_do_cache_miss`: number of cache miss on client side
 - `valkey_do_cache_hits`: number of cache hits on client side
 
+These metrics can include an optional `key_pattern` label to track cache performance by resource type (see below).
+
 Client side command metrics:
  - `valkey_command_duration_seconds`: histogram of command duration
  - `valkey_command_errors`: number of command errors
@@ -19,6 +21,9 @@ Client side command metrics:
 package main
 
 import (
+    "context"
+    "time"
+
     "github.com/valkey-io/valkey-go"
     "github.com/valkey-io/valkey-go/valkeyotel"
 )
@@ -29,6 +34,18 @@ func main() {
         panic(err)
     }
     defer client.Close()
+
+    // Basic usage
+    ctx := context.Background()
+    client.DoCache(ctx, client.B().Get().Key("mykey").Cache(), time.Minute)
+
+    // Add key_pattern label to cache metrics
+    ctxWithPattern := valkeyotel.WithCacheKeyPattern(ctx, "book")
+    client.DoCache(ctxWithPattern, client.B().Get().Key("book:123").Cache(), time.Minute)
+
+    // Track different resource types
+    ctxAuthor := valkeyotel.WithCacheKeyPattern(ctx, "author")
+    client.DoCache(ctxAuthor, client.B().Get().Key("author:456").Cache(), time.Minute)
 }
 ```
 
