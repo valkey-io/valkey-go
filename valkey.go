@@ -89,6 +89,8 @@ var (
 	ErrWrongPipelineMultiplex = errors.New("ClientOption.PipelineMultiplex must not be bigger than MaxPipelineMultiplex")
 	// ErrDedicatedClientRecycled means the caller attempted to use the dedicated client which has been already recycled (after canceled/closed).
 	ErrDedicatedClientRecycled = errors.New("dedicated client should not be used after recycled")
+	// ErrMaxMovedRetriesExceeded means the maximum number of MOVED retries has been exceeded
+	ErrMaxMovedRetriesExceeded = errors.New("maximum number of MOVED retries exceeded")
 	// DisableClientSetInfo is the value that can be used for ClientOption.ClientSetInfo to disable making the CLIENT SETINFO command
 	DisableClientSetInfo = make([]string, 0)
 )
@@ -301,6 +303,12 @@ type ClusterOption struct {
 	// If the value is zero, refreshment will be disabled.
 	// Cluster topology cache refresh happens always in the background after a successful scan.
 	ShardsRefreshInterval time.Duration
+
+	// MaxMovedRetries is the maximum number of times to retry a command when receiving MOVED responses.
+	// If set to 0 (default), MOVED retries will continue until the context timeout.
+	// If set to a positive value, the client will return an error after that many MOVED redirects.
+	// This helps prevent infinite redirect loops in case of cluster misconfiguration.
+	MaxMovedRetries int
 }
 
 // StandaloneOption is the options for the standalone client.

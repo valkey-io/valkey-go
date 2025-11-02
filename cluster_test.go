@@ -6574,6 +6574,227 @@ func TestClusterClientMovedRetry(t *testing.T) {
 	})
 }
 
+func TestClusterClientMaxMovedRetries(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	t.Run("Do exceeds max MOVED retries", func(t *testing.T) {
+		m := &mockConn{
+			DoFn: func(cmd Completed) ValkeyResult {
+				if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
+					return slotsMultiResp
+				}
+				// Always return MOVED to simulate infinite redirect loop
+				return newResult(strmsg('-', "MOVED 0 127.0.0.1:7001"), nil)
+			},
+		}
+		client, err := newClusterClient(
+			&ClientOption{
+				InitAddress: []string{":0"},
+				ClusterOption: ClusterOption{
+					MaxMovedRetries: 3,
+				},
+			},
+			func(dst string, opt *ClientOption) conn { return m },
+			newRetryer(defaultRetryDelayFn),
+		)
+		if err != nil {
+			t.Fatalf("unexpected err %v", err)
+		}
+
+		cmd := client.B().Get().Key("test").Build()
+		resp := client.Do(context.Background(), cmd)
+		if resp.Error() != ErrMaxMovedRetriesExceeded {
+			t.Fatalf("expected ErrMaxMovedRetriesExceeded, got %v", resp.Error())
+		}
+	})
+
+	t.Run("DoCache exceeds max MOVED retries", func(t *testing.T) {
+		m := &mockConn{
+			DoFn: func(cmd Completed) ValkeyResult {
+				if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
+					return slotsMultiResp
+				}
+				return ValkeyResult{}
+			},
+			DoCacheFn: func(cmd Cacheable, ttl time.Duration) ValkeyResult {
+				// Always return MOVED to simulate infinite redirect loop
+				return newResult(strmsg('-', "MOVED 0 127.0.0.1:7001"), nil)
+			},
+		}
+		client, err := newClusterClient(
+			&ClientOption{
+				InitAddress: []string{":0"},
+				ClusterOption: ClusterOption{
+					MaxMovedRetries: 2,
+				},
+			},
+			func(dst string, opt *ClientOption) conn { return m },
+			newRetryer(defaultRetryDelayFn),
+		)
+		if err != nil {
+			t.Fatalf("unexpected err %v", err)
+		}
+
+		cmd := client.B().Get().Key("test").Cache()
+		resp := client.DoCache(context.Background(), cmd, time.Second)
+		if resp.Error() != ErrMaxMovedRetriesExceeded {
+			t.Fatalf("expected ErrMaxMovedRetriesExceeded, got %v", resp.Error())
+		}
+	})
+
+	t.Run("DoMulti exceeds max MOVED retries", func(t *testing.T) {
+		m := &mockConn{
+			DoFn: func(cmd Completed) ValkeyResult {
+				if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
+					return slotsMultiResp
+				}
+				return ValkeyResult{}
+			},
+			DoMultiFn: func(multi ...Completed) *valkeyresults {
+				// Always return MOVED to simulate infinite redirect loop
+				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('-', "MOVED 0 127.0.0.1:7001"), nil)}}
+			},
+		}
+		client, err := newClusterClient(
+			&ClientOption{
+				InitAddress: []string{":0"},
+				ClusterOption: ClusterOption{
+					MaxMovedRetries: 5,
+				},
+			},
+			func(dst string, opt *ClientOption) conn { return m },
+			newRetryer(defaultRetryDelayFn),
+		)
+		if err != nil {
+			t.Fatalf("unexpected err %v", err)
+		}
+
+		cmd := client.B().Get().Key("test").Build()
+		resps := client.DoMulti(context.Background(), cmd)
+		if len(resps) != 1 {
+			t.Fatalf("expected 1 response, got %d", len(resps))
+		}
+		if resps[0].Error() != ErrMaxMovedRetriesExceeded {
+			t.Fatalf("expected ErrMaxMovedRetriesExceeded, got %v", resps[0].Error())
+		}
+	})
+
+	t.Run("DoMultiCache exceeds max MOVED retries", func(t *testing.T) {
+		m := &mockConn{
+			DoFn: func(cmd Completed) ValkeyResult {
+				if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
+					return slotsMultiResp
+				}
+				return ValkeyResult{}
+			},
+			DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
+				// Always return MOVED to simulate infinite redirect loop
+				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('-', "MOVED 0 127.0.0.1:7001"), nil)}}
+			},
+		}
+		client, err := newClusterClient(
+			&ClientOption{
+				InitAddress: []string{":0"},
+				ClusterOption: ClusterOption{
+					MaxMovedRetries: 4,
+				},
+			},
+			func(dst string, opt *ClientOption) conn { return m },
+			newRetryer(defaultRetryDelayFn),
+		)
+		if err != nil {
+			t.Fatalf("unexpected err %v", err)
+		}
+
+		cmd := client.B().Get().Key("test").Cache()
+		resps := client.DoMultiCache(context.Background(), CT(cmd, time.Second))
+		if len(resps) != 1 {
+			t.Fatalf("expected 1 response, got %d", len(resps))
+		}
+		if resps[0].Error() != ErrMaxMovedRetriesExceeded {
+			t.Fatalf("expected ErrMaxMovedRetriesExceeded, got %v", resps[0].Error())
+		}
+	})
+
+	t.Run("Do succeeds within max MOVED retries", func(t *testing.T) {
+		attempts := 0
+		m := &mockConn{
+			DoFn: func(cmd Completed) ValkeyResult {
+				if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
+					return slotsMultiResp
+				}
+				attempts++
+				// Return MOVED twice, then success
+				if attempts <= 2 {
+					return newResult(strmsg('-', "MOVED 0 127.0.0.1:7001"), nil)
+				}
+				return newResult(strmsg('+', "OK"), nil)
+			},
+		}
+		client, err := newClusterClient(
+			&ClientOption{
+				InitAddress: []string{":0"},
+				ClusterOption: ClusterOption{
+					MaxMovedRetries: 3,
+				},
+			},
+			func(dst string, opt *ClientOption) conn { return m },
+			newRetryer(defaultRetryDelayFn),
+		)
+		if err != nil {
+			t.Fatalf("unexpected err %v", err)
+		}
+
+		cmd := client.B().Get().Key("test").Build()
+		resp := client.Do(context.Background(), cmd)
+		if v, err := resp.ToString(); err != nil || v != "OK" {
+			t.Fatalf("expected OK, got %v %v", v, err)
+		}
+		if attempts != 3 {
+			t.Fatalf("expected 3 attempts, got %d", attempts)
+		}
+	})
+
+	t.Run("Do with MaxMovedRetries=0 allows unlimited retries", func(t *testing.T) {
+		attempts := 0
+		m := &mockConn{
+			DoFn: func(cmd Completed) ValkeyResult {
+				if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
+					return slotsMultiResp
+				}
+				attempts++
+				// Return MOVED 10 times, then success
+				if attempts <= 10 {
+					return newResult(strmsg('-', "MOVED 0 127.0.0.1:7001"), nil)
+				}
+				return newResult(strmsg('+', "OK"), nil)
+			},
+		}
+		client, err := newClusterClient(
+			&ClientOption{
+				InitAddress: []string{":0"},
+				ClusterOption: ClusterOption{
+					MaxMovedRetries: 0, // 0 means unlimited
+				},
+			},
+			func(dst string, opt *ClientOption) conn { return m },
+			newRetryer(defaultRetryDelayFn),
+		)
+		if err != nil {
+			t.Fatalf("unexpected err %v", err)
+		}
+
+		cmd := client.B().Get().Key("test").Build()
+		resp := client.Do(context.Background(), cmd)
+		if v, err := resp.ToString(); err != nil || v != "OK" {
+			t.Fatalf("expected OK, got %v %v", v, err)
+		}
+		if attempts != 11 {
+			t.Fatalf("expected 11 attempts, got %d", attempts)
+		}
+	})
+}
+
 func TestClusterClientCacheASKRetry(t *testing.T) {
 	defer ShouldNotLeak(SetupLeakDetection())
 
