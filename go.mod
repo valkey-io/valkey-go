@@ -1,4 +1,4 @@
-module github.com/nirchetrit/valkey-go
+module github.com/valkey-io/valkey-go
 
 go 1.23.0
 
