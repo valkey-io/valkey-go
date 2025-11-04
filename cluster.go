@@ -904,14 +904,16 @@ retry:
 	if len(retries.m) != 0 {
 		if retries.Redirects > 0 {
 			if c.opt.ClusterOption.MaxMovedRetries > 0 && int(retries.MovedRetries) > c.opt.ClusterOption.MaxMovedRetries {
+				// Set error for all responses that haven't succeeded yet
 				for i := range results.s {
-					if results.s[i].err == nil && results.s[i].val.Error() != nil {
+					if results.s[i].NonValkeyError() != nil || results.s[i].val.Error() != nil {
 						results.s[i] = newErrResult(ErrMaxMovedRetriesExceeded)
 					}
 				}
 				return results.s
 			}
 			retries.Redirects = 0
+			retries.MovedRetries = 0 // Reset for next retry loop
 			goto retry
 		}
 		if retries.RetryDelay >= 0 {
@@ -1287,14 +1289,16 @@ retry:
 	if len(retries.m) != 0 {
 		if retries.Redirects > 0 {
 			if c.opt.ClusterOption.MaxMovedRetries > 0 && int(retries.MovedRetries) > c.opt.ClusterOption.MaxMovedRetries {
+				// Set error for all responses that haven't succeeded yet
 				for i := range results.s {
-					if results.s[i].err == nil && results.s[i].val.Error() != nil {
+					if results.s[i].NonValkeyError() != nil || results.s[i].val.Error() != nil {
 						results.s[i] = newErrResult(ErrMaxMovedRetriesExceeded)
 					}
 				}
 				return results.s
 			}
 			retries.Redirects = 0
+			retries.MovedRetries = 0 // Reset for next retry loop
 			goto retry
 		}
 		if retries.RetryDelay >= 0 {

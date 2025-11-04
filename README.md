@@ -506,6 +506,7 @@ The `MaxMovedRetries` option prevents infinite redirect loops when the Valkey cl
 - **Default**: `0` (unlimited retries)
 - **Usage**: Set to a positive integer to limit the number of `MOVED` redirects before returning `ErrMaxMovedRetriesExceeded`
 - **Behavior**: When the limit is exceeded, the client returns `valkey.ErrMaxMovedRetriesExceeded` instead of continuing to follow redirects
+- **Multi-command operations**: For `DoMulti()` and `DoMultiCache()`, the limit applies to the total number of `MOVED` responses received across all commands in the batch during a single retry loop. The counter is reset between retry loops, allowing each retry attempt to independently track redirects.
 
 This protection applies to all cluster client methods: `Do()`, `DoCache()`, `DoMulti()`, and `DoMultiCache()`.
 
