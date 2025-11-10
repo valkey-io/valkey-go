@@ -11,7 +11,7 @@ Client side caching metrics:
 - `valkey_do_cache_miss`: number of cache miss on client side
 - `valkey_do_cache_hits`: number of cache hits on client side
 
-These metrics can include an optional `key_pattern` label to track cache performance by resource type (see below).
+These metrics can include additional labels using `CacheLabeler` (see below).
 
 Client side command metrics:
  - `valkey_command_duration_seconds`: histogram of command duration
@@ -26,6 +26,7 @@ import (
 
     "github.com/valkey-io/valkey-go"
     "github.com/valkey-io/valkey-go/valkeyotel"
+    "go.opentelemetry.io/otel/attribute"
 )
 
 func main() {
@@ -39,12 +40,19 @@ func main() {
     ctx := context.Background()
     client.DoCache(ctx, client.B().Get().Key("mykey").Cache(), time.Minute)
 
-    // Add key_pattern label to cache metrics
-    ctxWithPattern := valkeyotel.WithCacheKeyPattern(ctx, "book")
-    client.DoCache(ctxWithPattern, client.B().Get().Key("book:123").Cache(), time.Minute)
+    // Add custom labels to cache metrics using CacheLabeler
+    bookLabeler := &valkeyotel.CacheLabeler{}
+    bookLabeler.Add(attribute.String("key_pattern", "book"))
+    ctxBook := valkeyotel.ContextWithCacheLabeler(ctx, bookLabeler)
+    client.DoCache(ctxBook, client.B().Get().Key("book:123").Cache(), time.Minute)
 
-    // Track different resource types
-    ctxAuthor := valkeyotel.WithCacheKeyPattern(ctx, "author")
+    // Track with multiple attributes
+    authorLabeler := &valkeyotel.CacheLabeler{}
+    authorLabeler.Add(
+        attribute.String("key_pattern", "author"),
+        attribute.String("tenant", "acme"),
+    )
+    ctxAuthor := valkeyotel.ContextWithCacheLabeler(ctx, authorLabeler)
     client.DoCache(ctxAuthor, client.B().Get().Key("author:456").Cache(), time.Minute)
 }
 ```

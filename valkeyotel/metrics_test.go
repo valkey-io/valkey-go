@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
@@ -292,25 +293,42 @@ func int64CountMetricWithAttrs(metrics metricdata.ResourceMetrics, name string, 
 	return 0
 }
 
-func TestWithCacheKeyPattern(t *testing.T) {
-	t.Run("cache metrics with key pattern", func(t *testing.T) {
+func TestCacheLabeler(t *testing.T) {
+	t.Run("labeler basic operations", func(t *testing.T) {
 		ctx := context.Background()
 
-		// Test WithCacheKeyPattern
-		ctxWithPattern := WithCacheKeyPattern(ctx, "book")
-		pattern, ok := getCacheKeyPattern(ctxWithPattern)
-		if !ok || pattern != "book" {
-			t.Errorf("getCacheKeyPattern: got (%s, %v), want (book, true)", pattern, ok)
+		// Test ContextWithCacheLabeler
+		labeler := &CacheLabeler{}
+		labeler.Add(attribute.String("key_pattern", "book"))
+		ctxWithLabeler := ContextWithCacheLabeler(ctx, labeler)
+
+		retrieved := LabelerFromContext(ctxWithLabeler)
+		attrs := retrieved.Get()
+		if len(attrs) != 1 {
+			t.Errorf("labeler attributes length: got %d, want 1", len(attrs))
+		}
+		if attrs[0].Key != "key_pattern" || attrs[0].Value.AsString() != "book" {
+			t.Errorf("labeler attribute: got %v, want key_pattern=book", attrs[0])
 		}
 
-		// Test without pattern
-		pattern, ok = getCacheKeyPattern(ctx)
-		if ok || pattern != "" {
-			t.Errorf("getCacheKeyPattern without pattern: got (%s, %v), want ('', false)", pattern, ok)
+		// Test LabelerFromContext without labeler
+		emptyLabeler := LabelerFromContext(ctx)
+		if len(emptyLabeler.Get()) != 0 {
+			t.Errorf("empty labeler should have 0 attributes, got %d", len(emptyLabeler.Get()))
+		}
+
+		// Test Add with multiple attributes
+		labeler2 := &CacheLabeler{}
+		labeler2.Add(
+			attribute.String("key_pattern", "author"),
+			attribute.String("tenant", "acme"),
+		)
+		if len(labeler2.Get()) != 2 {
+			t.Errorf("labeler with 2 attributes: got %d, want 2", len(labeler2.Get()))
 		}
 	})
 
-	t.Run("cache metrics with different key patterns", func(t *testing.T) {
+	t.Run("cache metrics with labeler attributes", func(t *testing.T) {
 		client, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{"127.0.0.1:6379"}})
 		if err != nil {
 			t.Fatal(err)
@@ -328,21 +346,28 @@ func TestWithCacheKeyPattern(t *testing.T) {
 		oclient.Do(ctx, oclient.B().Set().Key("book:1").Value("Book One").Build())
 		oclient.Do(ctx, oclient.B().Set().Key("author:1").Value("Author One").Build())
 
-		// DoCache with "book" pattern - cache miss
-		ctxBook := WithCacheKeyPattern(ctx, "book")
+		// DoCache with "book" labeler - cache miss
+		bookLabeler := &CacheLabeler{}
+		bookLabeler.Add(attribute.String("key_pattern", "book"))
+		ctxBook := ContextWithCacheLabeler(ctx, bookLabeler)
 		oclient.DoCache(ctxBook, oclient.B().Get().Key("book:1").Cache(), time.Minute)
 
-		// DoCache with "book" pattern again - cache hit
+		// DoCache with "book" labeler again - cache hit
 		oclient.DoCache(ctxBook, oclient.B().Get().Key("book:1").Cache(), time.Minute)
 
-		// DoCache with "author" pattern - cache miss
-		ctxAuthor := WithCacheKeyPattern(ctx, "author")
+		// DoCache with "author" labeler and multiple attributes - cache miss
+		authorLabeler := &CacheLabeler{}
+		authorLabeler.Add(
+			attribute.String("key_pattern", "author"),
+			attribute.String("tenant", "test"),
+		)
+		ctxAuthor := ContextWithCacheLabeler(ctx, authorLabeler)
 		oclient.DoCache(ctxAuthor, oclient.B().Get().Key("author:1").Cache(), time.Minute)
 
-		// DoCache with "author" pattern again - cache hit
+		// DoCache with "author" labeler again - cache hit
 		oclient.DoCache(ctxAuthor, oclient.B().Get().Key("author:1").Cache(), time.Minute)
 
-		// DoCache without pattern - cache miss
+		// DoCache without labeler - cache miss
 		oclient.DoCache(ctx, oclient.B().Get().Key("other:1").Cache(), time.Minute)
 
 		// Collect metrics
@@ -362,7 +387,7 @@ func TestWithCacheKeyPattern(t *testing.T) {
 			t.Errorf("book cache hits: got %d, want 1", bookHits)
 		}
 
-		// Validate "author" metrics
+		// Validate "author" metrics (should have both key_pattern and tenant attributes)
 		authorMiss := int64CountMetricWithAttrs(metrics, "valkey_do_cache_miss", "key_pattern", "author")
 		if authorMiss != 1 {
 			t.Errorf("author cache miss: got %d, want 1", authorMiss)
