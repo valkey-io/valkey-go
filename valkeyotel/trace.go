@@ -117,18 +117,33 @@ type commandMetrics struct {
 
 func (c *commandMetrics) recordDuration(ctx context.Context, op string, now time.Time) {
 	opts := c.recordOpts
-	var attrs []attribute.KeyValue
 
+	// Check labeler once
+	labeler, hasLabeler := ctx.Value(labelerContextKey).(*Labeler)
+	labelerLen := 0
+	if hasLabeler {
+		labelerLen = len(labeler.attrs)
+	}
+
+	totalAttrs := 0
 	if c.opAttr {
-		attrs = append(attrs, attribute.String("operation", op))
+		totalAttrs++
 	}
+	totalAttrs += labelerLen
 
-	// Add labeler attributes if present
-	if labeler, ok := ctx.Value(labelerContextKey).(*Labeler); ok && len(labeler.attrs) > 0 {
-		attrs = append(attrs, labeler.attrs...)
-	}
+	if totalAttrs > 0 {
+		attrs := make([]attribute.KeyValue, totalAttrs)
+		idx := 0
 
-	if len(attrs) > 0 {
+		if c.opAttr {
+			attrs[idx] = attribute.String("operation", op)
+			idx++
+		}
+
+		if labelerLen > 0 {
+			copy(attrs[idx:], labeler.attrs)
+		}
+
 		opts = append(c.recordOpts, metric.WithAttributeSet(attribute.NewSet(attrs...)))
 	}
 
@@ -138,18 +153,32 @@ func (c *commandMetrics) recordDuration(ctx context.Context, op string, now time
 func (c *commandMetrics) recordError(ctx context.Context, op string, err error) {
 	if err != nil && !valkey.IsValkeyNil(err) {
 		opts := c.addOpts
-		var attrs []attribute.KeyValue
 
+		labeler, hasLabeler := ctx.Value(labelerContextKey).(*Labeler)
+		labelerLen := 0
+		if hasLabeler {
+			labelerLen = len(labeler.attrs)
+		}
+
+		totalAttrs := 0
 		if c.opAttr {
-			attrs = append(attrs, attribute.String("operation", op))
+			totalAttrs++
 		}
+		totalAttrs += labelerLen
 
-		// Add labeler attributes if present
-		if labeler, ok := ctx.Value(labelerContextKey).(*Labeler); ok && len(labeler.attrs) > 0 {
-			attrs = append(attrs, labeler.attrs...)
-		}
+		if totalAttrs > 0 {
+			attrs := make([]attribute.KeyValue, totalAttrs)
+			idx := 0
 
-		if len(attrs) > 0 {
+			if c.opAttr {
+				attrs[idx] = attribute.String("operation", op)
+				idx++
+			}
+
+			if labelerLen > 0 {
+				copy(attrs[idx:], labeler.attrs)
+			}
+
 			opts = append(c.addOpts, metric.WithAttributeSet(attribute.NewSet(attrs...)))
 		}
 
