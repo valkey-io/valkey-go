@@ -25,7 +25,7 @@ type contextKey struct{}
 var labelerContextKey = contextKey{}
 
 // Labeler is used to allow instrumentation to add additional attributes
-// to metrics (valkey_do_cache_hits and valkey_do_cache_miss).
+// to metrics.
 type Labeler struct {
 	attrs []attribute.KeyValue
 }
@@ -55,9 +55,13 @@ func LabelerFromContext(ctx context.Context) (*Labeler, bool) {
 //
 // Example:
 //
-//	labeler := &valkeyotel.Labeler{}
+//	// Check if labeler exists in context, create new context only if needed
+//	labeler, ok := valkeyotel.LabelerFromContext(ctx)
+//	if !ok {
+//		labeler = &valkeyotel.Labeler{}
+//		ctx = valkeyotel.ContextWithLabeler(ctx, labeler)
+//	}
 //	labeler.Add(attribute.String("key_pattern", "book"))
-//	ctx := valkeyotel.ContextWithLabeler(ctx, labeler)
 //	client.DoCache(ctx, client.B().Get().Key("book:123").Cache(), time.Minute)
 func ContextWithLabeler(ctx context.Context, labeler *Labeler) context.Context {
 	return context.WithValue(ctx, labelerContextKey, labeler)
@@ -114,18 +118,42 @@ type commandMetrics struct {
 
 func (c *commandMetrics) recordDuration(ctx context.Context, op string, now time.Time) {
 	opts := c.recordOpts
+	var attrs []attribute.KeyValue
+
 	if c.opAttr {
-		opts = append(c.recordOpts, metric.WithAttributeSet(attribute.NewSet(attribute.String("operation", op))))
+		attrs = append(attrs, attribute.String("operation", op))
 	}
+
+	// Add labeler attributes if present
+	if labeler, ok := ctx.Value(labelerContextKey).(*Labeler); ok && len(labeler.attrs) > 0 {
+		attrs = append(attrs, labeler.attrs...)
+	}
+
+	if len(attrs) > 0 {
+		opts = append(c.recordOpts, metric.WithAttributeSet(attribute.NewSet(attrs...)))
+	}
+
 	c.duration.Record(ctx, time.Since(now).Seconds(), opts...)
 }
 
 func (c *commandMetrics) recordError(ctx context.Context, op string, err error) {
 	if err != nil && !valkey.IsValkeyNil(err) {
 		opts := c.addOpts
+		var attrs []attribute.KeyValue
+
 		if c.opAttr {
-			opts = append(c.addOpts, metric.WithAttributeSet(attribute.NewSet(attribute.String("operation", op))))
+			attrs = append(attrs, attribute.String("operation", op))
 		}
+
+		// Add labeler attributes if present
+		if labeler, ok := ctx.Value(labelerContextKey).(*Labeler); ok && len(labeler.attrs) > 0 {
+			attrs = append(attrs, labeler.attrs...)
+		}
+
+		if len(attrs) > 0 {
+			opts = append(c.addOpts, metric.WithAttributeSet(attribute.NewSet(attrs...)))
+		}
+
 		c.errors.Add(ctx, 1, opts...)
 	}
 }

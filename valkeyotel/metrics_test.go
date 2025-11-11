@@ -293,7 +293,7 @@ func int64CountMetricWithAttrs(metrics metricdata.ResourceMetrics, name string, 
 	return 0
 }
 
-func TestCacheLabeler(t *testing.T) {
+func TestLabeler(t *testing.T) {
 	t.Run("labeler basic operations", func(t *testing.T) {
 		ctx := context.Background()
 
@@ -402,6 +402,58 @@ func TestCacheLabeler(t *testing.T) {
 		authorHits := int64CountMetricWithAttrs(metrics, "valkey_do_cache_hits", "key_pattern", "author")
 		if authorHits != 1 {
 			t.Errorf("author cache hits: got %d, want 1", authorHits)
+		}
+	})
+
+	t.Run("command metrics with labeler attributes", func(t *testing.T) {
+		client, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{"127.0.0.1:6379"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		mxp := metric.NewManualReader()
+		meterProvider := metric.NewMeterProvider(metric.WithReader(mxp))
+
+		oclient := WithClient(client, WithMeterProvider(meterProvider))
+		defer oclient.Close()
+
+		ctx := context.Background()
+
+		// Execute command with labeler
+		labeler := &Labeler{}
+		labeler.Add(attribute.String("service", "api"))
+		ctxWithLabeler := ContextWithLabeler(ctx, labeler)
+		oclient.Do(ctxWithLabeler, oclient.B().Set().Key("test:1").Value("value").Build())
+
+		// Collect metrics
+		metrics := metricdata.ResourceMetrics{}
+		if err := mxp.Collect(ctx, &metrics); err != nil {
+			t.Fatal(err)
+		}
+
+		// Verify command duration has the label
+		m := findMetric(metrics, "valkey_command_duration_seconds")
+		if m == nil {
+			t.Fatal("valkey_command_duration_seconds metric not found")
+		}
+
+		data, ok := m.(metricdata.Histogram[float64])
+		if !ok {
+			t.Fatalf("unexpected metric type: %T", m)
+		}
+
+		found := false
+		for _, dp := range data.DataPoints {
+			for _, attr := range dp.Attributes.ToSlice() {
+				if string(attr.Key) == "service" && attr.Value.AsString() == "api" {
+					found = true
+					break
+				}
+			}
+		}
+
+		if !found {
+			t.Error("command duration metric should have service=api attribute")
 		}
 	})
 }

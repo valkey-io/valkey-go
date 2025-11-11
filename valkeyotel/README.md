@@ -41,19 +41,26 @@ func main() {
     client.DoCache(ctx, client.B().Get().Key("mykey").Cache(), time.Minute)
 
     // Add custom labels to cache metrics using Labeler
-    bookLabeler := &valkeyotel.Labeler{}
+    // Check if labeler exists in context, create new context only if needed
+    bookLabeler, ok := valkeyotel.LabelerFromContext(ctx)
+    if !ok {
+        bookLabeler = &valkeyotel.Labeler{}
+        ctx = valkeyotel.ContextWithLabeler(ctx, bookLabeler)
+    }
     bookLabeler.Add(attribute.String("key_pattern", "book"))
-    ctxBook := valkeyotel.ContextWithLabeler(ctx, bookLabeler)
-    client.DoCache(ctxBook, client.B().Get().Key("book:123").Cache(), time.Minute)
+    client.DoCache(ctx, client.B().Get().Key("book:123").Cache(), time.Minute)
 
     // Track with multiple attributes
-    authorLabeler := &valkeyotel.Labeler{}
+    authorLabeler, ok := valkeyotel.LabelerFromContext(ctx)
+    if !ok {
+        authorLabeler = &valkeyotel.Labeler{}
+        ctx = valkeyotel.ContextWithLabeler(ctx, authorLabeler)
+    }
     authorLabeler.Add(
         attribute.String("key_pattern", "author"),
         attribute.String("tenant", "acme"),
     )
-    ctxAuthor := valkeyotel.ContextWithLabeler(ctx, authorLabeler)
-    client.DoCache(ctxAuthor, client.B().Get().Key("author:456").Cache(), time.Minute)
+    client.DoCache(ctx, client.B().Get().Key("author:456").Cache(), time.Minute)
 }
 ```
 
