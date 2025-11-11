@@ -1313,6 +1313,25 @@
     "since": "3.0.0",
     "group": "cluster"
   },
+  "CLUSTER CANCELMIGRATION": {
+    "summary": "Cancel slot migration operations",
+    "complexity": "O(N) where N is the number of active slot migrations",
+    "arguments": [
+      {
+        "name": "mode",
+        "type": "oneof",
+        "arguments": [
+          {
+            "name": "all",
+            "type": "pure-token",
+            "token": "ALL"
+          }
+        ]
+      }
+    ],
+    "since": "9.0.0",
+    "group": "cluster"
+  },
   "CLUSTER COUNT-FAILURE-REPORTS": {
     "summary": "Return the number of failure reports active for a given node",
     "complexity": "O(N) where N is the number of failure reports",
@@ -1421,6 +1440,12 @@
     "since": "3.0.0",
     "group": "cluster"
   },
+  "CLUSTER GETSLOTMIGRATIONS": {
+    "summary": "Return a list of recent slot migrations",
+    "complexity": "O(N) where N is the number of slot migration jobs",
+    "since": "9.0.0",
+    "group": "cluster"
+  },
   "CLUSTER INFO": {
     "summary": "Provides info about Valkey Cluster node state",
     "complexity": "O(1)",
@@ -1443,6 +1468,43 @@
     "summary": "Returns a list of all TCP links to and from peer nodes in cluster",
     "complexity": "O(N) where N is the total number of Cluster nodes",
     "since": "7.0.0",
+    "group": "cluster"
+  },
+  "CLUSTER MIGRATESLOTS": {
+    "summary": "Migrate hash slots to target nodes using atomic slot migration",
+    "complexity": "O(N) where N is the number of keys in the migrating slots",
+    "arguments": [
+      {
+        "name": "slot-migration-spec",
+        "type": "block",
+        "multiple": true,
+        "arguments": [
+          {
+            "name": "slotsrange-token",
+            "type": "pure-token",
+            "token": "SLOTSRANGE"
+          },
+          {
+            "name": "start-slot",
+            "type": "integer"
+          },
+          {
+            "name": "end-slot",
+            "type": "integer"
+          },
+          {
+            "name": "node-token",
+            "type": "pure-token",
+            "token": "NODE"
+          },
+          {
+            "name": "node-id",
+            "type": "string"
+          }
+        ]
+      }
+    ],
+    "since": "9.0.0",
     "group": "cluster"
   },
   "CLUSTER MEET": {
