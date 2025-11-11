@@ -118,33 +118,17 @@ type commandMetrics struct {
 func (c *commandMetrics) recordDuration(ctx context.Context, op string, now time.Time) {
 	opts := c.recordOpts
 
-	// Check labeler once
 	labeler, hasLabeler := ctx.Value(labelerContextKey).(*Labeler)
-	labelerLen := 0
-	if hasLabeler {
-		labelerLen = len(labeler.attrs)
-	}
+	hasLabelerAttrs := hasLabeler && len(labeler.attrs) > 0
 
-	totalAttrs := 0
-	if c.opAttr {
-		totalAttrs++
-	}
-	totalAttrs += labelerLen
-
-	if totalAttrs > 0 {
-		attrs := make([]attribute.KeyValue, totalAttrs)
-		idx := 0
-
-		if c.opAttr {
-			attrs[idx] = attribute.String("operation", op)
-			idx++
-		}
-
-		if labelerLen > 0 {
-			copy(attrs[idx:], labeler.attrs)
-		}
-
-		opts = append(c.recordOpts, metric.WithAttributeSet(attribute.NewSet(attrs...)))
+	if c.opAttr && hasLabelerAttrs {
+		opts = append(c.recordOpts,
+			metric.WithAttributeSet(attribute.NewSet(attribute.String("operation", op))),
+			metric.WithAttributeSet(attribute.NewSet(labeler.attrs...)))
+	} else if c.opAttr {
+		opts = append(c.recordOpts, metric.WithAttributeSet(attribute.NewSet(attribute.String("operation", op))))
+	} else if hasLabelerAttrs {
+		opts = append(c.recordOpts, metric.WithAttributeSet(attribute.NewSet(labeler.attrs...)))
 	}
 
 	c.duration.Record(ctx, time.Since(now).Seconds(), opts...)
@@ -155,31 +139,16 @@ func (c *commandMetrics) recordError(ctx context.Context, op string, err error) 
 		opts := c.addOpts
 
 		labeler, hasLabeler := ctx.Value(labelerContextKey).(*Labeler)
-		labelerLen := 0
-		if hasLabeler {
-			labelerLen = len(labeler.attrs)
-		}
+		hasLabelerAttrs := hasLabeler && len(labeler.attrs) > 0
 
-		totalAttrs := 0
-		if c.opAttr {
-			totalAttrs++
-		}
-		totalAttrs += labelerLen
-
-		if totalAttrs > 0 {
-			attrs := make([]attribute.KeyValue, totalAttrs)
-			idx := 0
-
-			if c.opAttr {
-				attrs[idx] = attribute.String("operation", op)
-				idx++
-			}
-
-			if labelerLen > 0 {
-				copy(attrs[idx:], labeler.attrs)
-			}
-
-			opts = append(c.addOpts, metric.WithAttributeSet(attribute.NewSet(attrs...)))
+		if c.opAttr && hasLabelerAttrs {
+			opts = append(c.addOpts,
+				metric.WithAttributeSet(attribute.NewSet(attribute.String("operation", op))),
+				metric.WithAttributeSet(attribute.NewSet(labeler.attrs...)))
+		} else if c.opAttr {
+			opts = append(c.addOpts, metric.WithAttributeSet(attribute.NewSet(attribute.String("operation", op))))
+		} else if hasLabelerAttrs {
+			opts = append(c.addOpts, metric.WithAttributeSet(attribute.NewSet(labeler.attrs...)))
 		}
 
 		c.errors.Add(ctx, 1, opts...)
