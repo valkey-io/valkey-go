@@ -11,7 +11,7 @@ Client side caching metrics:
 - `valkey_do_cache_miss`: number of cache miss on client side
 - `valkey_do_cache_hits`: number of cache hits on client side
 
-These metrics can include additional labels using `CacheLabeler` (see below).
+These metrics can include additional labels using `Labeler` (see below).
 
 Client side command metrics:
  - `valkey_command_duration_seconds`: histogram of command duration
@@ -40,19 +40,19 @@ func main() {
     ctx := context.Background()
     client.DoCache(ctx, client.B().Get().Key("mykey").Cache(), time.Minute)
 
-    // Add custom labels to cache metrics using CacheLabeler
-    bookLabeler := &valkeyotel.CacheLabeler{}
+    // Add custom labels to cache metrics using Labeler
+    bookLabeler := &valkeyotel.Labeler{}
     bookLabeler.Add(attribute.String("key_pattern", "book"))
-    ctxBook := valkeyotel.ContextWithCacheLabeler(ctx, bookLabeler)
+    ctxBook := valkeyotel.ContextWithLabeler(ctx, bookLabeler)
     client.DoCache(ctxBook, client.B().Get().Key("book:123").Cache(), time.Minute)
 
     // Track with multiple attributes
-    authorLabeler := &valkeyotel.CacheLabeler{}
+    authorLabeler := &valkeyotel.Labeler{}
     authorLabeler.Add(
         attribute.String("key_pattern", "author"),
         attribute.String("tenant", "acme"),
     )
-    ctxAuthor := valkeyotel.ContextWithCacheLabeler(ctx, authorLabeler)
+    ctxAuthor := valkeyotel.ContextWithLabeler(ctx, authorLabeler)
     client.DoCache(ctxAuthor, client.B().Get().Key("author:456").Cache(), time.Minute)
 }
 ```

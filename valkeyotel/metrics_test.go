@@ -297,12 +297,15 @@ func TestCacheLabeler(t *testing.T) {
 	t.Run("labeler basic operations", func(t *testing.T) {
 		ctx := context.Background()
 
-		// Test ContextWithCacheLabeler
-		labeler := &CacheLabeler{}
+		// Test ContextWithLabeler
+		labeler := &Labeler{}
 		labeler.Add(attribute.String("key_pattern", "book"))
-		ctxWithLabeler := ContextWithCacheLabeler(ctx, labeler)
+		ctxWithLabeler := ContextWithLabeler(ctx, labeler)
 
-		retrieved := LabelerFromContext(ctxWithLabeler)
+		retrieved, ok := LabelerFromContext(ctxWithLabeler)
+		if !ok {
+			t.Error("LabelerFromContext: labeler not found in context, want found")
+		}
 		attrs := retrieved.Get()
 		if len(attrs) != 1 {
 			t.Errorf("labeler attributes length: got %d, want 1", len(attrs))
@@ -312,13 +315,16 @@ func TestCacheLabeler(t *testing.T) {
 		}
 
 		// Test LabelerFromContext without labeler
-		emptyLabeler := LabelerFromContext(ctx)
+		emptyLabeler, ok := LabelerFromContext(ctx)
+		if ok {
+			t.Error("LabelerFromContext without labeler: got found, want not found")
+		}
 		if len(emptyLabeler.Get()) != 0 {
 			t.Errorf("empty labeler should have 0 attributes, got %d", len(emptyLabeler.Get()))
 		}
 
 		// Test Add with multiple attributes
-		labeler2 := &CacheLabeler{}
+		labeler2 := &Labeler{}
 		labeler2.Add(
 			attribute.String("key_pattern", "author"),
 			attribute.String("tenant", "acme"),
@@ -347,21 +353,21 @@ func TestCacheLabeler(t *testing.T) {
 		oclient.Do(ctx, oclient.B().Set().Key("author:1").Value("Author One").Build())
 
 		// DoCache with "book" labeler - cache miss
-		bookLabeler := &CacheLabeler{}
+		bookLabeler := &Labeler{}
 		bookLabeler.Add(attribute.String("key_pattern", "book"))
-		ctxBook := ContextWithCacheLabeler(ctx, bookLabeler)
+		ctxBook := ContextWithLabeler(ctx, bookLabeler)
 		oclient.DoCache(ctxBook, oclient.B().Get().Key("book:1").Cache(), time.Minute)
 
 		// DoCache with "book" labeler again - cache hit
 		oclient.DoCache(ctxBook, oclient.B().Get().Key("book:1").Cache(), time.Minute)
 
 		// DoCache with "author" labeler and multiple attributes - cache miss
-		authorLabeler := &CacheLabeler{}
+		authorLabeler := &Labeler{}
 		authorLabeler.Add(
 			attribute.String("key_pattern", "author"),
 			attribute.String("tenant", "test"),
 		)
-		ctxAuthor := ContextWithCacheLabeler(ctx, authorLabeler)
+		ctxAuthor := ContextWithLabeler(ctx, authorLabeler)
 		oclient.DoCache(ctxAuthor, oclient.B().Get().Key("author:1").Cache(), time.Minute)
 
 		// DoCache with "author" labeler again - cache hit

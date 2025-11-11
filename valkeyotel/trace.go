@@ -22,44 +22,45 @@ var (
 
 type contextKey struct{}
 
-var cacheLabelerContextKey = contextKey{}
+var labelerContextKey = contextKey{}
 
-// CacheLabeler is used to allow instrumentation to add additional attributes
-// to cache hit/miss metrics (valkey_do_cache_hits and valkey_do_cache_miss).
-type CacheLabeler struct {
+// Labeler is used to allow instrumentation to add additional attributes
+// to metrics (valkey_do_cache_hits and valkey_do_cache_miss).
+type Labeler struct {
 	attrs []attribute.KeyValue
 }
 
 // Add appends new attributes to the labeler.
-func (l *CacheLabeler) Add(attrs ...attribute.KeyValue) {
+func (l *Labeler) Add(attrs ...attribute.KeyValue) {
 	l.attrs = append(l.attrs, attrs...)
 }
 
 // Get returns the attributes added to the labeler.
-func (l *CacheLabeler) Get() []attribute.KeyValue {
+func (l *Labeler) Get() []attribute.KeyValue {
 	return l.attrs
 }
 
-// LabelerFromContext retrieves a CacheLabeler instance from the provided context.
-// If no labeler is found in the context, a new one is created and added to the context.
-func LabelerFromContext(ctx context.Context) *CacheLabeler {
-	if l, ok := ctx.Value(cacheLabelerContextKey).(*CacheLabeler); ok {
-		return l
+// LabelerFromContext retrieves a Labeler instance from the provided context.
+// It returns the labeler and a boolean indicating whether it was found.
+// If no labeler is found, returns a new empty labeler and false.
+func LabelerFromContext(ctx context.Context) (*Labeler, bool) {
+	if l, ok := ctx.Value(labelerContextKey).(*Labeler); ok {
+		return l, true
 	}
-	return &CacheLabeler{}
+	return &Labeler{}, false
 }
 
-// ContextWithCacheLabeler returns a new context with the provided CacheLabeler.
+// ContextWithLabeler returns a new context with the provided Labeler.
 // Attributes added to the labeler will be included in cache metrics.
 //
 // Example:
 //
-//	labeler := &valkeyotel.CacheLabeler{}
+//	labeler := &valkeyotel.Labeler{}
 //	labeler.Add(attribute.String("key_pattern", "book"))
-//	ctx := valkeyotel.ContextWithCacheLabeler(ctx, labeler)
+//	ctx := valkeyotel.ContextWithLabeler(ctx, labeler)
 //	client.DoCache(ctx, client.B().Get().Key("book:123").Cache(), time.Minute)
-func ContextWithCacheLabeler(ctx context.Context, labeler *CacheLabeler) context.Context {
-	return context.WithValue(ctx, cacheLabelerContextKey, labeler)
+func ContextWithLabeler(ctx context.Context, labeler *Labeler) context.Context {
+	return context.WithValue(ctx, labelerContextKey, labeler)
 }
 
 var _ valkey.Client = (*otelclient)(nil)
@@ -305,7 +306,7 @@ func (o *otelclient) Close() {
 
 func (o *otelclient) recordCacheHit(ctx context.Context) {
 	opts := o.addOpts
-	if labeler, ok := ctx.Value(cacheLabelerContextKey).(*CacheLabeler); ok && len(labeler.attrs) > 0 {
+	if labeler, ok := ctx.Value(labelerContextKey).(*Labeler); ok && len(labeler.attrs) > 0 {
 		opts = append(o.addOpts, metric.WithAttributeSet(attribute.NewSet(labeler.attrs...)))
 	}
 	o.cscHits.Add(ctx, 1, opts...)
@@ -313,7 +314,7 @@ func (o *otelclient) recordCacheHit(ctx context.Context) {
 
 func (o *otelclient) recordCacheMiss(ctx context.Context) {
 	opts := o.addOpts
-	if labeler, ok := ctx.Value(cacheLabelerContextKey).(*CacheLabeler); ok && len(labeler.attrs) > 0 {
+	if labeler, ok := ctx.Value(labelerContextKey).(*Labeler); ok && len(labeler.attrs) > 0 {
 		opts = append(o.addOpts, metric.WithAttributeSet(attribute.NewSet(labeler.attrs...)))
 	}
 	o.cscMiss.Add(ctx, 1, opts...)
