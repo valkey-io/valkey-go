@@ -44,7 +44,6 @@ func main() {
     // Check if labeler exists in context, create new context only if needed
     bookLabeler, ok := valkeyotel.LabelerFromContext(ctx)
     if !ok {
-        bookLabeler = &valkeyotel.Labeler{}
         ctx = valkeyotel.ContextWithLabeler(ctx, bookLabeler)
     }
     bookLabeler.Add(attribute.String("key_pattern", "book"))
@@ -53,7 +52,6 @@ func main() {
     // Track with multiple attributes
     authorLabeler, ok := valkeyotel.LabelerFromContext(ctx)
     if !ok {
-        authorLabeler = &valkeyotel.Labeler{}
         ctx = valkeyotel.ContextWithLabeler(ctx, authorLabeler)
     }
     authorLabeler.Add(

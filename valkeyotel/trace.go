@@ -58,7 +58,6 @@ func LabelerFromContext(ctx context.Context) (*Labeler, bool) {
 //	// Check if labeler exists in context, create new context only if needed
 //	labeler, ok := valkeyotel.LabelerFromContext(ctx)
 //	if !ok {
-//		labeler = &valkeyotel.Labeler{}
 //		ctx = valkeyotel.ContextWithLabeler(ctx, labeler)
 //	}
 //	labeler.Add(attribute.String("key_pattern", "book"))
