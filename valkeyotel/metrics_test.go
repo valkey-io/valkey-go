@@ -456,4 +456,223 @@ func TestLabeler(t *testing.T) {
 			t.Error("command duration metric should have service=api attribute")
 		}
 	})
+
+	t.Run("command metrics with operation attr and labeler", func(t *testing.T) {
+		client, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{"127.0.0.1:6379"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		mxp := metric.NewManualReader()
+		meterProvider := metric.NewMeterProvider(metric.WithReader(mxp))
+
+		// Enable operation metric attribute
+		oclient := WithClient(client, WithMeterProvider(meterProvider), WithOperationMetricAttr())
+		defer oclient.Close()
+
+		ctx := context.Background()
+
+		// Execute command with labeler and operation attr enabled
+		labeler := &Labeler{}
+		labeler.Add(attribute.String("tenant", "test-tenant"))
+		ctxWithLabeler := ContextWithLabeler(ctx, labeler)
+		oclient.Do(ctxWithLabeler, oclient.B().Set().Key("test:op:1").Value("value").Build())
+
+		// Collect metrics
+		metrics := metricdata.ResourceMetrics{}
+		if err := mxp.Collect(ctx, &metrics); err != nil {
+			t.Fatal(err)
+		}
+
+		// Verify command duration has both operation and labeler attributes
+		m := findMetric(metrics, "valkey_command_duration_seconds")
+		if m == nil {
+			t.Fatal("valkey_command_duration_seconds metric not found")
+		}
+
+		data, ok := m.(metricdata.Histogram[float64])
+		if !ok {
+			t.Fatalf("unexpected metric type: %T", m)
+		}
+
+		foundTenant := false
+		foundOperation := false
+		for _, dp := range data.DataPoints {
+			attrs := dp.Attributes.ToSlice()
+			for _, attr := range attrs {
+				if string(attr.Key) == "tenant" && attr.Value.AsString() == "test-tenant" {
+					foundTenant = true
+				}
+				if string(attr.Key) == "operation" && attr.Value.AsString() == "SET" {
+					foundOperation = true
+				}
+			}
+		}
+
+		if !foundTenant {
+			t.Error("command duration metric should have tenant=test-tenant attribute")
+		}
+		if !foundOperation {
+			t.Error("command duration metric should have operation=SET attribute")
+		}
+	})
+
+	t.Run("command error metrics with operation attr and labeler", func(t *testing.T) {
+		client, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{"127.0.0.1:6379"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		mxp := metric.NewManualReader()
+		meterProvider := metric.NewMeterProvider(metric.WithReader(mxp))
+
+		// Enable operation metric attribute
+		oclient := WithClient(client, WithMeterProvider(meterProvider), WithOperationMetricAttr())
+		defer oclient.Close()
+
+		ctx := context.Background()
+
+		labeler := &Labeler{}
+		labeler.Add(attribute.String("service", "error-test"))
+		ctxWithLabeler := ContextWithLabeler(ctx, labeler)
+
+		oclient.Do(ctx, oclient.B().Set().Key("test:error:1").Value("not-a-list").Build())
+		oclient.Do(ctxWithLabeler, oclient.B().Lpop().Key("test:error:1").Build())
+
+		metrics := metricdata.ResourceMetrics{}
+		if err := mxp.Collect(ctx, &metrics); err != nil {
+			t.Fatal(err)
+		}
+
+		m := findMetric(metrics, "valkey_command_errors")
+		if m == nil {
+			t.Fatal("valkey_command_errors metric not found")
+		}
+
+		data, ok := m.(metricdata.Sum[int64])
+		if !ok {
+			t.Fatalf("unexpected metric type: %T", m)
+		}
+
+		foundService := false
+		foundOperation := false
+		for _, dp := range data.DataPoints {
+			attrs := dp.Attributes.ToSlice()
+			for _, attr := range attrs {
+				if string(attr.Key) == "service" && attr.Value.AsString() == "error-test" {
+					foundService = true
+				}
+				if string(attr.Key) == "operation" && attr.Value.AsString() == "LPOP" {
+					foundOperation = true
+				}
+			}
+		}
+
+		if !foundService {
+			t.Error("command error metric should have service=error-test attribute")
+		}
+		if !foundOperation {
+			t.Error("command error metric should have operation=LPOP attribute")
+		}
+	})
+
+	t.Run("command error metrics with labeler only", func(t *testing.T) {
+		client, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{"127.0.0.1:6379"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		mxp := metric.NewManualReader()
+		meterProvider := metric.NewMeterProvider(metric.WithReader(mxp))
+
+		oclient := WithClient(client, WithMeterProvider(meterProvider))
+		defer oclient.Close()
+
+		ctx := context.Background()
+
+		labeler := &Labeler{}
+		labeler.Add(attribute.String("app", "test-app"))
+		ctxWithLabeler := ContextWithLabeler(ctx, labeler)
+
+		oclient.Do(ctx, oclient.B().Set().Key("test:error:2").Value("not-a-list").Build())
+		oclient.Do(ctxWithLabeler, oclient.B().Lpop().Key("test:error:2").Build())
+
+		metrics := metricdata.ResourceMetrics{}
+		if err := mxp.Collect(ctx, &metrics); err != nil {
+			t.Fatal(err)
+		}
+
+		m := findMetric(metrics, "valkey_command_errors")
+		if m == nil {
+			t.Fatal("valkey_command_errors metric not found")
+		}
+
+		data, ok := m.(metricdata.Sum[int64])
+		if !ok {
+			t.Fatalf("unexpected metric type: %T", m)
+		}
+
+		foundApp := false
+		for _, dp := range data.DataPoints {
+			attrs := dp.Attributes.ToSlice()
+			for _, attr := range attrs {
+				if string(attr.Key) == "app" && attr.Value.AsString() == "test-app" {
+					foundApp = true
+					break
+				}
+			}
+		}
+
+		if !foundApp {
+			t.Error("command error metric should have app=test-app attribute")
+		}
+	})
+
+	t.Run("command error metrics with operation attr only", func(t *testing.T) {
+		client, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{"127.0.0.1:6379"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		mxp := metric.NewManualReader()
+		meterProvider := metric.NewMeterProvider(metric.WithReader(mxp))
+
+		oclient := WithClient(client, WithMeterProvider(meterProvider), WithOperationMetricAttr())
+		defer oclient.Close()
+
+		ctx := context.Background()
+
+		oclient.Do(ctx, oclient.B().Set().Key("test:error:3").Value("not-a-list").Build())
+		oclient.Do(ctx, oclient.B().Lpop().Key("test:error:3").Build())
+
+		metrics := metricdata.ResourceMetrics{}
+		if err := mxp.Collect(ctx, &metrics); err != nil {
+			t.Fatal(err)
+		}
+
+		m := findMetric(metrics, "valkey_command_errors")
+		if m == nil {
+			t.Fatal("valkey_command_errors metric not found")
+		}
+
+		data, ok := m.(metricdata.Sum[int64])
+		if !ok {
+			t.Fatalf("unexpected metric type: %T", m)
+		}
+
+		foundOperation := false
+		for _, dp := range data.DataPoints {
+			attrs := dp.Attributes.ToSlice()
+			for _, attr := range attrs {
+				if string(attr.Key) == "operation" && attr.Value.AsString() == "LPOP" {
+					foundOperation = true
+					break
+				}
+			}
+		}
+
+		if !foundOperation {
+			t.Error("command error metric should have operation=LPOP attribute")
+		}
+	})
 }
