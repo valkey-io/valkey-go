@@ -1467,31 +1467,13 @@
         "multiple": true,
         "arguments": [
           {
-            "name": "slot-range",
-            "type": "block",
+            "name": ["start-slot", "end-slot"],
+            "type": ["integer", "integer"],
             "multiple": true,
-            "arguments": [
-              {
-                "name": "slotsrange-token",
-                "type": "pure-token",
-                "token": "SLOTSRANGE"
-              },
-              {
-                "name": "start-slot",
-                "type": "integer"
-              },
-              {
-                "name": "end-slot",
-                "type": "integer"
-              }
-            ]
+            "command": "SLOTSRANGE"
           },
           {
-            "name": "node-token",
-            "type": "pure-token",
-            "token": "NODE"
-          },
-          {
+            "command": "NODE",
             "name": "node-id",
             "type": "string"
           }

@@ -392,54 +392,33 @@ func (b Builder) ClusterMigrateslots() (c ClusterMigrateslots) {
 	return c
 }
 
-func (c ClusterMigrateslots) Slotsrange() ClusterMigrateslotsSlotMigrationSpecSlotRangeSlotsrangeTokenSlotsrange {
+func (c ClusterMigrateslots) Slotsrange() ClusterMigrateslotsSlotMigrationSpecSlotsrange {
 	c.cs.s = append(c.cs.s, "SLOTSRANGE")
-	return (ClusterMigrateslotsSlotMigrationSpecSlotRangeSlotsrangeTokenSlotsrange)(c)
+	return (ClusterMigrateslotsSlotMigrationSpecSlotsrange)(c)
 }
 
-type ClusterMigrateslotsSlotMigrationSpecNodeId Incomplete
+type ClusterMigrateslotsSlotMigrationSpecNode Incomplete
 
-func (c ClusterMigrateslotsSlotMigrationSpecNodeId) Slotsrange() ClusterMigrateslotsSlotMigrationSpecSlotRangeSlotsrangeTokenSlotsrange {
+func (c ClusterMigrateslotsSlotMigrationSpecNode) Slotsrange() ClusterMigrateslotsSlotMigrationSpecSlotsrange {
 	c.cs.s = append(c.cs.s, "SLOTSRANGE")
-	return (ClusterMigrateslotsSlotMigrationSpecSlotRangeSlotsrangeTokenSlotsrange)(c)
+	return (ClusterMigrateslotsSlotMigrationSpecSlotsrange)(c)
 }
 
-func (c ClusterMigrateslotsSlotMigrationSpecNodeId) Build() Completed {
+func (c ClusterMigrateslotsSlotMigrationSpecNode) Build() Completed {
 	c.cs.Build()
 	return Completed{cs: c.cs, cf: uint16(c.cf), ks: c.ks}
 }
 
-type ClusterMigrateslotsSlotMigrationSpecNodeTokenNode Incomplete
+type ClusterMigrateslotsSlotMigrationSpecSlotsrange Incomplete
 
-func (c ClusterMigrateslotsSlotMigrationSpecNodeTokenNode) NodeId(nodeId string) ClusterMigrateslotsSlotMigrationSpecNodeId {
-	c.cs.s = append(c.cs.s, nodeId)
-	return (ClusterMigrateslotsSlotMigrationSpecNodeId)(c)
+func (c ClusterMigrateslotsSlotMigrationSpecSlotsrange) Slotsrange(startSlot int64, endSlot int64) ClusterMigrateslotsSlotMigrationSpecSlotsrange {
+	c.cs.s = append(c.cs.s, strconv.FormatInt(startSlot, 10), strconv.FormatInt(endSlot, 10))
+	return c
 }
 
-type ClusterMigrateslotsSlotMigrationSpecSlotRangeEndSlot Incomplete
-
-func (c ClusterMigrateslotsSlotMigrationSpecSlotRangeEndSlot) Slotsrange() ClusterMigrateslotsSlotMigrationSpecSlotRangeSlotsrangeTokenSlotsrange {
-	c.cs.s = append(c.cs.s, "SLOTSRANGE")
-	return (ClusterMigrateslotsSlotMigrationSpecSlotRangeSlotsrangeTokenSlotsrange)(c)
-}
-
-func (c ClusterMigrateslotsSlotMigrationSpecSlotRangeEndSlot) Node() ClusterMigrateslotsSlotMigrationSpecNodeTokenNode {
-	c.cs.s = append(c.cs.s, "NODE")
-	return (ClusterMigrateslotsSlotMigrationSpecNodeTokenNode)(c)
-}
-
-type ClusterMigrateslotsSlotMigrationSpecSlotRangeSlotsrangeTokenSlotsrange Incomplete
-
-func (c ClusterMigrateslotsSlotMigrationSpecSlotRangeSlotsrangeTokenSlotsrange) StartSlot(startSlot int64) ClusterMigrateslotsSlotMigrationSpecSlotRangeStartSlot {
-	c.cs.s = append(c.cs.s, strconv.FormatInt(startSlot, 10))
-	return (ClusterMigrateslotsSlotMigrationSpecSlotRangeStartSlot)(c)
-}
-
-type ClusterMigrateslotsSlotMigrationSpecSlotRangeStartSlot Incomplete
-
-func (c ClusterMigrateslotsSlotMigrationSpecSlotRangeStartSlot) EndSlot(endSlot int64) ClusterMigrateslotsSlotMigrationSpecSlotRangeEndSlot {
-	c.cs.s = append(c.cs.s, strconv.FormatInt(endSlot, 10))
-	return (ClusterMigrateslotsSlotMigrationSpecSlotRangeEndSlot)(c)
+func (c ClusterMigrateslotsSlotMigrationSpecSlotsrange) Node(nodeId string) ClusterMigrateslotsSlotMigrationSpecNode {
+	c.cs.s = append(c.cs.s, "NODE", nodeId)
+	return (ClusterMigrateslotsSlotMigrationSpecNode)(c)
 }
 
 type ClusterMyid Incomplete

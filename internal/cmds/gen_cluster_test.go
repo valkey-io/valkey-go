@@ -26,7 +26,7 @@ func cluster0(s Builder) {
 	s.ClusterLinks().Build()
 	s.ClusterMeet().Ip("1").Port(1).ClusterBusPort(1).Build()
 	s.ClusterMeet().Ip("1").Port(1).Build()
-	s.ClusterMigrateslots().Slotsrange().StartSlot(1).EndSlot(1).Slotsrange().StartSlot(1).EndSlot(1).Node().NodeId("1").Build()
+	s.ClusterMigrateslots().Slotsrange().Slotsrange(1, 1).Slotsrange(1, 1).Node("1").Slotsrange().Slotsrange(1, 1).Slotsrange(1, 1).Node("1").Build()
 	s.ClusterMyid().Build()
 	s.ClusterMyshardid().Build()
 	s.ClusterNodes().Build()
