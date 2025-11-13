@@ -1313,22 +1313,9 @@
     "since": "3.0.0",
     "group": "cluster"
   },
-  "CLUSTER CANCELMIGRATION": {
+  "CLUSTER CANCELSLOTMIGRATIONS": {
     "summary": "Cancel slot migration operations",
     "complexity": "O(N) where N is the number of active slot migrations",
-    "arguments": [
-      {
-        "name": "mode",
-        "type": "oneof",
-        "arguments": [
-          {
-            "name": "all",
-            "type": "pure-token",
-            "token": "ALL"
-          }
-        ]
-      }
-    ],
     "since": "9.0.0",
     "group": "cluster"
   },
@@ -1480,17 +1467,24 @@
         "multiple": true,
         "arguments": [
           {
-            "name": "slotsrange-token",
-            "type": "pure-token",
-            "token": "SLOTSRANGE"
-          },
-          {
-            "name": "start-slot",
-            "type": "integer"
-          },
-          {
-            "name": "end-slot",
-            "type": "integer"
+            "name": "slot-range",
+            "type": "block",
+            "multiple": true,
+            "arguments": [
+              {
+                "name": "slotsrange-token",
+                "type": "pure-token",
+                "token": "SLOTSRANGE"
+              },
+              {
+                "name": "start-slot",
+                "type": "integer"
+              },
+              {
+                "name": "end-slot",
+                "type": "integer"
+              }
+            ]
           },
           {
             "name": "node-token",

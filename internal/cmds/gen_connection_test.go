@@ -1462,6 +1462,7 @@ func TestCommand_InitSlot_connection(t *testing.T) {
 	t.Run("11", func(t *testing.T) { connection11(s) })
 	t.Run("12", func(t *testing.T) { connection12(s) })
 	t.Run("13", func(t *testing.T) { connection13(s) })
+	t.Run("14", func(t *testing.T) { connection14(s) })
 }
 
 func TestCommand_NoSlot_connection(t *testing.T) {
@@ -1480,4 +1481,5 @@ func TestCommand_NoSlot_connection(t *testing.T) {
 	t.Run("11", func(t *testing.T) { connection11(s) })
 	t.Run("12", func(t *testing.T) { connection12(s) })
 	t.Run("13", func(t *testing.T) { connection13(s) })
+	t.Run("14", func(t *testing.T) { connection14(s) })
 }

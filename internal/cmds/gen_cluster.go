@@ -83,22 +83,15 @@ func (c ClusterBumpepoch) Build() Completed {
 	return Completed{cs: c.cs, cf: uint16(c.cf), ks: c.ks}
 }
 
-type ClusterCancelmigration Incomplete
+type ClusterCancelslotmigrations Incomplete
 
-func (b Builder) ClusterCancelmigration() (c ClusterCancelmigration) {
-	c = ClusterCancelmigration{cs: get(), ks: b.ks}
-	c.cs.s = append(c.cs.s, "CLUSTER", "CANCELMIGRATION")
+func (b Builder) ClusterCancelslotmigrations() (c ClusterCancelslotmigrations) {
+	c = ClusterCancelslotmigrations{cs: get(), ks: b.ks}
+	c.cs.s = append(c.cs.s, "CLUSTER", "CANCELSLOTMIGRATIONS")
 	return c
 }
 
-func (c ClusterCancelmigration) All() ClusterCancelmigrationModeAll {
-	c.cs.s = append(c.cs.s, "ALL")
-	return (ClusterCancelmigrationModeAll)(c)
-}
-
-type ClusterCancelmigrationModeAll Incomplete
-
-func (c ClusterCancelmigrationModeAll) Build() Completed {
+func (c ClusterCancelslotmigrations) Build() Completed {
 	c.cs.Build()
 	return Completed{cs: c.cs, cf: uint16(c.cf), ks: c.ks}
 }
@@ -399,23 +392,16 @@ func (b Builder) ClusterMigrateslots() (c ClusterMigrateslots) {
 	return c
 }
 
-func (c ClusterMigrateslots) Slotsrange() ClusterMigrateslotsSlotMigrationSpecSlotsrangeTokenSlotsrange {
+func (c ClusterMigrateslots) Slotsrange() ClusterMigrateslotsSlotMigrationSpecSlotRangeSlotsrangeTokenSlotsrange {
 	c.cs.s = append(c.cs.s, "SLOTSRANGE")
-	return (ClusterMigrateslotsSlotMigrationSpecSlotsrangeTokenSlotsrange)(c)
-}
-
-type ClusterMigrateslotsSlotMigrationSpecEndSlot Incomplete
-
-func (c ClusterMigrateslotsSlotMigrationSpecEndSlot) Node() ClusterMigrateslotsSlotMigrationSpecNodeTokenNode {
-	c.cs.s = append(c.cs.s, "NODE")
-	return (ClusterMigrateslotsSlotMigrationSpecNodeTokenNode)(c)
+	return (ClusterMigrateslotsSlotMigrationSpecSlotRangeSlotsrangeTokenSlotsrange)(c)
 }
 
 type ClusterMigrateslotsSlotMigrationSpecNodeId Incomplete
 
-func (c ClusterMigrateslotsSlotMigrationSpecNodeId) Slotsrange() ClusterMigrateslotsSlotMigrationSpecSlotsrangeTokenSlotsrange {
+func (c ClusterMigrateslotsSlotMigrationSpecNodeId) Slotsrange() ClusterMigrateslotsSlotMigrationSpecSlotRangeSlotsrangeTokenSlotsrange {
 	c.cs.s = append(c.cs.s, "SLOTSRANGE")
-	return (ClusterMigrateslotsSlotMigrationSpecSlotsrangeTokenSlotsrange)(c)
+	return (ClusterMigrateslotsSlotMigrationSpecSlotRangeSlotsrangeTokenSlotsrange)(c)
 }
 
 func (c ClusterMigrateslotsSlotMigrationSpecNodeId) Build() Completed {
@@ -430,18 +416,30 @@ func (c ClusterMigrateslotsSlotMigrationSpecNodeTokenNode) NodeId(nodeId string)
 	return (ClusterMigrateslotsSlotMigrationSpecNodeId)(c)
 }
 
-type ClusterMigrateslotsSlotMigrationSpecSlotsrangeTokenSlotsrange Incomplete
+type ClusterMigrateslotsSlotMigrationSpecSlotRangeEndSlot Incomplete
 
-func (c ClusterMigrateslotsSlotMigrationSpecSlotsrangeTokenSlotsrange) StartSlot(startSlot int64) ClusterMigrateslotsSlotMigrationSpecStartSlot {
-	c.cs.s = append(c.cs.s, strconv.FormatInt(startSlot, 10))
-	return (ClusterMigrateslotsSlotMigrationSpecStartSlot)(c)
+func (c ClusterMigrateslotsSlotMigrationSpecSlotRangeEndSlot) Slotsrange() ClusterMigrateslotsSlotMigrationSpecSlotRangeSlotsrangeTokenSlotsrange {
+	c.cs.s = append(c.cs.s, "SLOTSRANGE")
+	return (ClusterMigrateslotsSlotMigrationSpecSlotRangeSlotsrangeTokenSlotsrange)(c)
 }
 
-type ClusterMigrateslotsSlotMigrationSpecStartSlot Incomplete
+func (c ClusterMigrateslotsSlotMigrationSpecSlotRangeEndSlot) Node() ClusterMigrateslotsSlotMigrationSpecNodeTokenNode {
+	c.cs.s = append(c.cs.s, "NODE")
+	return (ClusterMigrateslotsSlotMigrationSpecNodeTokenNode)(c)
+}
 
-func (c ClusterMigrateslotsSlotMigrationSpecStartSlot) EndSlot(endSlot int64) ClusterMigrateslotsSlotMigrationSpecEndSlot {
+type ClusterMigrateslotsSlotMigrationSpecSlotRangeSlotsrangeTokenSlotsrange Incomplete
+
+func (c ClusterMigrateslotsSlotMigrationSpecSlotRangeSlotsrangeTokenSlotsrange) StartSlot(startSlot int64) ClusterMigrateslotsSlotMigrationSpecSlotRangeStartSlot {
+	c.cs.s = append(c.cs.s, strconv.FormatInt(startSlot, 10))
+	return (ClusterMigrateslotsSlotMigrationSpecSlotRangeStartSlot)(c)
+}
+
+type ClusterMigrateslotsSlotMigrationSpecSlotRangeStartSlot Incomplete
+
+func (c ClusterMigrateslotsSlotMigrationSpecSlotRangeStartSlot) EndSlot(endSlot int64) ClusterMigrateslotsSlotMigrationSpecSlotRangeEndSlot {
 	c.cs.s = append(c.cs.s, strconv.FormatInt(endSlot, 10))
-	return (ClusterMigrateslotsSlotMigrationSpecEndSlot)(c)
+	return (ClusterMigrateslotsSlotMigrationSpecSlotRangeEndSlot)(c)
 }
 
 type ClusterMyid Incomplete
