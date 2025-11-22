@@ -480,13 +480,26 @@ client, err := valkey.NewClient(valkey.ClientOption{
         MasterSet: "my_master",
     },
 })
+// connect to valkey node through unix socket
+client, err := valkey.NewClient(
+	valkey.ClientOption{
+		DialCtxFn: func(ctx context.Context, s string, d *net.Dialer, c *tls.Config) (conn net.Conn, err error) {
+		  return d.DialContext(ctx, "unix", s)
+		},
+		InitAddress: []string{"/run/valkey.sock"}
+})
 ```
 
 ### Valkey URL
 
 You can use `ParseURL` or `MustParseURL` to construct a `ClientOption`.
 
-The provided URL must be started with either `redis://`, `rediss://` or `unix://`.
+The provided URL must be started with either `redis://`, `rediss://` or `unix://`	
+	InitAddress = []string{"/run/valkey.sock"}
+	opt.DialCtxFn = func(ctx context.Context, s string, d *net.Dialer, c *tls.Config) (conn net.Conn, err error) {
+	    return d.DialContext(ctx, "unix", s)
+	}
+	.
 
 Currently supported url parameters are `db`, `dial_timeout`, `write_timeout`, `addr`, `protocol`, `client_cache`, `client_name`, `max_retries`, and `master_set`.
 
