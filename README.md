@@ -481,12 +481,11 @@ client, err := valkey.NewClient(valkey.ClientOption{
     },
 })
 // connect to valkey node through unix socket
-client, err := valkey.NewClient(
-	valkey.ClientOption{
-		DialCtxFn: func(ctx context.Context, s string, d *net.Dialer, c *tls.Config) (conn net.Conn, err error) {
-		  return d.DialContext(ctx, "unix", s)
-		},
-		InitAddress: []string{"/run/valkey.sock"}
+client, err := valkey.NewClient(valkey.ClientOption{
+    InitAddress: []string{"/run/valkey.sock"},
+    DialCtxFn: func(ctx context.Context, s string, d *net.Dialer, c *tls.Config) (conn net.Conn, err error) {
+        return d.DialContext(ctx, "unix", s)
+    },
 })
 ```
 
