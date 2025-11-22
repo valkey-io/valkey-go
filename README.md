@@ -497,6 +497,8 @@ client, err = valkey.NewClient(valkey.MustParseURL("redis://127.0.0.1:7001?addr=
 client, err = valkey.NewClient(valkey.MustParseURL("redis://127.0.0.1:6379/0"))
 // connect to a valkey sentinel
 client, err = valkey.NewClient(valkey.MustParseURL("redis://127.0.0.1:26379/0?master_set=my_master"))
+// connecting to valkey node using unix socket
+client, err = valkey.NewClient(valkey.MustParseURL("unix:///run/valkey.conf?db=0"))
 ```
 
 ### Availability Zone Affinity Routing
