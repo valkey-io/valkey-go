@@ -482,34 +482,6 @@ client, err := valkey.NewClient(valkey.ClientOption{
 })
 ```
 
-### Cluster Options
-
-When connecting to a Valkey cluster, you can configure additional options using `ClusterOption`:
-
-```golang
-// Connect to a valkey cluster with MaxMovedRetries limit
-client, err := valkey.NewClient(valkey.ClientOption{
-    InitAddress: []string{"127.0.0.1:7001", "127.0.0.1:7002", "127.0.0.1:7003"},
-    ClusterOption: valkey.ClusterOption{
-        // MaxMovedRetries limits the number of MOVED redirect retries.
-        // Set to 0 (default) for unlimited retries, or a positive value to prevent
-        // infinite redirect loops in case of cluster misconfiguration.
-        MaxMovedRetries: 5,
-    },
-})
-```
-
-#### MaxMovedRetries
-
-The `MaxMovedRetries` option prevents infinite redirect loops when the Valkey cluster returns `MOVED` responses. This can occur during cluster resharding, topology changes, or misconfiguration.
-
-- **Default**: `0` (unlimited retries)
-- **Usage**: Set to a positive integer to limit the number of `MOVED` redirects before returning `ErrMaxMovedRetriesExceeded`
-- **Behavior**: When the limit is exceeded, the client returns `valkey.ErrMaxMovedRetriesExceeded` instead of continuing to follow redirects
-- **Multi-command operations**: For `DoMulti()` and `DoMultiCache()`, the limit applies to the total number of `MOVED` responses received across all commands in the batch during a single retry loop. The counter is reset between retry loops, allowing each retry attempt to independently track redirects.
-
-This protection applies to all cluster client methods: `Do()`, `DoCache()`, `DoMulti()`, and `DoMultiCache()`.
-
 ### Valkey URL
 
 You can use `ParseURL` or `MustParseURL` to construct a `ClientOption`.
