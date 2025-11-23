@@ -1,4 +1,4 @@
-module github.com/nirchetrit/valkey-go
+module github.com/valkey-io/valkey-go
 
 go 1.23.0
 
@@ -6,7 +6,6 @@ toolchain go1.23.4
 
 require (
 	github.com/onsi/gomega v1.36.2
-	github.com/valkey-io/valkey-go v1.0.67
 	golang.org/x/sys v0.31.0
 )
 
