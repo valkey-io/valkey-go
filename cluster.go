@@ -879,6 +879,7 @@ func (c *clusterClient) DoMulti(ctx context.Context, multi ...Completed) []Valke
 	results := resultsp.Get(len(multi), len(multi))
 
 	attempts := 1
+	movedRetries := 0
 
 retry:
 	retries.RetryDelay = -1 // Assume no retry. Because a client retry flag can be set to false.
@@ -903,14 +904,17 @@ retry:
 
 	if len(retries.m) != 0 {
 		if retries.Redirects > 0 {
-			if c.opt.ClusterOption.MaxMovedRetries > 0 && int(retries.MovedRetries) > c.opt.ClusterOption.MaxMovedRetries {
-				// Set error for all responses that haven't succeeded yet
-				for i := range results.s {
-					if results.s[i].NonValkeyError() != nil || results.s[i].val.Error() != nil {
-						results.s[i] = newErrResult(ErrMaxMovedRetriesExceeded)
+			if retries.MovedRetries > 0 {
+				movedRetries++
+				if c.opt.ClusterOption.MaxMovedRetries > 0 && movedRetries > c.opt.ClusterOption.MaxMovedRetries {
+					// Set error for all responses that haven't succeeded yet
+					for i := range results.s {
+						if results.s[i].NonValkeyError() != nil || results.s[i].val.Error() != nil {
+							results.s[i] = newErrResult(ErrMaxMovedRetriesExceeded)
+						}
 					}
+					return results.s
 				}
-				return results.s
 			}
 			retries.Redirects = 0
 			retries.MovedRetries = 0 // Reset for next retry loop
@@ -1264,6 +1268,7 @@ func (c *clusterClient) DoMultiCache(ctx context.Context, multi ...CacheableTTL)
 	results := resultsp.Get(len(multi), len(multi))
 
 	attempts := 1
+	movedRetries := 0
 
 retry:
 	retries.RetryDelay = -1 // Assume no retry. Because a client retry flag can be set to false.
@@ -1288,14 +1293,17 @@ retry:
 
 	if len(retries.m) != 0 {
 		if retries.Redirects > 0 {
-			if c.opt.ClusterOption.MaxMovedRetries > 0 && int(retries.MovedRetries) > c.opt.ClusterOption.MaxMovedRetries {
-				// Set error for all responses that haven't succeeded yet
-				for i := range results.s {
-					if results.s[i].NonValkeyError() != nil || results.s[i].val.Error() != nil {
-						results.s[i] = newErrResult(ErrMaxMovedRetriesExceeded)
+			if retries.MovedRetries > 0 {
+				movedRetries++
+				if c.opt.ClusterOption.MaxMovedRetries > 0 && movedRetries > c.opt.ClusterOption.MaxMovedRetries {
+					// Set error for all responses that haven't succeeded yet
+					for i := range results.s {
+						if results.s[i].NonValkeyError() != nil || results.s[i].val.Error() != nil {
+							results.s[i] = newErrResult(ErrMaxMovedRetriesExceeded)
+						}
 					}
+					return results.s
 				}
-				return results.s
 			}
 			retries.Redirects = 0
 			retries.MovedRetries = 0 // Reset for next retry loop
