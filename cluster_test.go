@@ -6574,7 +6574,7 @@ func TestClusterClientMovedRetry(t *testing.T) {
 	})
 }
 
-func TestClusterClientMaxMovedRetries(t *testing.T) {
+func TestClusterClientMaxMovedRedirections(t *testing.T) {
 	defer ShouldNotLeak(SetupLeakDetection())
 
 	t.Run("Do exceeds max MOVED retries", func(t *testing.T) {
@@ -6591,7 +6591,7 @@ func TestClusterClientMaxMovedRetries(t *testing.T) {
 			&ClientOption{
 				InitAddress: []string{":0"},
 				ClusterOption: ClusterOption{
-					MaxMovedRetries: 3,
+					MaxMovedRedirections: 3,
 				},
 			},
 			func(dst string, opt *ClientOption) conn { return m },
@@ -6603,8 +6603,8 @@ func TestClusterClientMaxMovedRetries(t *testing.T) {
 
 		cmd := client.B().Get().Key("test").Build()
 		resp := client.Do(context.Background(), cmd)
-		if resp.Error() != ErrMaxMovedRetriesExceeded {
-			t.Fatalf("expected ErrMaxMovedRetriesExceeded, got %v", resp.Error())
+		if resp.Error() != ErrMaxMovedRedirectionsExceeded {
+			t.Fatalf("expected ErrMaxMovedRedirectionsExceeded, got %v", resp.Error())
 		}
 	})
 
@@ -6625,7 +6625,7 @@ func TestClusterClientMaxMovedRetries(t *testing.T) {
 			&ClientOption{
 				InitAddress: []string{":0"},
 				ClusterOption: ClusterOption{
-					MaxMovedRetries: 2,
+					MaxMovedRedirections: 2,
 				},
 			},
 			func(dst string, opt *ClientOption) conn { return m },
@@ -6637,8 +6637,8 @@ func TestClusterClientMaxMovedRetries(t *testing.T) {
 
 		cmd := client.B().Get().Key("test").Cache()
 		resp := client.DoCache(context.Background(), cmd, time.Second)
-		if resp.Error() != ErrMaxMovedRetriesExceeded {
-			t.Fatalf("expected ErrMaxMovedRetriesExceeded, got %v", resp.Error())
+		if resp.Error() != ErrMaxMovedRedirectionsExceeded {
+			t.Fatalf("expected ErrMaxMovedRedirectionsExceeded, got %v", resp.Error())
 		}
 	})
 
@@ -6659,7 +6659,7 @@ func TestClusterClientMaxMovedRetries(t *testing.T) {
 			&ClientOption{
 				InitAddress: []string{":0"},
 				ClusterOption: ClusterOption{
-					MaxMovedRetries: 5,
+					MaxMovedRedirections: 5,
 				},
 			},
 			func(dst string, opt *ClientOption) conn { return m },
@@ -6674,8 +6674,8 @@ func TestClusterClientMaxMovedRetries(t *testing.T) {
 		if len(resps) != 1 {
 			t.Fatalf("expected 1 response, got %d", len(resps))
 		}
-		if resps[0].Error() != ErrMaxMovedRetriesExceeded {
-			t.Fatalf("expected ErrMaxMovedRetriesExceeded, got %v", resps[0].Error())
+		if resps[0].Error() != ErrMaxMovedRedirectionsExceeded {
+			t.Fatalf("expected ErrMaxMovedRedirectionsExceeded, got %v", resps[0].Error())
 		}
 	})
 
@@ -6696,7 +6696,7 @@ func TestClusterClientMaxMovedRetries(t *testing.T) {
 			&ClientOption{
 				InitAddress: []string{":0"},
 				ClusterOption: ClusterOption{
-					MaxMovedRetries: 4,
+					MaxMovedRedirections: 4,
 				},
 			},
 			func(dst string, opt *ClientOption) conn { return m },
@@ -6711,8 +6711,8 @@ func TestClusterClientMaxMovedRetries(t *testing.T) {
 		if len(resps) != 1 {
 			t.Fatalf("expected 1 response, got %d", len(resps))
 		}
-		if resps[0].Error() != ErrMaxMovedRetriesExceeded {
-			t.Fatalf("expected ErrMaxMovedRetriesExceeded, got %v", resps[0].Error())
+		if resps[0].Error() != ErrMaxMovedRedirectionsExceeded {
+			t.Fatalf("expected ErrMaxMovedRedirectionsExceeded, got %v", resps[0].Error())
 		}
 	})
 
@@ -6735,7 +6735,7 @@ func TestClusterClientMaxMovedRetries(t *testing.T) {
 			&ClientOption{
 				InitAddress: []string{":0"},
 				ClusterOption: ClusterOption{
-					MaxMovedRetries: 3,
+					MaxMovedRedirections: 3,
 				},
 			},
 			func(dst string, opt *ClientOption) conn { return m },
@@ -6755,7 +6755,7 @@ func TestClusterClientMaxMovedRetries(t *testing.T) {
 		}
 	})
 
-	t.Run("Do with MaxMovedRetries=0 allows unlimited retries", func(t *testing.T) {
+	t.Run("Do with MaxMovedRedirections=0 allows unlimited retries", func(t *testing.T) {
 		attempts := 0
 		m := &mockConn{
 			DoFn: func(cmd Completed) ValkeyResult {
@@ -6774,7 +6774,7 @@ func TestClusterClientMaxMovedRetries(t *testing.T) {
 			&ClientOption{
 				InitAddress: []string{":0"},
 				ClusterOption: ClusterOption{
-					MaxMovedRetries: 0, // 0 means unlimited
+					MaxMovedRedirections: 0, // 0 means unlimited
 				},
 			},
 			func(dst string, opt *ClientOption) conn { return m },
@@ -6817,7 +6817,7 @@ func TestClusterClientMaxMovedRetries(t *testing.T) {
 			&ClientOption{
 				InitAddress: []string{":0"},
 				ClusterOption: ClusterOption{
-					MaxMovedRetries: 3,
+					MaxMovedRedirections: 3,
 				},
 			},
 			func(dst string, opt *ClientOption) conn { return m },
@@ -6833,15 +6833,15 @@ func TestClusterClientMaxMovedRetries(t *testing.T) {
 		if len(resps) != 2 {
 			t.Fatalf("expected 2 responses, got %d", len(resps))
 		}
-		// Both commands should have ErrMaxMovedRetriesExceeded
+		// Both commands should have ErrMaxMovedRedirectionsExceeded
 		for i, resp := range resps {
-			if resp.Error() != ErrMaxMovedRetriesExceeded {
-				t.Fatalf("response %d: expected ErrMaxMovedRetriesExceeded, got %v", i, resp.Error())
+			if resp.Error() != ErrMaxMovedRedirectionsExceeded {
+				t.Fatalf("response %d: expected ErrMaxMovedRedirectionsExceeded, got %v", i, resp.Error())
 			}
 		}
 	})
 
-	t.Run("DoMulti with MaxMovedRetries=1 fails immediately", func(t *testing.T) {
+	t.Run("DoMulti with MaxMovedRedirections=1 fails immediately", func(t *testing.T) {
 		m := &mockConn{
 			DoFn: func(cmd Completed) ValkeyResult {
 				if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
@@ -6862,7 +6862,7 @@ func TestClusterClientMaxMovedRetries(t *testing.T) {
 			&ClientOption{
 				InitAddress: []string{":0"},
 				ClusterOption: ClusterOption{
-					MaxMovedRetries: 1, // Minimum non-zero value
+					MaxMovedRedirections: 1, // Minimum non-zero value
 				},
 			},
 			func(dst string, opt *ClientOption) conn { return m },
@@ -6877,8 +6877,8 @@ func TestClusterClientMaxMovedRetries(t *testing.T) {
 		if len(resps) != 1 {
 			t.Fatalf("expected 1 response, got %d", len(resps))
 		}
-		if resps[0].Error() != ErrMaxMovedRetriesExceeded {
-			t.Fatalf("expected ErrMaxMovedRetriesExceeded, got %v", resps[0].Error())
+		if resps[0].Error() != ErrMaxMovedRedirectionsExceeded {
+			t.Fatalf("expected ErrMaxMovedRedirectionsExceeded, got %v", resps[0].Error())
 		}
 	})
 
@@ -6914,7 +6914,7 @@ func TestClusterClientMaxMovedRetries(t *testing.T) {
 			&ClientOption{
 				InitAddress: []string{":0"},
 				ClusterOption: ClusterOption{
-					MaxMovedRetries: 1, // Limit is 1, but counter resets between loops
+					MaxMovedRedirections: 1, // Limit is 1, but counter resets between loops
 				},
 			},
 			func(dst string, opt *ClientOption) conn { return m },
@@ -6959,7 +6959,7 @@ func TestClusterClientMaxMovedRetries(t *testing.T) {
 			&ClientOption{
 				InitAddress: []string{":0"},
 				ClusterOption: ClusterOption{
-					MaxMovedRetries: 2,
+					MaxMovedRedirections: 2,
 				},
 			},
 			func(dst string, opt *ClientOption) conn { return m },
@@ -6975,15 +6975,15 @@ func TestClusterClientMaxMovedRetries(t *testing.T) {
 		if len(resps) != 2 {
 			t.Fatalf("expected 2 responses, got %d", len(resps))
 		}
-		// Both commands should have ErrMaxMovedRetriesExceeded
+		// Both commands should have ErrMaxMovedRedirectionsExceeded
 		for i, resp := range resps {
-			if resp.Error() != ErrMaxMovedRetriesExceeded {
-				t.Fatalf("response %d: expected ErrMaxMovedRetriesExceeded, got %v", i, resp.Error())
+			if resp.Error() != ErrMaxMovedRedirectionsExceeded {
+				t.Fatalf("response %d: expected ErrMaxMovedRedirectionsExceeded, got %v", i, resp.Error())
 			}
 		}
 	})
 
-	t.Run("Do with MaxMovedRetries=1 fails immediately", func(t *testing.T) {
+	t.Run("Do with MaxMovedRedirections=1 fails immediately", func(t *testing.T) {
 		m := &mockConn{
 			DoFn: func(cmd Completed) ValkeyResult {
 				if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
@@ -6997,7 +6997,7 @@ func TestClusterClientMaxMovedRetries(t *testing.T) {
 			&ClientOption{
 				InitAddress: []string{":0"},
 				ClusterOption: ClusterOption{
-					MaxMovedRetries: 1,
+					MaxMovedRedirections: 1,
 				},
 			},
 			func(dst string, opt *ClientOption) conn { return m },
@@ -7009,8 +7009,8 @@ func TestClusterClientMaxMovedRetries(t *testing.T) {
 
 		cmd := client.B().Get().Key("test").Build()
 		resp := client.Do(context.Background(), cmd)
-		if resp.Error() != ErrMaxMovedRetriesExceeded {
-			t.Fatalf("expected ErrMaxMovedRetriesExceeded, got %v", resp.Error())
+		if resp.Error() != ErrMaxMovedRedirectionsExceeded {
+			t.Fatalf("expected ErrMaxMovedRedirectionsExceeded, got %v", resp.Error())
 		}
 	})
 }

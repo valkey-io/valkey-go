@@ -551,8 +551,8 @@ process:
 	switch addr, mode := c.shouldRefreshRetry(resp.Error(), ctx); mode {
 	case RedirectMove:
 		movedRetries++
-		if c.opt.ClusterOption.MaxMovedRetries > 0 && movedRetries > c.opt.ClusterOption.MaxMovedRetries {
-			return newErrResult(ErrMaxMovedRetriesExceeded)
+		if c.opt.ClusterOption.MaxMovedRedirections > 0 && movedRetries > c.opt.ClusterOption.MaxMovedRedirections {
+			return newErrResult(ErrMaxMovedRedirectionsExceeded)
 		}
 		ncc := c.redirectOrNew(addr, cc, cmd.Slot(), mode)
 	recover1:
@@ -906,11 +906,11 @@ retry:
 		if retries.Redirects > 0 {
 			if retries.MovedRetries > 0 {
 				movedRetries++
-				if c.opt.ClusterOption.MaxMovedRetries > 0 && movedRetries > c.opt.ClusterOption.MaxMovedRetries {
+				if c.opt.ClusterOption.MaxMovedRedirections > 0 && movedRetries > c.opt.ClusterOption.MaxMovedRedirections {
 					// Set error for all responses that haven't succeeded yet
 					for i := range results.s {
 						if results.s[i].NonValkeyError() != nil || results.s[i].val.Error() != nil {
-							results.s[i] = newErrResult(ErrMaxMovedRetriesExceeded)
+							results.s[i] = newErrResult(ErrMaxMovedRedirectionsExceeded)
 						}
 					}
 					return results.s
@@ -960,8 +960,8 @@ process:
 	switch addr, mode := c.shouldRefreshRetry(resp.Error(), ctx); mode {
 	case RedirectMove:
 		movedRetries++
-		if c.opt.ClusterOption.MaxMovedRetries > 0 && movedRetries > c.opt.ClusterOption.MaxMovedRetries {
-			return newErrResult(ErrMaxMovedRetriesExceeded)
+		if c.opt.ClusterOption.MaxMovedRedirections > 0 && movedRetries > c.opt.ClusterOption.MaxMovedRedirections {
+			return newErrResult(ErrMaxMovedRedirectionsExceeded)
 		}
 		ncc := c.redirectOrNew(addr, cc, cmd.Slot(), mode)
 	recover:
@@ -1295,11 +1295,11 @@ retry:
 		if retries.Redirects > 0 {
 			if retries.MovedRetries > 0 {
 				movedRetries++
-				if c.opt.ClusterOption.MaxMovedRetries > 0 && movedRetries > c.opt.ClusterOption.MaxMovedRetries {
+				if c.opt.ClusterOption.MaxMovedRedirections > 0 && movedRetries > c.opt.ClusterOption.MaxMovedRedirections {
 					// Set error for all responses that haven't succeeded yet
 					for i := range results.s {
 						if results.s[i].NonValkeyError() != nil || results.s[i].val.Error() != nil {
-							results.s[i] = newErrResult(ErrMaxMovedRetriesExceeded)
+							results.s[i] = newErrResult(ErrMaxMovedRedirectionsExceeded)
 						}
 					}
 					return results.s
