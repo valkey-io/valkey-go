@@ -909,8 +909,12 @@ retry:
 				if c.opt.ClusterOption.MaxMovedRedirections > 0 && movedRetries > c.opt.ClusterOption.MaxMovedRedirections {
 					// Set error for all responses that haven't succeeded yet
 					for i := range results.s {
-						if results.s[i].NonValkeyError() != nil || results.s[i].val.Error() != nil {
-							results.s[i] = newErrResult(ErrMaxMovedRedirectionsExceeded)
+						if err := results.s[i].val.Error(); err != nil {
+							if vErr, ok := err.(*ValkeyError); ok {
+								if _, isMoved := vErr.IsMoved(); isMoved {
+									results.s[i] = newErrResult(ErrMaxMovedRedirectionsExceeded)
+								}
+							}
 						}
 					}
 					return results.s
@@ -1298,8 +1302,12 @@ retry:
 				if c.opt.ClusterOption.MaxMovedRedirections > 0 && movedRetries > c.opt.ClusterOption.MaxMovedRedirections {
 					// Set error for all responses that haven't succeeded yet
 					for i := range results.s {
-						if results.s[i].NonValkeyError() != nil || results.s[i].val.Error() != nil {
-							results.s[i] = newErrResult(ErrMaxMovedRedirectionsExceeded)
+						if err := results.s[i].val.Error(); err != nil {
+							if vErr, ok := err.(*ValkeyError); ok {
+								if _, isMoved := vErr.IsMoved(); isMoved {
+									results.s[i] = newErrResult(ErrMaxMovedRedirectionsExceeded)
+								}
+							}
 						}
 					}
 					return results.s
