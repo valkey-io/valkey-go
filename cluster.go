@@ -907,7 +907,7 @@ retry:
 			if retries.MovedRetries > 0 {
 				movedRetries++
 				if c.opt.ClusterOption.MaxMovedRedirections > 0 && movedRetries > c.opt.ClusterOption.MaxMovedRedirections {
-					// Set error for all responses that haven't succeeded yet
+					// Set error for all MOVED responses
 					for i := range results.s {
 						if err := results.s[i].val.Error(); err != nil {
 							if vErr, ok := err.(*ValkeyError); ok {
@@ -1300,7 +1300,7 @@ retry:
 			if retries.MovedRetries > 0 {
 				movedRetries++
 				if c.opt.ClusterOption.MaxMovedRedirections > 0 && movedRetries > c.opt.ClusterOption.MaxMovedRedirections {
-					// Set error for all responses that haven't succeeded yet
+					// Set error for all MOVED responses
 					for i := range results.s {
 						if err := results.s[i].val.Error(); err != nil {
 							if vErr, ok := err.(*ValkeyError); ok {
