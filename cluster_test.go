@@ -6603,8 +6603,10 @@ func TestClusterClientMaxMovedRedirections(t *testing.T) {
 
 		cmd := client.B().Get().Key("test").Build()
 		resp := client.Do(context.Background(), cmd)
-		if resp.Error() != ErrMaxMovedRedirectionsExceeded {
-			t.Fatalf("expected ErrMaxMovedRedirectionsExceeded, got %v", resp.Error())
+		if vErr, ok := resp.Error().(*ValkeyError); !ok {
+			t.Fatalf("expected ValkeyError, got %T %v", resp.Error(), resp.Error())
+		} else if _, moved := vErr.IsMoved(); !moved {
+			t.Fatalf("expected MOVED error, got %v", vErr)
 		}
 	})
 
@@ -6637,8 +6639,10 @@ func TestClusterClientMaxMovedRedirections(t *testing.T) {
 
 		cmd := client.B().Get().Key("test").Cache()
 		resp := client.DoCache(context.Background(), cmd, time.Second)
-		if resp.Error() != ErrMaxMovedRedirectionsExceeded {
-			t.Fatalf("expected ErrMaxMovedRedirectionsExceeded, got %v", resp.Error())
+		if vErr, ok := resp.Error().(*ValkeyError); !ok {
+			t.Fatalf("expected ValkeyError, got %T %v", resp.Error(), resp.Error())
+		} else if _, moved := vErr.IsMoved(); !moved {
+			t.Fatalf("expected MOVED error, got %v", vErr)
 		}
 	})
 
@@ -6674,8 +6678,10 @@ func TestClusterClientMaxMovedRedirections(t *testing.T) {
 		if len(resps) != 1 {
 			t.Fatalf("expected 1 response, got %d", len(resps))
 		}
-		if resps[0].Error() != ErrMaxMovedRedirectionsExceeded {
-			t.Fatalf("expected ErrMaxMovedRedirectionsExceeded, got %v", resps[0].Error())
+		if vErr, ok := resps[0].Error().(*ValkeyError); !ok {
+			t.Fatalf("expected ValkeyError, got %T %v", resps[0].Error(), resps[0].Error())
+		} else if _, moved := vErr.IsMoved(); !moved {
+			t.Fatalf("expected MOVED error, got %v", vErr)
 		}
 	})
 
@@ -6711,8 +6717,10 @@ func TestClusterClientMaxMovedRedirections(t *testing.T) {
 		if len(resps) != 1 {
 			t.Fatalf("expected 1 response, got %d", len(resps))
 		}
-		if resps[0].Error() != ErrMaxMovedRedirectionsExceeded {
-			t.Fatalf("expected ErrMaxMovedRedirectionsExceeded, got %v", resps[0].Error())
+		if vErr, ok := resps[0].Error().(*ValkeyError); !ok {
+			t.Fatalf("expected ValkeyError, got %T %v", resps[0].Error(), resps[0].Error())
+		} else if _, moved := vErr.IsMoved(); !moved {
+			t.Fatalf("expected MOVED error, got %v", vErr)
 		}
 	})
 
@@ -6833,10 +6841,12 @@ func TestClusterClientMaxMovedRedirections(t *testing.T) {
 		if len(resps) != 2 {
 			t.Fatalf("expected 2 responses, got %d", len(resps))
 		}
-		// Both commands should have ErrMaxMovedRedirectionsExceeded
+		// Both commands should have MOVED error
 		for i, resp := range resps {
-			if resp.Error() != ErrMaxMovedRedirectionsExceeded {
-				t.Fatalf("response %d: expected ErrMaxMovedRedirectionsExceeded, got %v", i, resp.Error())
+			if vErr, ok := resp.Error().(*ValkeyError); !ok {
+				t.Fatalf("response %d: expected ValkeyError, got %T %v", i, resp.Error(), resp.Error())
+			} else if _, moved := vErr.IsMoved(); !moved {
+				t.Fatalf("response %d: expected MOVED error, got %v", i, vErr)
 			}
 		}
 	})
@@ -6877,8 +6887,10 @@ func TestClusterClientMaxMovedRedirections(t *testing.T) {
 		if len(resps) != 1 {
 			t.Fatalf("expected 1 response, got %d", len(resps))
 		}
-		if resps[0].Error() != ErrMaxMovedRedirectionsExceeded {
-			t.Fatalf("expected ErrMaxMovedRedirectionsExceeded, got %v", resps[0].Error())
+		if vErr, ok := resps[0].Error().(*ValkeyError); !ok {
+			t.Fatalf("expected ValkeyError, got %T %v", resps[0].Error(), resps[0].Error())
+		} else if _, moved := vErr.IsMoved(); !moved {
+			t.Fatalf("expected MOVED error, got %v", vErr)
 		}
 	})
 
@@ -6975,10 +6987,12 @@ func TestClusterClientMaxMovedRedirections(t *testing.T) {
 		if len(resps) != 2 {
 			t.Fatalf("expected 2 responses, got %d", len(resps))
 		}
-		// Both commands should have ErrMaxMovedRedirectionsExceeded
+		// Both commands should have MOVED error
 		for i, resp := range resps {
-			if resp.Error() != ErrMaxMovedRedirectionsExceeded {
-				t.Fatalf("response %d: expected ErrMaxMovedRedirectionsExceeded, got %v", i, resp.Error())
+			if vErr, ok := resp.Error().(*ValkeyError); !ok {
+				t.Fatalf("response %d: expected ValkeyError, got %T %v", i, resp.Error(), resp.Error())
+			} else if _, moved := vErr.IsMoved(); !moved {
+				t.Fatalf("response %d: expected MOVED error, got %v", i, vErr)
 			}
 		}
 	})
@@ -7009,8 +7023,10 @@ func TestClusterClientMaxMovedRedirections(t *testing.T) {
 
 		cmd := client.B().Get().Key("test").Build()
 		resp := client.Do(context.Background(), cmd)
-		if resp.Error() != ErrMaxMovedRedirectionsExceeded {
-			t.Fatalf("expected ErrMaxMovedRedirectionsExceeded, got %v", resp.Error())
+		if vErr, ok := resp.Error().(*ValkeyError); !ok {
+			t.Fatalf("expected ValkeyError, got %T %v", resp.Error(), resp.Error())
+		} else if _, moved := vErr.IsMoved(); !moved {
+			t.Fatalf("expected MOVED error, got %v", vErr)
 		}
 	})
 }

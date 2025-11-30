@@ -537,7 +537,7 @@ func (c *clusterClient) Do(ctx context.Context, cmd Completed) (resp ValkeyResul
 
 func (c *clusterClient) do(ctx context.Context, cmd Completed) (resp ValkeyResult) {
 	attempts := 1
-	movedRetries := 0
+	redirects := 0
 retry:
 	cc, err := c.pick(ctx, cmd.Slot(), c.toReplica(cmd))
 	if err != nil {
@@ -550,9 +550,9 @@ retry:
 process:
 	switch addr, mode := c.shouldRefreshRetry(resp.Error(), ctx); mode {
 	case RedirectMove:
-		movedRetries++
-		if c.opt.ClusterOption.MaxMovedRedirections > 0 && movedRetries > c.opt.ClusterOption.MaxMovedRedirections {
-			return newErrResult(ErrMaxMovedRedirectionsExceeded)
+		redirects++
+		if c.opt.ClusterOption.MaxMovedRedirections > 0 && redirects > c.opt.ClusterOption.MaxMovedRedirections {
+			return resp
 		}
 		ncc := c.redirectOrNew(addr, cc, cmd.Slot(), mode)
 	recover1:
@@ -562,6 +562,10 @@ process:
 		}
 		goto process
 	case RedirectAsk:
+		redirects++
+		if c.opt.ClusterOption.MaxMovedRedirections > 0 && redirects > c.opt.ClusterOption.MaxMovedRedirections {
+			return resp
+		}
 		ncc := c.redirectOrNew(addr, cc, cmd.Slot(), mode)
 	recover2:
 		results := ncc.DoMulti(ctx, cmds.AskingCmd, cmd)
@@ -761,9 +765,6 @@ func (c *clusterClient) doresultfn(
 				if mi >= 0 && ei < len(commands) && isMulti(commands[mi]) && isExec(commands[ei]) && resps[mi].val.string() == ok { // a transaction is found.
 					mu.Lock()
 					retries.Redirects++
-					if mode == RedirectMove {
-						retries.MovedRetries++
-					}
 					nr := retries.m[nc]
 					if nr == nil {
 						nr = retryp.Get(0, len(commands))
@@ -790,9 +791,6 @@ func (c *clusterClient) doresultfn(
 			mu.Lock()
 			if mode != RedirectRetry {
 				retries.Redirects++
-			}
-			if mode == RedirectMove {
-				retries.MovedRetries++
 			}
 			if mode == RedirectRetry && retryDelay >= 0 {
 				retries.RetryDelay = max(retries.RetryDelay, retryDelay)
@@ -879,7 +877,7 @@ func (c *clusterClient) DoMulti(ctx context.Context, multi ...Completed) []Valke
 	results := resultsp.Get(len(multi), len(multi))
 
 	attempts := 1
-	movedRetries := 0
+	redirects := 0
 
 retry:
 	retries.RetryDelay = -1 // Assume no retry. Because a client retry flag can be set to false.
@@ -904,24 +902,11 @@ retry:
 
 	if len(retries.m) != 0 {
 		if retries.Redirects > 0 {
-			if retries.MovedRetries > 0 {
-				movedRetries++
-				if c.opt.ClusterOption.MaxMovedRedirections > 0 && movedRetries > c.opt.ClusterOption.MaxMovedRedirections {
-					// Set error for all MOVED responses
-					for i := range results.s {
-						if err := results.s[i].val.Error(); err != nil {
-							if vErr, ok := err.(*ValkeyError); ok {
-								if _, isMoved := vErr.IsMoved(); isMoved {
-									results.s[i] = newErrResult(ErrMaxMovedRedirectionsExceeded)
-								}
-							}
-						}
-					}
-					return results.s
-				}
+			redirects++
+			if c.opt.ClusterOption.MaxMovedRedirections > 0 && redirects > c.opt.ClusterOption.MaxMovedRedirections {
+				return results.s
 			}
 			retries.Redirects = 0
-			retries.MovedRetries = 0 // Reset for next retry loop
 			goto retry
 		}
 		if retries.RetryDelay >= 0 {
@@ -949,7 +934,7 @@ func fillErrs(n int, err error) (results []ValkeyResult) {
 
 func (c *clusterClient) doCache(ctx context.Context, cmd Cacheable, ttl time.Duration) (resp ValkeyResult) {
 	attempts := 1
-	movedRetries := 0
+	redirects := 0
 
 retry:
 	cc, err := c.pick(ctx, cmd.Slot(), c.toReplica(Completed(cmd)))
@@ -963,9 +948,9 @@ retry:
 process:
 	switch addr, mode := c.shouldRefreshRetry(resp.Error(), ctx); mode {
 	case RedirectMove:
-		movedRetries++
-		if c.opt.ClusterOption.MaxMovedRedirections > 0 && movedRetries > c.opt.ClusterOption.MaxMovedRedirections {
-			return newErrResult(ErrMaxMovedRedirectionsExceeded)
+		redirects++
+		if c.opt.ClusterOption.MaxMovedRedirections > 0 && redirects > c.opt.ClusterOption.MaxMovedRedirections {
+			return resp
 		}
 		ncc := c.redirectOrNew(addr, cc, cmd.Slot(), mode)
 	recover:
@@ -975,6 +960,10 @@ process:
 		}
 		goto process
 	case RedirectAsk:
+		redirects++
+		if c.opt.ClusterOption.MaxMovedRedirections > 0 && redirects > c.opt.ClusterOption.MaxMovedRedirections {
+			return resp
+		}
 		results := c.askingMultiCache(c.redirectOrNew(addr, cc, cmd.Slot(), mode), ctx, []CacheableTTL{CT(cmd, ttl)})
 		resp = results.s[0]
 		resultsp.Put(results)
@@ -1195,9 +1184,6 @@ func (c *clusterClient) resultcachefn(
 			if mode != RedirectRetry {
 				retries.Redirects++
 			}
-			if mode == RedirectMove {
-				retries.MovedRetries++
-			}
 			if mode == RedirectRetry && retryDelay >= 0 {
 				retries.RetryDelay = max(retries.RetryDelay, retryDelay)
 			}
@@ -1272,7 +1258,7 @@ func (c *clusterClient) DoMultiCache(ctx context.Context, multi ...CacheableTTL)
 	results := resultsp.Get(len(multi), len(multi))
 
 	attempts := 1
-	movedRetries := 0
+	redirects := 0
 
 retry:
 	retries.RetryDelay = -1 // Assume no retry. Because a client retry flag can be set to false.
@@ -1297,24 +1283,11 @@ retry:
 
 	if len(retries.m) != 0 {
 		if retries.Redirects > 0 {
-			if retries.MovedRetries > 0 {
-				movedRetries++
-				if c.opt.ClusterOption.MaxMovedRedirections > 0 && movedRetries > c.opt.ClusterOption.MaxMovedRedirections {
-					// Set error for all MOVED responses
-					for i := range results.s {
-						if err := results.s[i].val.Error(); err != nil {
-							if vErr, ok := err.(*ValkeyError); ok {
-								if _, isMoved := vErr.IsMoved(); isMoved {
-									results.s[i] = newErrResult(ErrMaxMovedRedirectionsExceeded)
-								}
-							}
-						}
-					}
-					return results.s
-				}
+			redirects++
+			if c.opt.ClusterOption.MaxMovedRedirections > 0 && redirects > c.opt.ClusterOption.MaxMovedRedirections {
+				return results.s
 			}
 			retries.Redirects = 0
-			retries.MovedRetries = 0 // Reset for next retry loop
 			goto retry
 		}
 		if retries.RetryDelay >= 0 {
