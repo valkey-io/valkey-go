@@ -62,7 +62,7 @@ type dialMetrics struct {
 
 type dialTracer struct {
 	trace.Tracer
-	tAttrs trace.SpanStartEventOption
+	tAttrs []trace.SpanStartOption
 }
 
 // WithHistogramOption sets the HistogramOption.
@@ -83,6 +83,10 @@ func NewClient(clientOption valkey.ClientOption, opts ...Option) (valkey.Client,
 	oclient, err := newClient(opts...)
 	if err != nil {
 		return nil, err
+	}
+
+	if len(clientOption.InitAddress) == 1 {
+		oclient.tAttrs = append(oclient.tAttrs, serverAttrs(clientOption.InitAddress[0]))
 	}
 
 	if clientOption.DialCtxFn == nil {
@@ -135,9 +139,7 @@ func NewClient(clientOption valkey.ClientOption, opts ...Option) (valkey.Client,
 }
 
 func newClient(opts ...Option) (*otelclient, error) {
-	cli := &otelclient{
-		tAttrs: trace.WithAttributes(),
-	}
+	cli := &otelclient{}
 	for _, opt := range opts {
 		opt(cli)
 	}
@@ -183,7 +185,7 @@ func newClient(opts ...Option) (*otelclient, error) {
 
 func trackDialing(m dialMetrics, t dialTracer, dialFn func(context.Context, string, *net.Dialer, *tls.Config) (conn net.Conn, err error)) func(context.Context, string, *net.Dialer, *tls.Config) (conn net.Conn, err error) {
 	return func(ctx context.Context, dst string, dialer *net.Dialer, tlsConfig *tls.Config) (conn net.Conn, err error) {
-		ctx, span := t.Start(ctx, "valkey.dial", kind, trace.WithAttributes(dbattr), serverAttrs(dst), t.tAttrs)
+		ctx, span := t.Start(ctx, "valkey.dial", append(t.tAttrs, kind, trace.WithAttributes(dbattr), serverAttrs(dst))...)
 		defer span.End()
 
 		m.attempt.Add(ctx, 1, m.addOpts...)

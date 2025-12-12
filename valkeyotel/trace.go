@@ -86,7 +86,9 @@ type Option func(o *otelclient)
 // TraceAttrs set additional attributes to append to each trace.
 func TraceAttrs(attrs ...attribute.KeyValue) Option {
 	return func(o *otelclient) {
-		o.tAttrs = trace.WithAttributes(attrs...)
+		// TODO: this should (probably) append to align with `trace.WithAttributes(...)`, but overwrite for now to avoid breaking changes
+		// o.tAttrs = append(o.tAttrs, trace.WithAttributes(attrs...))
+		o.tAttrs = []trace.SpanStartOption{trace.WithAttributes(attrs...)}
 	}
 }
 
@@ -163,7 +165,7 @@ type otelclient struct {
 	meter           metric.Meter
 	cscMiss         metric.Int64Counter
 	cscHits         metric.Int64Counter
-	tAttrs          trace.SpanStartEventOption
+	tAttrs          []trace.SpanStartOption
 	dbStmtFunc      StatementFunc
 	addOpts         []metric.AddOption
 	recordOpts      []metric.RecordOption
@@ -350,7 +352,7 @@ var _ valkey.DedicatedClient = (*dedicated)(nil)
 type dedicated struct {
 	client     valkey.DedicatedClient
 	tracer     trace.Tracer
-	tAttrs     trace.SpanStartEventOption
+	tAttrs     []trace.SpanStartOption
 	dbStmtFunc StatementFunc
 	commandMetrics
 }
@@ -504,8 +506,8 @@ func (d *dedicated) end(span trace.Span, err error) {
 	endSpan(span, err)
 }
 
-func startSpan(tracer trace.Tracer, ctx context.Context, op string, size int, attrs trace.SpanStartEventOption) (context.Context, trace.Span) {
-	return tracer.Start(ctx, op, kind, attr(op, size), attrs)
+func startSpan(tracer trace.Tracer, ctx context.Context, op string, size int, attrs []trace.SpanStartOption) (context.Context, trace.Span) {
+	return tracer.Start(ctx, op, append(attrs, kind, attr(op, size))...)
 }
 
 func endSpan(span trace.Span, err error) {
