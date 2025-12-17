@@ -240,9 +240,6 @@ func serverAttrs(dst string) trace.SpanStartOption {
 		if port, err := strconv.Atoi(port); err == nil {
 			return trace.WithAttributes(attribute.String("server.address", addr), attribute.Int("server.port", port))
 		}
-
-		return trace.WithAttributes(attribute.String("server.address", addr))
 	}
-
 	return trace.WithAttributes(attribute.String("server.address", dst))
 }
