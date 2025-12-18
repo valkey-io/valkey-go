@@ -62,7 +62,7 @@ type dialMetrics struct {
 
 type dialTracer struct {
 	trace.Tracer
-	tAttrs []trace.SpanStartOption
+	tAttrs trace.SpanStartEventOption
 }
 
 // WithHistogramOption sets the HistogramOption.
@@ -86,7 +86,7 @@ func NewClient(clientOption valkey.ClientOption, opts ...Option) (valkey.Client,
 	}
 
 	if len(clientOption.InitAddress) == 1 {
-		oclient.tAttrs = append(oclient.tAttrs, serverAttrs(clientOption.InitAddress[0]))
+		oclient.sAttrs = serverAttrs(clientOption.InitAddress[0])
 	}
 
 	if clientOption.DialCtxFn == nil {
@@ -139,7 +139,10 @@ func NewClient(clientOption valkey.ClientOption, opts ...Option) (valkey.Client,
 }
 
 func newClient(opts ...Option) (*otelclient, error) {
-	cli := &otelclient{}
+	cli := &otelclient{
+		sAttrs: trace.WithAttributes(),
+		tAttrs: trace.WithAttributes(),
+	}
 	for _, opt := range opts {
 		opt(cli)
 	}
@@ -185,7 +188,7 @@ func newClient(opts ...Option) (*otelclient, error) {
 
 func trackDialing(m dialMetrics, t dialTracer, dialFn func(context.Context, string, *net.Dialer, *tls.Config) (conn net.Conn, err error)) func(context.Context, string, *net.Dialer, *tls.Config) (conn net.Conn, err error) {
 	return func(ctx context.Context, dst string, dialer *net.Dialer, tlsConfig *tls.Config) (conn net.Conn, err error) {
-		ctx, span := t.Start(ctx, "valkey.dial", append(t.tAttrs, kind, trace.WithAttributes(dbattr), serverAttrs(dst))...)
+		ctx, span := t.Start(ctx, "valkey.dial", kind, trace.WithAttributes(dbattr), serverAttrs(dst), t.tAttrs)
 		defer span.End()
 
 		m.attempt.Add(ctx, 1, m.addOpts...)
@@ -237,7 +240,7 @@ func defaultDialFn(ctx context.Context, dst string, dialer *net.Dialer, cfg *tls
 	return dialer.DialContext(ctx, "tcp", dst)
 }
 
-func serverAttrs(dst string) trace.SpanStartOption {
+func serverAttrs(dst string) trace.SpanStartEventOption {
 	if addr, port, err := net.SplitHostPort(dst); err == nil {
 		if port, err := strconv.Atoi(port); err == nil {
 			return trace.WithAttributes(attribute.String("server.address", addr), attribute.Int("server.port", port))

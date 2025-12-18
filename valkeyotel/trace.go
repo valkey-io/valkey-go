@@ -86,9 +86,7 @@ type Option func(o *otelclient)
 // TraceAttrs set additional attributes to append to each trace.
 func TraceAttrs(attrs ...attribute.KeyValue) Option {
 	return func(o *otelclient) {
-		// TODO: this should (probably) append to align with `trace.WithAttributes(...)`, but overwrite for now to avoid breaking changes
-		// o.tAttrs = append(o.tAttrs, trace.WithAttributes(attrs...))
-		o.tAttrs = []trace.SpanStartOption{trace.WithAttributes(attrs...)}
+		o.tAttrs = trace.WithAttributes(attrs...)
 	}
 }
 
@@ -165,7 +163,8 @@ type otelclient struct {
 	meter           metric.Meter
 	cscMiss         metric.Int64Counter
 	cscHits         metric.Int64Counter
-	tAttrs          []trace.SpanStartOption
+	sAttrs          trace.SpanStartEventOption
+	tAttrs          trace.SpanStartEventOption
 	dbStmtFunc      StatementFunc
 	addOpts         []metric.AddOption
 	recordOpts      []metric.RecordOption
@@ -271,6 +270,7 @@ func (o *otelclient) Dedicated(fn func(valkey.DedicatedClient) error) (err error
 	return o.client.Dedicated(func(client valkey.DedicatedClient) error {
 		return fn(&dedicated{
 			client:         client,
+			sAttrs:         o.sAttrs,
 			tAttrs:         o.tAttrs,
 			tracer:         o.tracer,
 			dbStmtFunc:     o.dbStmtFunc,
@@ -283,6 +283,7 @@ func (o *otelclient) Dedicate() (valkey.DedicatedClient, func()) {
 	client, cancel := o.client.Dedicate()
 	return &dedicated{
 		client:         client,
+		sAttrs:         o.sAttrs,
 		tAttrs:         o.tAttrs,
 		tracer:         o.tracer,
 		dbStmtFunc:     o.dbStmtFunc,
@@ -314,6 +315,7 @@ func (o *otelclient) Nodes() map[string]valkey.Client {
 			cscHits:         o.cscHits,
 			addOpts:         o.addOpts,
 			recordOpts:      o.recordOpts,
+			sAttrs:          o.sAttrs,
 			tAttrs:          o.tAttrs,
 			histogramOption: o.histogramOption,
 			dbStmtFunc:      o.dbStmtFunc,
@@ -352,7 +354,8 @@ var _ valkey.DedicatedClient = (*dedicated)(nil)
 type dedicated struct {
 	client     valkey.DedicatedClient
 	tracer     trace.Tracer
-	tAttrs     []trace.SpanStartOption
+	sAttrs     trace.SpanStartEventOption
+	tAttrs     trace.SpanStartEventOption
 	dbStmtFunc StatementFunc
 	commandMetrics
 }
@@ -491,7 +494,7 @@ func multiCacheableFirst(multi []valkey.CacheableTTL) string {
 }
 
 func (o *otelclient) start(ctx context.Context, op string, size int) (context.Context, trace.Span) {
-	return startSpan(o.tracer, ctx, op, size, o.tAttrs)
+	return startSpan(o.tracer, ctx, op, size, o.sAttrs, o.tAttrs)
 }
 
 func (o *otelclient) end(span trace.Span, err error) {
@@ -499,15 +502,15 @@ func (o *otelclient) end(span trace.Span, err error) {
 }
 
 func (d *dedicated) start(ctx context.Context, op string, size int) (context.Context, trace.Span) {
-	return startSpan(d.tracer, ctx, op, size, d.tAttrs)
+	return startSpan(d.tracer, ctx, op, size, d.sAttrs, d.tAttrs)
 }
 
 func (d *dedicated) end(span trace.Span, err error) {
 	endSpan(span, err)
 }
 
-func startSpan(tracer trace.Tracer, ctx context.Context, op string, size int, attrs []trace.SpanStartOption) (context.Context, trace.Span) {
-	return tracer.Start(ctx, op, append(attrs, kind, attr(op, size))...)
+func startSpan(tracer trace.Tracer, ctx context.Context, op string, size int, sAttrs trace.SpanStartEventOption, tAttrs trace.SpanStartEventOption) (context.Context, trace.Span) {
+	return tracer.Start(ctx, op, kind, attr(op, size), sAttrs, tAttrs)
 }
 
 func endSpan(span trace.Span, err error) {
