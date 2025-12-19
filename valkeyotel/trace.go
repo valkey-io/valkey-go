@@ -315,7 +315,7 @@ func (o *otelclient) Nodes() map[string]valkey.Client {
 			cscHits:         o.cscHits,
 			addOpts:         o.addOpts,
 			recordOpts:      o.recordOpts,
-			sAttrs:          o.sAttrs,
+			sAttrs:          serverAttrs(addr),
 			tAttrs:          o.tAttrs,
 			histogramOption: o.histogramOption,
 			dbStmtFunc:      o.dbStmtFunc,
