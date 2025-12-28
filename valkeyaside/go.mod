@@ -1,11 +1,11 @@
 module github.com/valkey-io/valkey-go/valkeyaside
 
-go 1.23.0
+go 1.24.9
 
-toolchain go1.23.4
+toolchain go1.24.11
 
 replace github.com/valkey-io/valkey-go => ../
 
 require github.com/valkey-io/valkey-go v1.0.69
 
-require golang.org/x/sys v0.31.0 // indirect
+require golang.org/x/sys v0.39.0 // indirect
