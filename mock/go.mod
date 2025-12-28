@@ -1,14 +1,14 @@
 module github.com/valkey-io/valkey-go/mock
 
-go 1.23.0
+go 1.24.9
 
-toolchain go1.23.4
+toolchain go1.24.11
 
 replace github.com/valkey-io/valkey-go => ../
 
 require (
 	github.com/valkey-io/valkey-go v1.0.69
-	go.uber.org/mock v0.5.0
+	go.uber.org/mock v0.6.0
 )
 
-require golang.org/x/sys v0.31.0 // indirect
+require golang.org/x/sys v0.39.0 // indirect
