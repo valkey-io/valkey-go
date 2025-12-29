@@ -63,4 +63,18 @@ func TestWithNodeScaleoutLimit(t *testing.T) {
 			t.Errorf("expected maxp to be 8, got %d", compat.maxp)
 		}
 	})
+
+	t.Run("WithNodeScaleoutLimit with value less than 1 defaults to 1", func(t *testing.T) {
+		adapter := NewAdapter(client, WithNodeScaleoutLimit(0))
+		compat := adapter.(*Compat)
+		if compat.maxp != 1 {
+			t.Errorf("expected maxp to be 1, got %d", compat.maxp)
+		}
+
+		adapter = NewAdapter(client, WithNodeScaleoutLimit(-5))
+		compat = adapter.(*Compat)
+		if compat.maxp != 1 {
+			t.Errorf("expected maxp to be 1, got %d", compat.maxp)
+		}
+	})
 }
