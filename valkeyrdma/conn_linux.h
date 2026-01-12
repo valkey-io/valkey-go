@@ -99,10 +99,6 @@ typedef enum valkeyRdmaOpcode {
     RegisterXferMemory = 3,
 } valkeyRdmaOpcode;
 
-#define VALKEY_RDMA_MAX_WQE 1024
-#define VALKEY_RDMA_DEFAULT_RX_LEN (1024 * 1024)
-#define VALKEY_RDMA_INVALID_OPCODE 0xffff
-
 typedef struct RdmaContext {
     struct rdma_cm_id *cm_id;
     struct rdma_event_channel *cm_channel;
