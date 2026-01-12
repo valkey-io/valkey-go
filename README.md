@@ -521,8 +521,13 @@ client, err = valkey.NewClient(valkey.MustParseURL("unix:///run/valkey.conf?db=0
 
 Starting from Valkey 8.1, Valkey server provides the `availability-zone` information for clients to know where the server is located.
 For using this information to route requests to the replica located in the same availability zone,
-set the `EnableReplicaAZInfo` option and your `ReadNodeSelector` function. For example:
+set the `EnableReplicaAZInfo` option and your `ReadNodeSelector` function with helpers:
 
+- **PreferReplicaNodeSelector**: Prioritizes reading from any replica. Fallback to primary if no replicas are available.
+- **AZAffinityNodeSelector**: Prioritizes reading from replicas in the same availability zone, then any replica. Fallback to primary.
+- **AZAffinityReplicasAndPrimaryNodeSelector**: Prioritizes reading from replicas in the same availability zone, then primary in the same availability zone, then any replica. Fallback to primary.
+
+For example:
 ```go
 client, err := valkey.NewClient(valkey.ClientOption{
   InitAddress:         []string{"address.example.com:6379"},
@@ -530,9 +535,20 @@ client, err := valkey.NewClient(valkey.ClientOption{
   SendToReplicas: func(cmd valkey.Completed) bool {
     return cmd.IsReadOnly()
   },
-  ReadNodeSelector: func(slot uint16, replicas []valkey.NodeInfo) int {
-    for i, replica := range replicas {
-      if replica.AZ == "us-east-1a" {
+  ReadNodeSelector: valkey.AZAffinityNodeSelector("us-east-1a"),
+})
+```
+You can also implement a custom selector to fit your specific needs:
+```go
+client, err := valkey.NewClient(valkey.ClientOption{
+  InitAddress:         []string{"address.example.com:6379"},
+  EnableReplicaAZInfo: true,
+  SendToReplicas: func(cmd valkey.Completed) bool {
+    return cmd.IsReadOnly()
+  },
+  ReadNodeSelector: func(slot uint16, nodes []valkey.NodeInfo) int {
+    for i, node := range nodes {
+      if node.AZ == "us-east-1a" {
         return i // return the index of the replica.
       }
     }
