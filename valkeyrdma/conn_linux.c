@@ -60,6 +60,15 @@ static inline int valkeyMin(long long a, long long b) {
     return (a < b) ? a : b;
 }
 
+static inline int poll_noeintr(struct pollfd *fds, nfds_t nfds, int timeout_ms) {
+    for (;;) {
+        int rc = poll(fds, nfds, timeout_ms);
+        if (rc >= 0) return rc;
+        if (errno == EINTR) continue;
+        return -1;
+    }
+}
+
 void valkeySetError(RdmaContext *ctx, int type, const char *str) {
     size_t len;
     ctx->err = type;
@@ -416,7 +425,7 @@ static int valkeyRdmaPollCqCm(RdmaContext *ctx, long timed) {
     pfd[VALKEY_RDMA_POLLFD_CQ].fd = ctx->comp_channel->fd;
     pfd[VALKEY_RDMA_POLLFD_CQ].events = POLLIN;
     pfd[VALKEY_RDMA_POLLFD_CQ].revents = 0;
-    ret = poll(pfd, VALKEY_RDMA_POLLFD_MAX, timed - now);
+    ret = poll_noeintr(pfd, VALKEY_RDMA_POLLFD_MAX, timed - now);
     if (ret < 0) {
         valkeySetError(ctx, VALKEY_ERR_IO, "RDMA: Poll CQ/CM failed");
         return VALKEY_ERR;
@@ -622,7 +631,7 @@ static int valkeyRdmaWaitConn(RdmaContext *ctx, long timeout) {
         pfd.fd = ctx->cm_channel->fd;
         pfd.events = POLLIN;
         pfd.revents = 0;
-        if (poll(&pfd, 1, end - now) < 0) {
+        if (poll_noeintr(&pfd, 1, end - now) < 0) {
             valkeySetError(ctx, VALKEY_ERR_IO, "poll");
             return VALKEY_ERR;
         }
