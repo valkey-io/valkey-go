@@ -5,8 +5,10 @@ package valkeyrdma
 #include <errno.h>
 #include <stdlib.h>
 #include "conn_linux.h"
-int connectRdma(RdmaContext *ctx, const char *addr, int port, long timeout_msec);
-void closeRdma(RdmaContext *ctx);
+int rdmaConnect(RdmaContext *ctx, const char *addr, int port, long timeout_msec);
+ssize_t rdmaRead(RdmaContext *ctx, char *buf, size_t bufcap, long timeout_msec);
+ssize_t rdmaWrite(RdmaContext *ctx, const char *obuf, size_t data_len, long timeout_msec);
+void rdmaClose(RdmaContext *ctx);
 */
 import "C"
 
@@ -42,12 +44,11 @@ func DialContext(ctx context.Context, dst string) (net.Conn, error) {
 		timeout = int(time.Since(dl).Milliseconds())
 	}
 
-	if ret := C.connectRdma(c.ctx, chost, C.int(port), C.long(timeout)); ret != 0 {
+	if ret := C.rdmaConnect(c.ctx, chost, C.int(port), C.long(timeout)); ret != 0 {
 		err = fmt.Errorf("%s: %d", C.GoString(&c.ctx.errstr[0]), int(c.ctx.err))
 		C.free(unsafe.Pointer(c.ctx))
 		return nil, err
 	}
-
 	return c, nil
 }
 
@@ -59,18 +60,30 @@ type conn struct {
 }
 
 func (c *conn) Read(b []byte) (n int, err error) {
-	//TODO implement me
-	panic("implement me")
+	var ret C.ssize_t
+	if len(b) > 0 {
+		ret = C.rdmaRead(c.ctx, (*C.char)(unsafe.Pointer(&b[0])), C.size_t(len(b)), C.long(100000))
+		if ret < 0 {
+			return 0, fmt.Errorf("%s: %d", C.GoString(&c.ctx.errstr[0]), int(c.ctx.err))
+		}
+	}
+	return int(ret), nil
 }
 
 func (c *conn) Write(b []byte) (n int, err error) {
-	//TODO implement me
-	panic("implement me")
+	var ret C.ssize_t
+	if len(b) > 0 {
+		ret = C.rdmaWrite(c.ctx, (*C.char)(unsafe.Pointer(&b[0])), C.size_t(len(b)), C.long(100000))
+		if ret < 0 {
+			return 0, fmt.Errorf("%s: %d", C.GoString(&c.ctx.errstr[0]), int(c.ctx.err))
+		}
+	}
+	return int(ret), nil
 }
 
 func (c *conn) Close() error {
 	if c.close.CompareAndSwap(false, true) {
-		C.closeRdma(c.ctx)
+		C.rdmaClose(c.ctx)
 		C.free(unsafe.Pointer(c.ctx))
 	}
 	return nil
