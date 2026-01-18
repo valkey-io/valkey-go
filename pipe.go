@@ -25,7 +25,7 @@ const LibVer = "1.0.70"
 
 var (
 	noHello = regexp.MustCompile("unknown command .?(HELLO|hello).?")
-	infoAZ  = regexp.MustCompile("availability_zone:([^\\r\\n]+)")
+	infoAZ  = regexp.MustCompile(`availability_zone:([^\r\n]+)`)
 )
 
 // See https://github.com/redis/rueidis/pull/691
