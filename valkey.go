@@ -282,7 +282,7 @@ type ClientOption struct {
 	// If true, the client will set the `AZ` field in `ReplicaInfo`.
 	EnableReplicaAZInfo bool
 
-	// AZFromInfo forces the `AZ` field to be taken from an INFO command instead of HELLO.
+	// AZFromInfo forces the `availability_zone` field to be taken from an INFO command instead of HELLO.
 	// Primarily used for AWS MemoryDB.
 	AZFromInfo bool
 }
