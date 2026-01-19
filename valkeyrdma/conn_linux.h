@@ -55,6 +55,7 @@
  * in the flags field is set when the context is connected. */
 #define VALKEY_CONNECTED 0x2
 
+#include <pthread.h>
 #include <rdma/rdma_cma.h>
 
 typedef struct valkeyRdmaFeature {
@@ -131,6 +132,11 @@ typedef struct RdmaContext {
     int err;          /* Error flags, 0 when there is no error */
     char errstr[128]; /* String representation of error when applicable */
     int flags;
+
+    pthread_mutex_t cq_mu;
+    pthread_mutex_t rx_mu;
+    pthread_mutex_t tx_mu;
+    pthread_mutex_t cmd_mu;
 
 } RdmaContext;
 
