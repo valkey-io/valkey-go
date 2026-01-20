@@ -71,14 +71,17 @@ static inline int poll_noeintr(struct pollfd *fds, nfds_t nfds, int timeout_ms) 
 
 void valkeySetError(RdmaContext *ctx, int type, const char *str) {
     size_t len;
-    ctx->err = type;
     len = strlen(str);
+    pthread_mutex_lock(&ctx->err_mu);
     len = len < (sizeof(ctx->errstr) - 1) ? len : (sizeof(ctx->errstr) - 1);
+    ctx->err = type;
     memcpy(ctx->errstr, str, len);
     ctx->errstr[len] = '\0';
+    pthread_mutex_unlock(&ctx->err_mu);
 }
 
 static int valkeyRdmaCM(RdmaContext *ctx, long timeout);
+static int connRdmaHandleCq(RdmaContext *ctx);
 
 static int valkeyRdmaSetFdBlocking(RdmaContext *ctx, int fd, int blocking) {
     int flags;
@@ -257,9 +260,17 @@ static int rdmaSendCommand(RdmaContext *ctx, struct rdma_cm_id *cm_id, valkeyRdm
     send_wr.opcode = IBV_WR_SEND;
     send_wr.send_flags = IBV_SEND_SIGNALED;
     send_wr.next = NULL;
+
+resend:
     ret = ibv_post_send(cm_id->qp, &send_wr, &bad_wr);
     if (ret) {
-        valkeySetError(ctx, VALKEY_ERR_OTHER, "RDMA: failed to send command buffers");
+        if (ret == ENOMEM) {
+            if (connRdmaHandleCq(ctx) == VALKEY_ERR) {
+                return VALKEY_ERR;
+            }
+            goto resend;
+        }
+        valkeySetError(ctx, ret, "RDMA: failed to send command buffers");
         return VALKEY_ERR;
     }
 
@@ -422,7 +433,7 @@ static int connRdmaHandleCq(RdmaContext *ctx) {
  * - fd of completion channel: handle CQ event.
  * Return OK on CQ event ready, then CQ event should be handled outside.
  */
-static int valkeyRdmaPollCqCm(RdmaContext *ctx, long timed) {
+static int _valkeyRdmaPollCqCm(RdmaContext *ctx, long timed) {
 #define VALKEY_RDMA_POLLFD_CM 0
 #define VALKEY_RDMA_POLLFD_CQ 1
 #define VALKEY_RDMA_POLLFD_MAX 2
@@ -464,6 +475,28 @@ static int valkeyRdmaPollCqCm(RdmaContext *ctx, long timed) {
     return VALKEY_OK;
 }
 
+static int valkeyRdmaPollCqCm(RdmaContext *ctx, long timed) {
+    int ret;
+    pthread_mutex_lock(&ctx->poll_mu);
+    if (ctx->poll_state != 0) {
+        while (ctx->poll_state != 0) {
+            pthread_cond_wait(&ctx->poll_cond, &ctx->poll_mu);
+        }
+        pthread_mutex_unlock(&ctx->poll_mu);
+        return VALKEY_OK;
+    }
+    ctx->poll_state = 1;
+    pthread_mutex_unlock(&ctx->poll_mu);
+
+    ret = _valkeyRdmaPollCqCm(ctx, timed);
+
+    pthread_mutex_lock(&ctx->poll_mu);
+    ctx->poll_state = 0;
+    pthread_cond_broadcast(&ctx->poll_cond);
+    pthread_mutex_unlock(&ctx->poll_mu);
+    return ret;
+}
+
 static size_t connRdmaSend(RdmaContext *ctx, struct rdma_cm_id *cm_id, const void *data, size_t data_len) {
     struct ibv_send_wr send_wr, *bad_wr;
     struct ibv_sge sge;
@@ -487,8 +520,19 @@ static size_t connRdmaSend(RdmaContext *ctx, struct rdma_cm_id *cm_id, const voi
     send_wr.wr.rdma.remote_addr = (uint64_t)(uintptr_t)remote_addr;
     send_wr.wr.rdma.rkey = ctx->tx_key;
     send_wr.next = NULL;
+
+resend:
     ret = ibv_post_send(cm_id->qp, &send_wr, &bad_wr);
     if (ret) {
+        if (ret == ENOMEM) {
+            pthread_mutex_unlock(&ctx->tx_mu);
+            if (connRdmaHandleCq(ctx) == VALKEY_ERR) {
+                return VALKEY_ERR;
+            }
+            pthread_mutex_lock(&ctx->tx_mu);
+            goto resend;
+        }
+        valkeySetError(ctx, ret, "RDMA: failed to write with imm");
         return VALKEY_ERR;
     }
 
@@ -634,6 +678,31 @@ static int valkeyRdmaCM(RdmaContext *ctx, long timeout) {
     return ret;
 }
 
+static int valkeyRdmaWaitTxBuf(RdmaContext *ctx, long timeout) {
+    struct pollfd pfd;
+    long now, end;
+
+    assert(timeout >= 0);
+    end = vk_msec_now() + timeout;
+
+    while (1) {
+        now = vk_msec_now();
+        if (now >= end) {
+            break;
+        }
+        if (valkeyRdmaPollCqCm(ctx, end) == VALKEY_OK) {
+            if (connRdmaHandleCq(ctx) == VALKEY_ERR) {
+                return VALKEY_ERR;
+            }
+            if (ctx->tx_length != 0 && ctx->send_length != 0) {
+                return VALKEY_OK;
+            }
+        }
+    }
+
+    return VALKEY_ERR;
+}
+
 static int valkeyRdmaWaitConn(RdmaContext *ctx, long timeout) {
     struct pollfd pfd;
     long now, end;
@@ -659,8 +728,11 @@ static int valkeyRdmaWaitConn(RdmaContext *ctx, long timeout) {
             return VALKEY_ERR;
         }
 
+        now = vk_msec_now();
         if (ctx->flags & VALKEY_CONNECTED) {
-            return VALKEY_OK;
+            if (valkeyRdmaWaitTxBuf(ctx, end - now) == VALKEY_OK) {
+                return VALKEY_OK;
+            }
         }
     }
 
@@ -673,6 +745,17 @@ int rdmaConnect(RdmaContext *ctx, const char *addr, int port, long timeout_msec)
     struct rdma_addrinfo hints = {0}, *addrinfo = NULL;
     long start = vk_msec_now(), timed;
 
+    pthread_mutex_init(&ctx->cq_mu, NULL);
+    pthread_mutex_init(&ctx->rx_mu, NULL);
+    pthread_mutex_init(&ctx->tx_mu, NULL);
+    pthread_mutex_init(&ctx->cmd_mu, NULL);
+    pthread_mutex_init(&ctx->err_mu, NULL);
+    pthread_mutex_init(&ctx->poll_mu, NULL);
+    pthread_cond_init(&ctx->poll_cond, NULL);
+
+    ctx->poll_state = 0;
+    ctx->tx_length = 0;
+    ctx->send_length = 0;
     ctx->flags &= ~VALKEY_CONNECTED;
 
     ctx->cm_channel = rdma_create_event_channel();
@@ -712,10 +795,6 @@ int rdmaConnect(RdmaContext *ctx, const char *addr, int port, long timeout_msec)
     }
 
     if ((valkeyRdmaWaitConn(ctx, timeout_msec - timed) == VALKEY_OK) && (ctx->flags & VALKEY_CONNECTED)) {
-        pthread_mutex_init(&ctx->cq_mu, NULL);
-        pthread_mutex_init(&ctx->rx_mu, NULL);
-        pthread_mutex_init(&ctx->tx_mu, NULL);
-        pthread_mutex_init(&ctx->cmd_mu, NULL);
         ret = VALKEY_OK;
         goto end;
     }
@@ -728,6 +807,13 @@ error:
     if (ctx->cm_channel) {
         rdma_destroy_event_channel(ctx->cm_channel);
     }
+    pthread_mutex_destroy(&ctx->cq_mu);
+    pthread_mutex_destroy(&ctx->rx_mu);
+    pthread_mutex_destroy(&ctx->tx_mu);
+    pthread_mutex_destroy(&ctx->cmd_mu);
+    pthread_mutex_destroy(&ctx->err_mu);
+    pthread_mutex_destroy(&ctx->poll_mu);
+    pthread_cond_destroy(&ctx->poll_cond);
 end:
     if (addrinfo) {
         rdma_freeaddrinfo(addrinfo);
@@ -749,8 +835,6 @@ pollcq:
     }
 
     pthread_mutex_lock(&ctx->rx_mu);
-    pthread_mutex_unlock(&ctx->rx_mu);
-
     if (ctx->recv_offset < ctx->rx_offset) {
         remained = ctx->rx_offset - ctx->recv_offset;
         toread = valkeyMin(remained, bufcap);
@@ -833,4 +917,7 @@ void rdmaClose(RdmaContext *ctx) {
     pthread_mutex_destroy(&ctx->rx_mu);
     pthread_mutex_destroy(&ctx->tx_mu);
     pthread_mutex_destroy(&ctx->cmd_mu);
+    pthread_mutex_destroy(&ctx->err_mu);
+    pthread_mutex_destroy(&ctx->poll_mu);
+    pthread_cond_destroy(&ctx->poll_cond);
 }

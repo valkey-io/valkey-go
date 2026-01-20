@@ -15,9 +15,10 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"strconv"
-	"sync/atomic"
+	"sync"
 	"time"
 	"unsafe"
 )
@@ -56,10 +57,16 @@ type conn struct {
 	ctx   *C.RdmaContext
 	raddr net.Addr
 	laddr net.Addr
-	close atomic.Bool
+	mu    sync.RWMutex
+	close bool
 }
 
 func (c *conn) Read(b []byte) (n int, err error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.close {
+		return 0, io.EOF
+	}
 	var ret C.ssize_t
 	if len(b) > 0 {
 		ret = C.rdmaRead(c.ctx, (*C.char)(unsafe.Pointer(&b[0])), C.size_t(len(b)), C.long(100000))
@@ -71,6 +78,11 @@ func (c *conn) Read(b []byte) (n int, err error) {
 }
 
 func (c *conn) Write(b []byte) (n int, err error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.close {
+		return 0, io.EOF
+	}
 	var ret C.ssize_t
 	if len(b) > 0 {
 		ret = C.rdmaWrite(c.ctx, (*C.char)(unsafe.Pointer(&b[0])), C.size_t(len(b)), C.long(100000))
@@ -82,7 +94,10 @@ func (c *conn) Write(b []byte) (n int, err error) {
 }
 
 func (c *conn) Close() error {
-	if c.close.CompareAndSwap(false, true) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.close {
+		c.close = true
 		C.rdmaClose(c.ctx)
 		C.free(unsafe.Pointer(c.ctx))
 	}
