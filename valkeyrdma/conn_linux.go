@@ -35,7 +35,8 @@ func DialContext(ctx context.Context, dst string) (net.Conn, error) {
 		return nil, err
 	}
 	c := &conn{
-		ctx: (*C.RdmaContext)(C.malloc(C.sizeof_struct_RdmaContext)),
+		ctx:   (*C.RdmaContext)(C.malloc(C.sizeof_struct_RdmaContext)),
+		timed: -1,
 	}
 	chost := C.CString(host)
 	defer C.free(unsafe.Pointer(chost))
@@ -56,6 +57,7 @@ func DialContext(ctx context.Context, dst string) (net.Conn, error) {
 type conn struct {
 	ctx   *C.RdmaContext
 	mu    sync.RWMutex
+	timed int64
 	close bool
 }
 
@@ -69,7 +71,11 @@ func (c *conn) Read(b []byte) (n int, err error) {
 		return 0, io.ErrClosedPipe
 	}
 	var ret C.ssize_t
-	ret = C.rdmaRead(c.ctx, (*C.char)(unsafe.Pointer(&b[0])), C.size_t(len(b)), C.long(100000))
+	var timed = c.timed
+	if timed < 0 {
+		timed = 100000
+	}
+	ret = C.rdmaRead(c.ctx, (*C.char)(unsafe.Pointer(&b[0])), C.size_t(len(b)), C.long(timed))
 	c.mu.RUnlock()
 
 	if ret < 0 {
@@ -90,7 +96,11 @@ func (c *conn) Write(b []byte) (n int, err error) {
 		return 0, io.ErrClosedPipe
 	}
 	var ret C.ssize_t
-	ret = C.rdmaWrite(c.ctx, (*C.char)(unsafe.Pointer(&b[0])), C.size_t(len(b)), C.long(100000))
+	var timed = c.timed
+	if timed < 0 {
+		timed = 100000
+	}
+	ret = C.rdmaWrite(c.ctx, (*C.char)(unsafe.Pointer(&b[0])), C.size_t(len(b)), C.long(timed))
 	c.mu.RUnlock()
 
 	if ret < 0 {
@@ -121,6 +131,13 @@ func (c *conn) RemoteAddr() net.Addr {
 }
 
 func (c *conn) SetDeadline(t time.Time) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if t.IsZero() {
+		c.timed = -1
+	} else {
+		c.timed = time.Until(t).Milliseconds()
+	}
 	return nil
 }
 

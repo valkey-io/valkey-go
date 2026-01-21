@@ -829,11 +829,6 @@ ssize_t rdmaRead(RdmaContext *ctx, char *buf, size_t bufcap, long timeout_msec) 
     end = vk_msec_now() + timeout_msec;
 
 pollcq:
-    /* try to poll a CQ first */
-    if (connRdmaHandleCq(ctx) == VALKEY_ERR) {
-        return VALKEY_ERR;
-    }
-
     pthread_mutex_lock(&ctx->rx_mu);
     if (ctx->recv_offset < ctx->rx_offset) {
         remained = ctx->rx_offset - ctx->recv_offset;
@@ -851,6 +846,9 @@ pollcq:
     pthread_mutex_unlock(&ctx->rx_mu);
 
     if (valkeyRdmaPollCqCm(ctx, end) == VALKEY_OK) {
+        if (connRdmaHandleCq(ctx) == VALKEY_ERR) {
+            return VALKEY_ERR;
+        }
         goto pollcq;
     } else {
         return VALKEY_ERR;
@@ -866,10 +864,6 @@ ssize_t rdmaWrite(RdmaContext *ctx, const char *obuf, size_t data_len, long time
     end = vk_msec_now() + timeout_msec;
 
 pollcq:
-    if (connRdmaHandleCq(ctx) == VALKEY_ERR) {
-        return VALKEY_ERR;
-    }
-
     pthread_mutex_lock(&ctx->tx_mu);
     assert(ctx->tx_offset <= ctx->tx_length);
     if (ctx->tx_offset == ctx->tx_length) {
@@ -892,6 +886,9 @@ pollcq:
 
 waitcq:
     if (valkeyRdmaPollCqCm(ctx, end) == VALKEY_OK) {
+        if (connRdmaHandleCq(ctx) == VALKEY_ERR) {
+            return VALKEY_ERR;
+        }
         goto pollcq;
     } else {
         return VALKEY_ERR;
