@@ -55,40 +55,48 @@ func DialContext(ctx context.Context, dst string) (net.Conn, error) {
 
 type conn struct {
 	ctx   *C.RdmaContext
-	raddr net.Addr
-	laddr net.Addr
 	mu    sync.RWMutex
 	close bool
 }
 
 func (c *conn) Read(b []byte) (n int, err error) {
+	if len(b) == 0 {
+		return 0, nil
+	}
 	c.mu.RLock()
-	defer c.mu.RUnlock()
 	if c.close {
-		return 0, io.EOF
+		c.mu.RUnlock()
+		return 0, io.ErrClosedPipe
 	}
 	var ret C.ssize_t
-	if len(b) > 0 {
-		ret = C.rdmaRead(c.ctx, (*C.char)(unsafe.Pointer(&b[0])), C.size_t(len(b)), C.long(100000))
-		if ret < 0 {
-			return 0, fmt.Errorf("%s: %d", C.GoString(&c.ctx.errstr[0]), int(c.ctx.err))
-		}
+	ret = C.rdmaRead(c.ctx, (*C.char)(unsafe.Pointer(&b[0])), C.size_t(len(b)), C.long(100000))
+	c.mu.RUnlock()
+
+	if ret < 0 {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return 0, fmt.Errorf("%s: %d", C.GoString(&c.ctx.errstr[0]), int(c.ctx.err))
 	}
 	return int(ret), nil
 }
 
 func (c *conn) Write(b []byte) (n int, err error) {
+	if len(b) == 0 {
+		return 0, nil
+	}
 	c.mu.RLock()
-	defer c.mu.RUnlock()
 	if c.close {
-		return 0, io.EOF
+		c.mu.RUnlock()
+		return 0, io.ErrClosedPipe
 	}
 	var ret C.ssize_t
-	if len(b) > 0 {
-		ret = C.rdmaWrite(c.ctx, (*C.char)(unsafe.Pointer(&b[0])), C.size_t(len(b)), C.long(100000))
-		if ret < 0 {
-			return 0, fmt.Errorf("%s: %d", C.GoString(&c.ctx.errstr[0]), int(c.ctx.err))
-		}
+	ret = C.rdmaWrite(c.ctx, (*C.char)(unsafe.Pointer(&b[0])), C.size_t(len(b)), C.long(100000))
+	c.mu.RUnlock()
+
+	if ret < 0 {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return 0, fmt.Errorf("%s: %d", C.GoString(&c.ctx.errstr[0]), int(c.ctx.err))
 	}
 	return int(ret), nil
 }
@@ -105,11 +113,11 @@ func (c *conn) Close() error {
 }
 
 func (c *conn) LocalAddr() net.Addr {
-	return c.laddr
+	panic("not implemented")
 }
 
 func (c *conn) RemoteAddr() net.Addr {
-	return c.raddr
+	panic("not implemented")
 }
 
 func (c *conn) SetDeadline(t time.Time) error {
@@ -117,9 +125,9 @@ func (c *conn) SetDeadline(t time.Time) error {
 }
 
 func (c *conn) SetReadDeadline(t time.Time) error {
-	return nil
+	panic("not implemented")
 }
 
 func (c *conn) SetWriteDeadline(t time.Time) error {
-	return nil
+	panic("not implemented")
 }
