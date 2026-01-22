@@ -9,6 +9,7 @@ int rdmaConnect(RdmaContext *ctx, const char *addr, int port, long timeout_msec)
 ssize_t rdmaRead(RdmaContext *ctx, char *buf, size_t bufcap, long timeout_msec);
 ssize_t rdmaWrite(RdmaContext *ctx, const char *obuf, size_t data_len, long timeout_msec);
 void rdmaClose(RdmaContext *ctx);
+void rdmaDisconnect(RdmaContext *ctx);
 */
 import "C"
 
@@ -19,6 +20,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 )
@@ -58,7 +60,7 @@ type conn struct {
 	ctx   *C.RdmaContext
 	mu    sync.RWMutex
 	timed int64
-	close bool
+	once  int32
 }
 
 func (c *conn) Read(b []byte) (n int, err error) {
@@ -66,7 +68,7 @@ func (c *conn) Read(b []byte) (n int, err error) {
 		return 0, nil
 	}
 	c.mu.RLock()
-	if c.close {
+	if c.ctx == nil {
 		c.mu.RUnlock()
 		return 0, io.ErrClosedPipe
 	}
@@ -79,9 +81,7 @@ func (c *conn) Read(b []byte) (n int, err error) {
 	c.mu.RUnlock()
 
 	if ret < 0 {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		return 0, fmt.Errorf("%s: %d", C.GoString(&c.ctx.errstr[0]), int(c.ctx.err))
+		return 0, c.err()
 	}
 	return int(ret), nil
 }
@@ -91,7 +91,7 @@ func (c *conn) Write(b []byte) (n int, err error) {
 		return 0, nil
 	}
 	c.mu.RLock()
-	if c.close {
+	if c.ctx == nil {
 		c.mu.RUnlock()
 		return 0, io.ErrClosedPipe
 	}
@@ -104,22 +104,34 @@ func (c *conn) Write(b []byte) (n int, err error) {
 	c.mu.RUnlock()
 
 	if ret < 0 {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		return 0, fmt.Errorf("%s: %d", C.GoString(&c.ctx.errstr[0]), int(c.ctx.err))
+		return 0, c.err()
 	}
 	return int(ret), nil
 }
 
 func (c *conn) Close() error {
+	if atomic.CompareAndSwapInt32(&c.once, 0, 1) {
+		C.rdmaDisconnect(c.ctx)
+	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !c.close {
-		c.close = true
+	if c.ctx != nil {
 		C.rdmaClose(c.ctx)
 		C.free(unsafe.Pointer(c.ctx))
+		c.ctx = nil
 	}
+	c.mu.Unlock()
 	return nil
+}
+
+func (c *conn) err() (err error) {
+	c.mu.Lock()
+	if c.ctx == nil {
+		err = io.ErrClosedPipe
+	} else {
+		err = fmt.Errorf("%s: %d", C.GoString(&c.ctx.errstr[0]), int(c.ctx.err))
+	}
+	c.mu.Unlock()
+	return err
 }
 
 func (c *conn) LocalAddr() net.Addr {

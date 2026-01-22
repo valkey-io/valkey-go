@@ -895,19 +895,23 @@ waitcq:
     }
 }
 
+void rdmaDisconnect(RdmaContext *ctx) {
+    struct rdma_cm_id *cm_id;
+    cm_id = ctx->cm_id;
+    rdma_disconnect(cm_id);
+}
+
 void rdmaClose(RdmaContext *ctx) {
     struct rdma_cm_id *cm_id;
 
     cm_id = ctx->cm_id;
     connRdmaHandleCq(ctx);
-    rdma_disconnect(cm_id);
     ibv_destroy_cq(ctx->cq);
     rdmaDestroyIoBuf(ctx);
     ibv_destroy_qp(cm_id->qp);
     ibv_destroy_comp_channel(ctx->comp_channel);
     ibv_dealloc_pd(ctx->pd);
     rdma_destroy_id(cm_id);
-
     rdma_destroy_event_channel(ctx->cm_channel);
 
     pthread_mutex_destroy(&ctx->cq_mu);
