@@ -633,7 +633,6 @@ static int valkeyRdmaEstablished(RdmaContext *ctx, struct rdma_cm_id *cm_id) {
 
 static int valkeyRdmaCM(RdmaContext *ctx, long timeout) {
     struct rdma_cm_event *event;
-    char errorstr[128];
     int ret = VALKEY_ERR;
 
     while (rdma_get_cm_event(ctx->cm_channel, &event) == 0) {
@@ -666,8 +665,7 @@ static int valkeyRdmaCM(RdmaContext *ctx, long timeout) {
             break;
         case RDMA_CM_EVENT_ADDR_CHANGE:
         default:
-            snprintf(errorstr, sizeof(errorstr), "RDMA: connect failed - %s", rdma_event_str(event->event));
-            valkeySetError(ctx, VALKEY_ERR_OTHER, errorstr);
+            valkeySetError(ctx, VALKEY_ERR_OTHER, rdma_event_str(event->event));
             ret = VALKEY_ERR;
             break;
         }

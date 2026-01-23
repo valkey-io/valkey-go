@@ -130,7 +130,7 @@ typedef struct RdmaContext {
     struct ibv_mr *cmd_mr;
 
     int err;          /* Error flags, 0 when there is no error */
-    char errstr[128]; /* String representation of error when applicable */
+    char errstr[64];  /* String representation of error when applicable */
     int flags;
 
     pthread_mutex_t cq_mu;
