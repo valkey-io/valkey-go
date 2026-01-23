@@ -136,7 +136,6 @@ typedef struct RdmaContext {
     pthread_mutex_t cq_mu;
     pthread_mutex_t rx_mu;
     pthread_mutex_t tx_mu;
-    pthread_mutex_t cmd_mu;
     pthread_mutex_t err_mu;
 
 } RdmaContext;

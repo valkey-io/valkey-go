@@ -235,7 +235,6 @@ static int rdmaSendCommand(RdmaContext *ctx, struct rdma_cm_id *cm_id, valkeyRdm
 
 find:
     /* find an unused cmd buffer */
-    pthread_mutex_lock(&ctx->cmd_mu);
     for (i = VALKEY_RDMA_MAX_WQE; i < 2 * VALKEY_RDMA_MAX_WQE; i++) {
         _cmd = ctx->cmd_buf + i;
         if (_cmd->keepalive.opcode == VALKEY_RDMA_INVALID_OPCODE) {
@@ -243,7 +242,6 @@ find:
             break;
         }
     }
-    pthread_mutex_unlock(&ctx->cmd_mu);
 
     if (i >= 2 * VALKEY_RDMA_MAX_WQE) {
         pthread_mutex_unlock(&ctx->rx_mu);
@@ -341,10 +339,10 @@ static int connRdmaHandleRecvImm(RdmaContext *ctx, struct rdma_cm_id *cm_id, val
 
 static int connRdmaHandleSend(RdmaContext *ctx, valkeyRdmaCmd *cmd) {
     /* mark this cmd has already sent */
-    pthread_mutex_lock(&ctx->cmd_mu);
+    pthread_mutex_lock(&ctx->rx_mu);
     memset(cmd, 0x00, sizeof(*cmd));
     cmd->keepalive.opcode = VALKEY_RDMA_INVALID_OPCODE;
-    pthread_mutex_unlock(&ctx->cmd_mu);
+    pthread_mutex_unlock(&ctx->rx_mu);
 
     return VALKEY_OK;
 }
@@ -730,7 +728,6 @@ int rdmaConnect(RdmaContext *ctx, const char *addr, int port, long timeout_msec)
     pthread_mutex_init(&ctx->cq_mu, NULL);
     pthread_mutex_init(&ctx->rx_mu, NULL);
     pthread_mutex_init(&ctx->tx_mu, NULL);
-    pthread_mutex_init(&ctx->cmd_mu, NULL);
     pthread_mutex_init(&ctx->err_mu, NULL);
 
     ctx->tx_length = 0;
@@ -789,7 +786,6 @@ error:
     pthread_mutex_destroy(&ctx->cq_mu);
     pthread_mutex_destroy(&ctx->rx_mu);
     pthread_mutex_destroy(&ctx->tx_mu);
-    pthread_mutex_destroy(&ctx->cmd_mu);
     pthread_mutex_destroy(&ctx->err_mu);
 end:
     if (addrinfo) {
@@ -899,6 +895,5 @@ void rdmaClose(RdmaContext *ctx) {
     pthread_mutex_destroy(&ctx->cq_mu);
     pthread_mutex_destroy(&ctx->rx_mu);
     pthread_mutex_destroy(&ctx->tx_mu);
-    pthread_mutex_destroy(&ctx->cmd_mu);
     pthread_mutex_destroy(&ctx->err_mu);
 }
