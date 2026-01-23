@@ -233,6 +233,7 @@ static int rdmaSendCommand(RdmaContext *ctx, struct rdma_cm_id *cm_id, valkeyRdm
     int i;
     int ret;
 
+find:
     /* find an unused cmd buffer */
     pthread_mutex_lock(&ctx->cmd_mu);
     for (i = VALKEY_RDMA_MAX_WQE; i < 2 * VALKEY_RDMA_MAX_WQE; i++) {
@@ -245,8 +246,14 @@ static int rdmaSendCommand(RdmaContext *ctx, struct rdma_cm_id *cm_id, valkeyRdm
     pthread_mutex_unlock(&ctx->cmd_mu);
 
     if (i >= 2 * VALKEY_RDMA_MAX_WQE) {
-        valkeySetError(ctx, VALKEY_ERR_OTHER, "RDMA: no empty command buffers");
-        return VALKEY_ERR;
+        pthread_mutex_unlock(&ctx->rx_mu);
+        if (connRdmaHandleCq(ctx) == VALKEY_ERR) {
+            pthread_mutex_lock(&ctx->rx_mu);
+            valkeySetError(ctx, ret, "RDMA: failed to release cmd buf");
+            return VALKEY_ERR;
+        }
+        pthread_mutex_lock(&ctx->rx_mu);
+        goto find;
     }
 
     memcpy(_cmd, cmd, sizeof(valkeyRdmaCmd));
@@ -265,9 +272,13 @@ resend:
     ret = ibv_post_send(cm_id->qp, &send_wr, &bad_wr);
     if (ret) {
         if (ret == ENOMEM) {
+            pthread_mutex_unlock(&ctx->rx_mu);
             if (connRdmaHandleCq(ctx) == VALKEY_ERR) {
+                pthread_mutex_lock(&ctx->rx_mu);
+                valkeySetError(ctx, ret, "RDMA: failed to handle rx ENOMEM");
                 return VALKEY_ERR;
             }
+            pthread_mutex_lock(&ctx->rx_mu);
             goto resend;
         }
         valkeySetError(ctx, ret, "RDMA: failed to send command buffers");
@@ -285,10 +296,8 @@ static int connRdmaRegisterRx(RdmaContext *ctx, struct rdma_cm_id *cm_id) {
     cmd.memory.length = htonl(ctx->recv_length);
     cmd.memory.key = htonl(ctx->recv_mr->rkey);
 
-    pthread_mutex_lock(&ctx->rx_mu);
     ctx->rx_offset = 0;
     ctx->recv_offset = 0;
-    pthread_mutex_unlock(&ctx->rx_mu);
 
     return rdmaSendCommand(ctx, cm_id, &cmd);
 }
@@ -497,6 +506,8 @@ resend:
         if (ret == ENOMEM) {
             pthread_mutex_unlock(&ctx->tx_mu);
             if (connRdmaHandleCq(ctx) == VALKEY_ERR) {
+                pthread_mutex_lock(&ctx->tx_mu);
+                valkeySetError(ctx, ret, "RDMA: failed to handle tx ENOMEM");
                 return VALKEY_ERR;
             }
             pthread_mutex_lock(&ctx->tx_mu);
@@ -596,9 +607,12 @@ error:
 
 static int valkeyRdmaEstablished(RdmaContext *ctx, struct rdma_cm_id *cm_id) {
     /* it's time to tell redis we have already connected */
+    int ret;
     ctx->flags |= VALKEY_CONNECTED;
-
-    return connRdmaRegisterRx(ctx, cm_id);
+    pthread_mutex_lock(&ctx->rx_mu);
+    ret = connRdmaRegisterRx(ctx, cm_id);
+    pthread_mutex_unlock(&ctx->rx_mu);
+    return ret;
 }
 
 static int valkeyRdmaCM(RdmaContext *ctx, long timeout) {
@@ -800,8 +814,9 @@ pollcq:
         memcpy(buf, ctx->recv_buf + ctx->recv_offset, toread);
         ctx->recv_offset += toread;
 
-        if (ctx->recv_offset == ctx->recv_length) {
-            connRdmaRegisterRx(ctx, cm_id);
+        if (ctx->recv_offset == ctx->recv_length && connRdmaRegisterRx(ctx, cm_id) == VALKEY_ERR) {
+            pthread_mutex_unlock(&ctx->rx_mu);
+            return VALKEY_ERR;
         }
         pthread_mutex_unlock(&ctx->rx_mu);
         return toread;
