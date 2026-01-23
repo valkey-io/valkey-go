@@ -63,24 +63,25 @@ type conn struct {
 	once  int32
 }
 
-func (c *conn) Read(b []byte) (n int, err error) {
-	if len(b) == 0 {
-		return 0, nil
-	}
-	c.mu.RLock()
-	if c.ctx == nil {
-		c.mu.RUnlock()
-		return 0, io.ErrClosedPipe
-	}
-	var ret C.ssize_t
+func (c *conn) timeout() int64 {
 	var timed = c.timed
 	if timed < 0 {
 		timed = 100000
 	}
-	ret = C.rdmaRead(c.ctx, (*C.char)(unsafe.Pointer(&b[0])), C.size_t(len(b)), C.long(timed))
-	c.mu.RUnlock()
+	return timed
+}
 
-	if ret < 0 {
+func (c *conn) Read(b []byte) (n int, err error) {
+	if len(b) == 0 {
+		return 0, nil
+	}
+	var ret C.ssize_t
+	c.mu.RLock()
+	if c.ctx != nil {
+		ret = C.rdmaRead(c.ctx, (*C.char)(unsafe.Pointer(&b[0])), C.size_t(len(b)), C.long(c.timeout()))
+	}
+	c.mu.RUnlock()
+	if ret <= 0 {
 		return 0, c.err()
 	}
 	return int(ret), nil
@@ -90,20 +91,13 @@ func (c *conn) Write(b []byte) (n int, err error) {
 	if len(b) == 0 {
 		return 0, nil
 	}
-	c.mu.RLock()
-	if c.ctx == nil {
-		c.mu.RUnlock()
-		return 0, io.ErrClosedPipe
-	}
 	var ret C.ssize_t
-	var timed = c.timed
-	if timed < 0 {
-		timed = 100000
+	c.mu.RLock()
+	if c.ctx != nil {
+		ret = C.rdmaWrite(c.ctx, (*C.char)(unsafe.Pointer(&b[0])), C.size_t(len(b)), C.long(c.timeout()))
 	}
-	ret = C.rdmaWrite(c.ctx, (*C.char)(unsafe.Pointer(&b[0])), C.size_t(len(b)), C.long(timed))
 	c.mu.RUnlock()
-
-	if ret < 0 {
+	if ret <= 0 {
 		return 0, c.err()
 	}
 	return int(ret), nil
@@ -123,15 +117,13 @@ func (c *conn) Close() error {
 	return nil
 }
 
-func (c *conn) err() (err error) {
+func (c *conn) err() error {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.ctx == nil {
-		err = io.ErrClosedPipe
-	} else {
-		err = fmt.Errorf("%s: %d", C.GoString(&c.ctx.errstr[0]), int(c.ctx.err))
+		return io.ErrClosedPipe
 	}
-	c.mu.Unlock()
-	return err
+	return fmt.Errorf("%s: %d", C.GoString(&c.ctx.errstr[0]), int(c.ctx.err))
 }
 
 func (c *conn) LocalAddr() net.Addr {

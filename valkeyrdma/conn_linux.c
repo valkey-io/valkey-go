@@ -843,14 +843,10 @@ pollcq:
     }
     pthread_mutex_unlock(&ctx->rx_mu);
 
-    if (valkeyRdmaPollCqCm(ctx, end) == VALKEY_OK) {
-        if (connRdmaHandleCq(ctx) == VALKEY_ERR) {
-            return VALKEY_ERR;
-        }
-        goto pollcq;
-    } else {
+    if (valkeyRdmaPollCqCm(ctx, end) != VALKEY_OK || connRdmaHandleCq(ctx) != VALKEY_OK) {
         return VALKEY_ERR;
     }
+    goto pollcq;
 }
 
 ssize_t rdmaWrite(RdmaContext *ctx, const char *obuf, size_t data_len, long timeout_msec) {
@@ -883,14 +879,10 @@ pollcq:
     }
 
 waitcq:
-    if (valkeyRdmaPollCqCm(ctx, end) == VALKEY_OK) {
-        if (connRdmaHandleCq(ctx) == VALKEY_ERR) {
-            return VALKEY_ERR;
-        }
-        goto pollcq;
-    } else {
+    if (valkeyRdmaPollCqCm(ctx, end) != VALKEY_OK || connRdmaHandleCq(ctx) != VALKEY_OK) {
         return VALKEY_ERR;
     }
+    goto pollcq;
 }
 
 void rdmaDisconnect(RdmaContext *ctx) {
