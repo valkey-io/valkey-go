@@ -344,7 +344,7 @@ static int connRdmaHandleWrite(RdmaContext *ctx, uint32_t byte_len) {
     return VALKEY_OK;
 }
 
-static int _connRdmaHandleCq(RdmaContext *ctx) {
+static int connRdmaHandleCq(RdmaContext *ctx) {
     struct rdma_cm_id *cm_id = ctx->cm_id;
     struct ibv_cq *ev_cq = NULL;
     void *ev_ctx = NULL;
@@ -420,20 +420,12 @@ pollcq:
     return VALKEY_OK;
 }
 
-static int connRdmaHandleCq(RdmaContext *ctx) {
-    int ret;
-    pthread_mutex_lock(&ctx->cq_mu);
-    ret = _connRdmaHandleCq(ctx);
-    pthread_mutex_unlock(&ctx->cq_mu);
-    return ret;
-}
-
 /* There are two FD(s) in use:
  * - fd of CM channel: handle CM event. Return error on Disconnected.
  * - fd of completion channel: handle CQ event.
  * Return OK on CQ event ready, then CQ event should be handled outside.
  */
-static int _valkeyRdmaPollCqCm(RdmaContext *ctx, long timed) {
+static int valkeyRdmaPollCqCm(RdmaContext *ctx, long timed) {
 #define VALKEY_RDMA_POLLFD_CM 0
 #define VALKEY_RDMA_POLLFD_CQ 1
 #define VALKEY_RDMA_POLLFD_MAX 2
@@ -473,28 +465,6 @@ static int _valkeyRdmaPollCqCm(RdmaContext *ctx, long timed) {
     }
 
     return VALKEY_OK;
-}
-
-static int valkeyRdmaPollCqCm(RdmaContext *ctx, long timed) {
-    int ret;
-    pthread_mutex_lock(&ctx->poll_mu);
-    if (ctx->poll_state != 0) {
-        while (ctx->poll_state != 0) {
-            pthread_cond_wait(&ctx->poll_cond, &ctx->poll_mu);
-        }
-        pthread_mutex_unlock(&ctx->poll_mu);
-        return VALKEY_OK;
-    }
-    ctx->poll_state = 1;
-    pthread_mutex_unlock(&ctx->poll_mu);
-
-    ret = _valkeyRdmaPollCqCm(ctx, timed);
-
-    pthread_mutex_lock(&ctx->poll_mu);
-    ctx->poll_state = 0;
-    pthread_cond_broadcast(&ctx->poll_cond);
-    pthread_mutex_unlock(&ctx->poll_mu);
-    return ret;
 }
 
 static size_t connRdmaSend(RdmaContext *ctx, struct rdma_cm_id *cm_id, const void *data, size_t data_len) {
@@ -748,10 +718,7 @@ int rdmaConnect(RdmaContext *ctx, const char *addr, int port, long timeout_msec)
     pthread_mutex_init(&ctx->tx_mu, NULL);
     pthread_mutex_init(&ctx->cmd_mu, NULL);
     pthread_mutex_init(&ctx->err_mu, NULL);
-    pthread_mutex_init(&ctx->poll_mu, NULL);
-    pthread_cond_init(&ctx->poll_cond, NULL);
 
-    ctx->poll_state = 0;
     ctx->tx_length = 0;
     ctx->send_length = 0;
     ctx->flags &= ~VALKEY_CONNECTED;
@@ -810,8 +777,6 @@ error:
     pthread_mutex_destroy(&ctx->tx_mu);
     pthread_mutex_destroy(&ctx->cmd_mu);
     pthread_mutex_destroy(&ctx->err_mu);
-    pthread_mutex_destroy(&ctx->poll_mu);
-    pthread_cond_destroy(&ctx->poll_cond);
 end:
     if (addrinfo) {
         rdma_freeaddrinfo(addrinfo);
@@ -822,7 +787,7 @@ end:
 ssize_t rdmaRead(RdmaContext *ctx, char *buf, size_t bufcap, long timeout_msec) {
     struct rdma_cm_id *cm_id = ctx->cm_id;
     long end;
-    uint32_t toread, remained;
+    uint32_t toread, remained, topoll;
 
     end = vk_msec_now() + timeout_msec;
 
@@ -843,16 +808,22 @@ pollcq:
     }
     pthread_mutex_unlock(&ctx->rx_mu);
 
-    if (valkeyRdmaPollCqCm(ctx, end) != VALKEY_OK || connRdmaHandleCq(ctx) != VALKEY_OK) {
+    pthread_mutex_lock(&ctx->cq_mu);
+    pthread_mutex_lock(&ctx->rx_mu);
+    topoll = ctx->recv_offset - ctx->rx_offset;
+    pthread_mutex_unlock(&ctx->rx_mu);
+    if (topoll == 0 && (valkeyRdmaPollCqCm(ctx, end) != VALKEY_OK || connRdmaHandleCq(ctx) != VALKEY_OK)) {
+        pthread_mutex_unlock(&ctx->cq_mu);
         return VALKEY_ERR;
     }
+    pthread_mutex_unlock(&ctx->cq_mu);
     goto pollcq;
 }
 
 ssize_t rdmaWrite(RdmaContext *ctx, const char *obuf, size_t data_len, long timeout_msec) {
     struct rdma_cm_id *cm_id = ctx->cm_id;
     long end;
-    uint32_t towrite, wrote = 0;
+    uint32_t towrite, topoll, wrote = 0;
     size_t ret;
 
     end = vk_msec_now() + timeout_msec;
@@ -879,9 +850,15 @@ pollcq:
     }
 
 waitcq:
-    if (valkeyRdmaPollCqCm(ctx, end) != VALKEY_OK || connRdmaHandleCq(ctx) != VALKEY_OK) {
+    pthread_mutex_lock(&ctx->cq_mu);
+    pthread_mutex_lock(&ctx->tx_mu);
+    topoll = ctx->tx_offset - ctx->tx_length;
+    pthread_mutex_unlock(&ctx->tx_mu);
+    if (topoll == 0 && (valkeyRdmaPollCqCm(ctx, end) != VALKEY_OK || connRdmaHandleCq(ctx) != VALKEY_OK)) {
+        pthread_mutex_unlock(&ctx->cq_mu);
         return VALKEY_ERR;
     }
+    pthread_mutex_unlock(&ctx->cq_mu);
     goto pollcq;
 }
 
@@ -909,6 +886,4 @@ void rdmaClose(RdmaContext *ctx) {
     pthread_mutex_destroy(&ctx->tx_mu);
     pthread_mutex_destroy(&ctx->cmd_mu);
     pthread_mutex_destroy(&ctx->err_mu);
-    pthread_mutex_destroy(&ctx->poll_mu);
-    pthread_cond_destroy(&ctx->poll_cond);
 }

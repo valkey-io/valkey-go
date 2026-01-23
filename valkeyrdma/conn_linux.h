@@ -129,18 +129,15 @@ typedef struct RdmaContext {
     valkeyRdmaCmd *cmd_buf;
     struct ibv_mr *cmd_mr;
 
+    int flags;
     int err;          /* Error flags, 0 when there is no error */
     char errstr[64];  /* String representation of error when applicable */
-    int flags;
 
     pthread_mutex_t cq_mu;
     pthread_mutex_t rx_mu;
     pthread_mutex_t tx_mu;
     pthread_mutex_t cmd_mu;
     pthread_mutex_t err_mu;
-    pthread_mutex_t poll_mu;
-    pthread_cond_t poll_cond;
-    int poll_state;
 
 } RdmaContext;
 
