@@ -43,15 +43,14 @@ func DialContext(ctx context.Context, dst string) (net.Conn, error) {
 	chost := C.CString(host)
 	defer C.free(unsafe.Pointer(chost))
 
-	timeout := 10000
+	timeout := int64(10000)
 	if dl, ok := ctx.Deadline(); ok {
-		timeout = int(time.Since(dl).Milliseconds())
+		timeout = time.Until(dl).Milliseconds()
 	}
 
 	if ret := C.rdmaConnect(c.ctx, chost, C.int(port), C.long(timeout)); ret != 0 {
-		err = fmt.Errorf("%s: %d", C.GoString(&c.ctx.errstr[0]), int(c.ctx.err))
-		C.free(unsafe.Pointer(c.ctx))
-		return nil, err
+		defer C.free(unsafe.Pointer(c.ctx))
+		return nil, c.err()
 	}
 	return c, nil
 }
@@ -64,41 +63,38 @@ type conn struct {
 }
 
 func (c *conn) timeout() int64 {
-	var timed = c.timed
-	if timed < 0 {
-		timed = 100000
+	if c.timed < 0 {
+		return 100000
 	}
-	return timed
+	return c.timed
 }
 
 func (c *conn) Read(b []byte) (n int, err error) {
-	if len(b) == 0 {
-		return 0, nil
-	}
 	var ret C.ssize_t
-	c.mu.RLock()
-	if c.ctx != nil {
-		ret = C.rdmaRead(c.ctx, (*C.char)(unsafe.Pointer(&b[0])), C.size_t(len(b)), C.long(c.timeout()))
-	}
-	c.mu.RUnlock()
-	if ret <= 0 {
-		return 0, c.err()
+	if len(b) != 0 {
+		c.mu.RLock()
+		if c.ctx != nil {
+			ret = C.rdmaRead(c.ctx, (*C.char)(unsafe.Pointer(&b[0])), C.size_t(len(b)), C.long(c.timeout()))
+		}
+		c.mu.RUnlock()
+		if ret <= 0 {
+			return 0, c.err()
+		}
 	}
 	return int(ret), nil
 }
 
 func (c *conn) Write(b []byte) (n int, err error) {
-	if len(b) == 0 {
-		return 0, nil
-	}
 	var ret C.ssize_t
-	c.mu.RLock()
-	if c.ctx != nil {
-		ret = C.rdmaWrite(c.ctx, (*C.char)(unsafe.Pointer(&b[0])), C.size_t(len(b)), C.long(c.timeout()))
-	}
-	c.mu.RUnlock()
-	if ret <= 0 {
-		return 0, c.err()
+	if len(b) != 0 {
+		c.mu.RLock()
+		if c.ctx != nil {
+			ret = C.rdmaWrite(c.ctx, (*C.char)(unsafe.Pointer(&b[0])), C.size_t(len(b)), C.long(c.timeout()))
+		}
+		c.mu.RUnlock()
+		if ret <= 0 {
+			return 0, c.err()
+		}
 	}
 	return int(ret), nil
 }
@@ -106,14 +102,14 @@ func (c *conn) Write(b []byte) (n int, err error) {
 func (c *conn) Close() error {
 	if atomic.CompareAndSwapInt32(&c.once, 0, 1) {
 		C.rdmaDisconnect(c.ctx)
+		c.mu.Lock()
+		if c.ctx != nil {
+			C.rdmaClose(c.ctx)
+			C.free(unsafe.Pointer(c.ctx))
+			c.ctx = nil
+		}
+		c.mu.Unlock()
 	}
-	c.mu.Lock()
-	if c.ctx != nil {
-		C.rdmaClose(c.ctx)
-		C.free(unsafe.Pointer(c.ctx))
-		c.ctx = nil
-	}
-	c.mu.Unlock()
 	return nil
 }
 
@@ -124,14 +120,6 @@ func (c *conn) err() error {
 		return io.ErrClosedPipe
 	}
 	return fmt.Errorf("%s: %d", C.GoString(&c.ctx.errstr[0]), int(c.ctx.err))
-}
-
-func (c *conn) LocalAddr() net.Addr {
-	panic("not implemented")
-}
-
-func (c *conn) RemoteAddr() net.Addr {
-	panic("not implemented")
 }
 
 func (c *conn) SetDeadline(t time.Time) error {
@@ -150,5 +138,13 @@ func (c *conn) SetReadDeadline(t time.Time) error {
 }
 
 func (c *conn) SetWriteDeadline(t time.Time) error {
+	panic("not implemented")
+}
+
+func (c *conn) LocalAddr() net.Addr {
+	panic("not implemented")
+}
+
+func (c *conn) RemoteAddr() net.Addr {
 	panic("not implemented")
 }
