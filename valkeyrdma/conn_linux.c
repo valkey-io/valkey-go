@@ -625,37 +625,45 @@ static int valkeyRdmaCM(RdmaContext *ctx, long timeout) {
             ret = rdma_resolve_route(event->id, timeout);
             if (ret) {
                 valkeySetError(ctx, VALKEY_ERR_OTHER, "RDMA: route resolve failed on");
+                goto disconnect;
             }
             break;
         case RDMA_CM_EVENT_ROUTE_RESOLVED:
             ret = valkeyRdmaConnect(ctx, event->id);
+            if (ret == VALKEY_ERR) {
+                goto disconnect;
+            }
             break;
         case RDMA_CM_EVENT_ESTABLISHED:
             ret = valkeyRdmaEstablished(ctx, event->id);
+            if (ret == VALKEY_ERR) {
+                goto disconnect;
+            }
             break;
         case RDMA_CM_EVENT_TIMEWAIT_EXIT:
-            ret = VALKEY_ERR;
-            valkeySetError(ctx, VALKEY_ERR_TIMEOUT, "RDMA: connect timeout");
-            break;
         case RDMA_CM_EVENT_ADDR_ERROR:
         case RDMA_CM_EVENT_ROUTE_ERROR:
         case RDMA_CM_EVENT_CONNECT_ERROR:
         case RDMA_CM_EVENT_UNREACHABLE:
         case RDMA_CM_EVENT_REJECTED:
         case RDMA_CM_EVENT_DISCONNECTED:
-            ctx->flags &= ~VALKEY_CONNECTED;
-            break;
+            valkeySetError(ctx, VALKEY_ERR_OTHER, "RDMA: disconnected");
+            goto disconnect;
         case RDMA_CM_EVENT_ADDR_CHANGE:
         default:
             valkeySetError(ctx, VALKEY_ERR_OTHER, rdma_event_str(event->event));
             ret = VALKEY_ERR;
             break;
         }
-
         rdma_ack_cm_event(event);
     }
 
     return ret;
+
+disconnect:
+    rdma_ack_cm_event(event);
+    ctx->flags &= ~VALKEY_CONNECTED;
+    return VALKEY_ERR;
 }
 
 static int valkeyRdmaWaitTxBuf(RdmaContext *ctx, long timeout) {
@@ -700,7 +708,7 @@ static int valkeyRdmaWaitConn(RdmaContext *ctx, long timeout) {
         pfd.events = POLLIN;
         pfd.revents = 0;
         if (poll_noeintr(&pfd, 1, end - now) < 0) {
-            valkeySetError(ctx, VALKEY_ERR_IO, "poll");
+            valkeySetError(ctx, VALKEY_ERR_IO, "RDMA: Poll CM failed");
             return VALKEY_ERR;
         }
 
@@ -715,7 +723,7 @@ static int valkeyRdmaWaitConn(RdmaContext *ctx, long timeout) {
             }
         }
     }
-
+    valkeySetError(ctx, VALKEY_ERR_TIMEOUT, "RDMA: connecting timeout");
     return VALKEY_ERR;
 }
 
