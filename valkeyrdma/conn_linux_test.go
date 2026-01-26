@@ -266,7 +266,7 @@ func needCmd(t testing.TB, name ...string) {
 	t.Helper()
 	for _, n := range name {
 		if !hasCmd(n) {
-			t.Skipf("missing required command %q in PATH", name)
+			t.Skipf("missing required command %q in PATH", n)
 		}
 	}
 }

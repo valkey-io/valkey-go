@@ -84,7 +84,7 @@ func main() {
 	client, err := valkey.NewClient(valkey.ClientOption{
 		InitAddress: []string{"<server ip on the rdma netdev>:6378"},
 		DialCtxFn: func(ctx context.Context, s string, dialer *net.Dialer, config *tls.Config) (conn net.Conn, err error) {
-			return valkeyrdma.DialContext(ctx,s)
+			return valkeyrdma.DialContext(ctx, s)
 		},
 	})
 	...

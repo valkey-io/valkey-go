@@ -247,7 +247,7 @@ find:
         pthread_mutex_unlock(&ctx->rx_mu);
         if (connRdmaHandleCq(ctx) == VALKEY_ERR) {
             pthread_mutex_lock(&ctx->rx_mu);
-            valkeySetError(ctx, ret, "RDMA: failed to release cmd buf");
+            valkeySetError(ctx, VALKEY_ERR_OTHER, "RDMA: failed to release cmd buf");
             return VALKEY_ERR;
         }
         pthread_mutex_lock(&ctx->rx_mu);
@@ -368,7 +368,7 @@ static int connRdmaHandleCq(RdmaContext *ctx) {
         return VALKEY_OK;
     }
 
-    ibv_ack_cq_events(ctx->cq, 1);
+    ibv_ack_cq_events(ev_cq, 1);
     if (ibv_req_notify_cq(ev_cq, 0)) {
         valkeySetError(ctx, VALKEY_ERR_OTHER, "RDMA: notify cq failed");
         return VALKEY_ERR;
@@ -423,8 +423,6 @@ pollcq:
     }
 
     goto pollcq;
-
-    return VALKEY_OK;
 }
 
 /* There are two FD(s) in use:
@@ -667,7 +665,6 @@ disconnect:
 }
 
 static int valkeyRdmaWaitTxBuf(RdmaContext *ctx, long timeout) {
-    struct pollfd pfd;
     long now, end;
 
     assert(timeout >= 0);

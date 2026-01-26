@@ -64,7 +64,7 @@ type conn struct {
 
 func (c *conn) timeout() int64 {
 	if c.timed < 0 {
-		return 100000
+		return 10000
 	}
 	return c.timed
 }
