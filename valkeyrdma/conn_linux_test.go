@@ -53,14 +53,6 @@ func BenchmarkE2E(b *testing.B) {
 	}))
 }
 
-type writer struct {
-	fn func(p []byte) (n int, err error)
-}
-
-func (i *writer) Write(p []byte) (n int, err error) {
-	return i.fn(p)
-}
-
 func TestLocalRoCECM(t *testing.T) {
 	if os.Getenv("CI") == "true" {
 		t.Skip()
@@ -69,13 +61,69 @@ func TestLocalRoCECM(t *testing.T) {
 	needCmd(t, "rdma")
 	needSudo(t)
 
-	netdev := "dummy0"
-	rxedev := "rxe_dummy0"
 	addr := "10.200.2.1"
 	port := "6378"
 
 	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Second)
 	defer cancel()
+
+	defer startValkey901WithRdmaModule(t, ctx, addr, port)()
+
+	c, err := valkey.NewClient(valkey.ClientOption{
+		InitAddress: []string{addr + ":" + port},
+		DialCtxFn: func(_ context.Context, s string, dialer *net.Dialer, config *tls.Config) (conn net.Conn, err error) {
+			return DialContext(ctx, s)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			buf := make([]byte, 512)
+			for j := 1; j <= len(buf); j++ {
+				_, err := rand.Read(buf[:j])
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				v, err := c.Do(ctx, c.B().Echo().Message(valkey.BinaryString(buf[:j])).Build()).ToString()
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				if v != valkey.BinaryString(buf[:j]) {
+					t.Errorf("got %q, want %q", v, string(buf[:j]))
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+type writer struct {
+	fn func(p []byte) (n int, err error)
+}
+
+func (i *writer) Write(p []byte) (n int, err error) {
+	return i.fn(p)
+}
+
+func startValkey901WithRdmaModule(t testing.TB, ctx context.Context, addr, port string) func() {
+	t.Helper()
+
+	needCmd(t, "ip")
+	needCmd(t, "rdma")
+	needSudo(t)
+
+	netdev := "dummy0"
+	rxedev := "rxe_dummy0"
 
 	if err := sudoRun(ctx, "modprobe", "rdma_rxe"); err != nil {
 		t.Logf("failed to load rdma_rxe: %v", err)
@@ -113,57 +161,21 @@ func TestLocalRoCECM(t *testing.T) {
 	if err := srv.Start(); err != nil {
 		t.Fatalf("failed to start server: %v", err)
 	}
-	defer func() {
-		_ = srv.Process.Kill()
-		_ = srv.Wait()
-	}()
 
 	select {
 	case <-r:
-	case <-ctx.Done():
+	case <-time.After(30 * time.Second):
+		_ = srv.Process.Kill()
+		_ = srv.Wait()
 		t.Fatal("timeout waiting for server to start")
 	}
-
-	c, err := valkey.NewClient(valkey.ClientOption{
-		InitAddress:       []string{addr + ":" + port},
-		PipelineMultiplex: -1,
-		DialCtxFn: func(_ context.Context, s string, dialer *net.Dialer, config *tls.Config) (conn net.Conn, err error) {
-			return DialContext(ctx, s)
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
+	return func() {
+		_ = srv.Process.Kill()
+		_ = srv.Wait()
 	}
-	defer c.Close()
-
-	var wg sync.WaitGroup
-	for i := 0; i < 4; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			buf := make([]byte, 512)
-			for j := 1; j <= len(buf); j++ {
-				_, err := rand.Read(buf[:j])
-				if err != nil {
-					t.Error(err)
-					return
-				}
-				v, err := c.Do(ctx, c.B().Echo().Message(valkey.BinaryString(buf[:j])).Build()).ToString()
-				if err != nil {
-					t.Error(err)
-					return
-				}
-				if v != valkey.BinaryString(buf[:j]) {
-					t.Errorf("got %q, want %q", v, string(buf[:j]))
-					return
-				}
-			}
-		}()
-	}
-	wg.Wait()
 }
 
-func buildValkey901WithRdmaModule(t *testing.T, ctx context.Context) (valkeyServer, rdmaSo string) {
+func buildValkey901WithRdmaModule(t testing.TB, ctx context.Context) (valkeyServer, rdmaSo string) {
 	t.Helper()
 
 	const (
@@ -209,7 +221,7 @@ func buildValkey901WithRdmaModule(t *testing.T, ctx context.Context) (valkeyServ
 	return valkeyServer, rdmaSo
 }
 
-func valkeyCacheDir(t *testing.T) string {
+func valkeyCacheDir(t testing.TB) string {
 	t.Helper()
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -228,7 +240,7 @@ func dirExists(p string) bool {
 	return err == nil && st.IsDir()
 }
 
-func mustRun(t *testing.T, ctx context.Context, dir, name string, args ...string) {
+func mustRun(t testing.TB, ctx context.Context, dir, name string, args ...string) {
 	t.Helper()
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
@@ -238,7 +250,7 @@ func mustRun(t *testing.T, ctx context.Context, dir, name string, args ...string
 	}
 }
 
-func mustRunEnv(t *testing.T, ctx context.Context, dir string, env []string, name string, args ...string) {
+func mustRunEnv(t testing.TB, ctx context.Context, dir string, env []string, name string, args ...string) {
 	t.Helper()
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
@@ -250,7 +262,7 @@ func mustRunEnv(t *testing.T, ctx context.Context, dir string, env []string, nam
 	}
 }
 
-func needCmd(t *testing.T, name ...string) {
+func needCmd(t testing.TB, name ...string) {
 	t.Helper()
 	for _, n := range name {
 		if !hasCmd(n) {
@@ -264,7 +276,7 @@ func hasCmd(name string) bool {
 	return err == nil
 }
 
-func needSudo(t *testing.T) {
+func needSudo(t testing.TB) {
 	t.Helper()
 	if !hasCmd("sudo") {
 		t.Skip("sudo not found in PATH")
