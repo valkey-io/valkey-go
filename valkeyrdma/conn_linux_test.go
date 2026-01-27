@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/tls"
 	"fmt"
 	randv2 "math/rand/v2"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -47,9 +45,7 @@ func BenchmarkE2E(b *testing.B) {
 	}))
 	b.Run("RDMA", f(valkey.ClientOption{
 		InitAddress: []string{"172.16.255.128:6378"},
-		DialCtxFn: func(ctx context.Context, s string, dialer *net.Dialer, config *tls.Config) (conn net.Conn, err error) {
-			return DialContext(ctx, s)
-		},
+		DialCtxFn:   DialCtxFn,
 	}))
 }
 
@@ -71,9 +67,7 @@ func TestLocalRoCECM(t *testing.T) {
 
 	c, err := valkey.NewClient(valkey.ClientOption{
 		InitAddress: []string{addr + ":" + port},
-		DialCtxFn: func(_ context.Context, s string, dialer *net.Dialer, config *tls.Config) (conn net.Conn, err error) {
-			return DialContext(ctx, s)
-		},
+		DialCtxFn:   DialCtxFn,
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -73,8 +73,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
-	"net"
 
 	"github.com/valkey-io/valkey-go"
 	"github.com/valkey-io/valkey-go/valkeyrdma"
@@ -83,9 +81,7 @@ import (
 func main() {
 	client, err := valkey.NewClient(valkey.ClientOption{
 		InitAddress: []string{"<server ip on the rdma netdev>:6378"},
-		DialCtxFn: func(ctx context.Context, s string, dialer *net.Dialer, config *tls.Config) (conn net.Conn, err error) {
-			return valkeyrdma.DialContext(ctx, s)
-		},
+		DialCtxFn:   valkeyrdma.DialCtxFn,
 	})
 	...
 }

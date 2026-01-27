@@ -15,6 +15,7 @@ import "C"
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -27,7 +28,7 @@ import (
 
 var _ net.Conn = (*conn)(nil)
 
-func DialContext(ctx context.Context, dst string) (net.Conn, error) {
+func DialCtxFn(ctx context.Context, dst string, _ *net.Dialer, _ *tls.Config) (net.Conn, error) {
 	host, portstr, err := net.SplitHostPort(dst)
 	if err != nil {
 		return nil, err
