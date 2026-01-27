@@ -161,7 +161,7 @@ static int rdmaSetupIoBuf(RdmaContext *ctx, struct rdma_cm_id *cm_id) {
     ctx->cmd_buf = calloc(length, 1);
     ctx->cmd_mr = ibv_reg_mr(ctx->pd, ctx->cmd_buf, length, access);
     if (!ctx->cmd_mr) {
-        valkeySetError(ctx, VALKEY_ERR_OTHER, "RDMA: reg recv mr failed");
+        valkeySetError(ctx, VALKEY_ERR_OTHER, "RDMA: reg cmd mr failed");
         goto destroy_iobuf;
     }
 
@@ -185,12 +185,12 @@ static int rdmaSetupIoBuf(RdmaContext *ctx, struct rdma_cm_id *cm_id) {
     ctx->recv_buf = calloc(length, 1);
     if (!ctx->recv_buf) {
         valkeySetError(ctx, VALKEY_ERR_OTHER, "RDMA: receive buffer allocation failed");
-        return VALKEY_ERR;
+        goto destroy_iobuf;
     }
     ctx->recv_length = length;
     ctx->recv_mr = ibv_reg_mr(ctx->pd, ctx->recv_buf, length, access);
     if (!ctx->recv_mr) {
-        valkeySetError(ctx, VALKEY_ERR_OTHER, "RDMA: reg send mr failed");
+        valkeySetError(ctx, VALKEY_ERR_OTHER, "RDMA: reg recv mr failed");
         goto destroy_iobuf;
     }
 
