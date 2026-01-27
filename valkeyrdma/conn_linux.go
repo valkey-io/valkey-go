@@ -128,7 +128,11 @@ func (c *conn) SetDeadline(t time.Time) error {
 	if t.IsZero() {
 		c.timed = -1
 	} else {
-		c.timed = time.Until(t).Milliseconds()
+		if d := time.Until(t); d <= 0 {
+			c.timed = 0 // Deadline already passed; use immediate timeout.
+		} else {
+			c.timed = d.Milliseconds()
+		}
 	}
 	return nil
 }

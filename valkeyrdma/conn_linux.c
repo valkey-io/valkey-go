@@ -183,6 +183,10 @@ static int rdmaSetupIoBuf(RdmaContext *ctx, struct rdma_cm_id *cm_id) {
     access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_WRITE;
     length = VALKEY_RDMA_DEFAULT_RX_LEN;
     ctx->recv_buf = calloc(length, 1);
+    if (!ctx->recv_buf) {
+        valkeySetError(ctx, VALKEY_ERR_OTHER, "RDMA: receive buffer allocation failed");
+        return VALKEY_ERR;
+    }
     ctx->recv_length = length;
     ctx->recv_mr = ibv_reg_mr(ctx->pd, ctx->recv_buf, length, access);
     if (!ctx->recv_mr) {
@@ -213,6 +217,10 @@ static int rdmaAdjustSendbuf(RdmaContext *ctx, unsigned int length) {
 
     /* create a new buffer & MR */
     ctx->send_buf = calloc(length, 1);
+    if (!ctx->send_buf) {
+        valkeySetError(ctx, VALKEY_ERR_OTHER, "RDMA: send buffer allocation failed");
+        return VALKEY_ERR;
+    }
     ctx->send_length = length;
     ctx->send_mr = ibv_reg_mr(ctx->pd, ctx->send_buf, length, access);
     if (!ctx->send_mr) {
@@ -301,6 +309,7 @@ static int connRdmaRegisterRx(RdmaContext *ctx, struct rdma_cm_id *cm_id) {
 }
 
 static int connRdmaHandleRecv(RdmaContext *ctx, struct rdma_cm_id *cm_id, valkeyRdmaCmd *cmd, uint32_t byte_len) {
+    int ret;
     if (byte_len != sizeof(valkeyRdmaCmd)) {
         valkeySetError(ctx, VALKEY_ERR_OTHER, "RDMA: FATAL error, recv corrupted cmd");
         return VALKEY_ERR;
@@ -313,8 +322,11 @@ static int connRdmaHandleRecv(RdmaContext *ctx, struct rdma_cm_id *cm_id, valkey
         ctx->tx_length = ntohl(cmd->memory.length);
         ctx->tx_key = ntohl(cmd->memory.key);
         ctx->tx_offset = 0;
-        rdmaAdjustSendbuf(ctx, ctx->tx_length);
+        ret = rdmaAdjustSendbuf(ctx, ctx->tx_length);
         pthread_mutex_unlock(&ctx->tx_mu);
+        if (ret == VALKEY_ERR) {
+            return VALKEY_ERR;
+        }
         break;
 
     case Keepalive:
