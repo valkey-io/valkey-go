@@ -11,8 +11,8 @@ replace github.com/valkey-io/valkey-go/mock => ../mock
 require (
 	github.com/onsi/ginkgo/v2 v2.27.3
 	github.com/onsi/gomega v1.38.3
-	github.com/valkey-io/valkey-go v1.0.70
-	github.com/valkey-io/valkey-go/mock v1.0.70
+	github.com/valkey-io/valkey-go v1.0.71
+	github.com/valkey-io/valkey-go/mock v1.0.71
 	go.uber.org/mock v0.6.0
 )
 

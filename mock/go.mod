@@ -7,7 +7,7 @@ toolchain go1.24.11
 replace github.com/valkey-io/valkey-go => ../
 
 require (
-	github.com/valkey-io/valkey-go v1.0.70
+	github.com/valkey-io/valkey-go v1.0.71
 	go.uber.org/mock v0.6.0
 )
 
