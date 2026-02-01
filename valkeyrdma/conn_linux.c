@@ -510,7 +510,6 @@ static int valkeyRdmaPollCqCm(RdmaContext *ctx, long timed) {
                 return VALKEY_ERR;
             }
             pthread_mutex_unlock(&ctx->cq_mu);
-            return VALKEY_OK;
         }
 
         /* Poll for a short slice so we can re-check CQ even if no events. */
