@@ -84,18 +84,21 @@ static int valkeyRdmaCM(RdmaContext *ctx, long timeout);
 static int connRdmaHandleCq(RdmaContext *ctx);
 static int connRdmaHandleWc(RdmaContext *ctx, struct ibv_wc *wc);
 
+/* Special return code for connRdmaPollCqOnce to indicate CQ is empty */
+#define VALKEY_CQ_EMPTY 1
+
 /* Helper function to poll CQ and handle work completions.
  * 
  * Parameters:
  * - ctx: RDMA context
  * - mutex_held: if non-zero, assumes ctx->cq_mu is already held by caller
  * - return_on_wc: if non-zero, returns VALKEY_OK immediately after handling one WC
- * - return_on_empty: if non-zero, returns VALKEY_OK when CQ is empty; otherwise breaks
+ * - return_on_empty: if non-zero, returns VALKEY_OK when CQ is empty; otherwise returns VALKEY_CQ_EMPTY
  *
  * Returns:
  * - VALKEY_OK on success (if return_on_wc or return_on_empty is set)
  * - VALKEY_ERR on error
- * - 0 if loop should break (when return_on_empty is 0 and CQ is empty)
+ * - VALKEY_CQ_EMPTY if CQ is empty and return_on_empty is 0
  */
 static int connRdmaPollCqOnce(RdmaContext *ctx, int mutex_held, int return_on_wc, int return_on_empty) {
     struct ibv_wc wc = {0};
@@ -122,7 +125,7 @@ static int connRdmaPollCqOnce(RdmaContext *ctx, int mutex_held, int return_on_wc
             if (return_on_empty) {
                 return VALKEY_OK;
             }
-            return 0; /* Signal to break the outer loop */
+            return VALKEY_CQ_EMPTY; /* Signal CQ is empty */
         }
 
         if (connRdmaHandleWc(ctx, &wc) == VALKEY_ERR) {
@@ -535,7 +538,7 @@ static int valkeyRdmaPollCqCm(RdmaContext *ctx, long timed) {
         } else if (ret == VALKEY_OK) {
             return VALKEY_OK;
         }
-        /* ret == 0 means CQ is empty, continue to poll */
+        /* ret == VALKEY_CQ_EMPTY means CQ is empty, continue to poll */
 
         /* Poll for a short slice so we can re-check CQ even if no events. */
         ret = poll_noeintr(pfd, VALKEY_RDMA_POLLFD_MAX, (int)valkeyMin(10, timed - now));
