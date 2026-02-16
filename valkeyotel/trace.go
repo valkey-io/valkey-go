@@ -127,12 +127,6 @@ var (
 )
 
 func (c *commandMetrics) recordDuration(ctx context.Context, op string, startTime time.Time) {
-	opts := metricRecordOptionPool.Get().(*[]metric.RecordOption)
-	defer func() {
-		*opts = (*opts)[:0]
-		metricRecordOptionPool.Put(opts)
-	}()
-
 	count := len(c.recordOpts)
 
 	var opOpt metric.RecordOption
@@ -147,13 +141,24 @@ func (c *commandMetrics) recordDuration(ctx context.Context, op string, startTim
 		count++
 	}
 
-	*opts = slices.Grow(*opts, count)
-	*opts = append(*opts, c.recordOpts...)
-	if opOpt != nil {
-		*opts = append(*opts, opOpt)
-	}
-	if labelerOpt != nil {
-		*opts = append(*opts, labelerOpt)
+	var opts *[]metric.RecordOption
+	if count == len(c.recordOpts) {
+		opts = &c.recordOpts
+	} else {
+		opts = metricRecordOptionPool.Get().(*[]metric.RecordOption)
+		defer func() {
+			*opts = (*opts)[:0]
+			metricRecordOptionPool.Put(opts)
+		}()
+
+		*opts = slices.Grow(*opts, count)
+		*opts = append(*opts, c.recordOpts...)
+		if opOpt != nil {
+			*opts = append(*opts, opOpt)
+		}
+		if labelerOpt != nil {
+			*opts = append(*opts, labelerOpt)
+		}
 	}
 
 	// Use floating point division here for higher precision (instead of Seconds method).
@@ -165,12 +170,6 @@ func (c *commandMetrics) recordError(ctx context.Context, op string, err error) 
 	if err == nil || valkey.IsValkeyNil(err) {
 		return
 	}
-
-	opts := metricAddOptionPool.Get().(*[]metric.AddOption)
-	defer func() {
-		*opts = (*opts)[:0]
-		metricAddOptionPool.Put(opts)
-	}()
 
 	count := len(c.addOpts)
 
@@ -186,13 +185,24 @@ func (c *commandMetrics) recordError(ctx context.Context, op string, err error) 
 		count++
 	}
 
-	*opts = slices.Grow(*opts, count)
-	*opts = append(*opts, c.addOpts...)
-	if opOpt != nil {
-		*opts = append(*opts, opOpt)
-	}
-	if labelerOpt != nil {
-		*opts = append(*opts, labelerOpt)
+	var opts *[]metric.AddOption
+	if count == len(c.addOpts) {
+		opts = &c.addOpts
+	} else {
+		opts = metricAddOptionPool.Get().(*[]metric.AddOption)
+		defer func() {
+			*opts = (*opts)[:0]
+			metricAddOptionPool.Put(opts)
+		}()
+
+		*opts = slices.Grow(*opts, count)
+		*opts = append(*opts, c.addOpts...)
+		if opOpt != nil {
+			*opts = append(*opts, opOpt)
+		}
+		if labelerOpt != nil {
+			*opts = append(*opts, labelerOpt)
+		}
 	}
 
 	c.errors.Add(ctx, 1, *opts...)
