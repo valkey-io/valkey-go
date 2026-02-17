@@ -161,9 +161,7 @@ func (c *commandMetrics) recordDuration(ctx context.Context, op string, startTim
 		}
 	}
 
-	// Use floating point division here for higher precision (instead of Seconds method).
-	elapsedTime := float64(time.Since(startTime)) / float64(time.Second)
-	c.duration.Record(ctx, elapsedTime, *opts...)
+	c.duration.Record(ctx, time.Since(startTime).Seconds(), *opts...)
 }
 
 func (c *commandMetrics) recordError(ctx context.Context, op string, err error) {
