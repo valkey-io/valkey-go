@@ -46,9 +46,18 @@ type Cmder interface {
 }
 
 type baseCmd[T any] struct {
-	err    error
-	val    T
-	rawVal any
+	err        error
+	val        T
+	rawVal     any
+	isCacheHit bool
+}
+
+func (cmd *baseCmd[T]) setIsCacheHit(val bool) {
+	cmd.isCacheHit = val
+}
+
+func (cmd *baseCmd[T]) IsCacheHit() bool {
+	return cmd.isCacheHit
 }
 
 func (cmd *baseCmd[T]) SetVal(val T) {
@@ -94,6 +103,7 @@ func (cmd *Cmd) from(res valkey.ValkeyResult) {
 		return
 	}
 	cmd.SetVal(val)
+	cmd.setIsCacheHit(res.IsCacheHit())
 }
 
 func newCmd(res valkey.ValkeyResult) *Cmd {
@@ -355,6 +365,7 @@ func (cmd *StringCmd) from(res valkey.ValkeyResult) {
 	val, err := res.ToString()
 	cmd.SetErr(err)
 	cmd.SetVal(val)
+	cmd.setIsCacheHit(res.IsCacheHit())
 }
 
 func newStringCmd(res valkey.ValkeyResult) *StringCmd {
@@ -433,6 +444,7 @@ func (cmd *BoolCmd) from(res valkey.ValkeyResult) {
 	}
 	cmd.SetVal(val)
 	cmd.SetErr(err)
+	cmd.setIsCacheHit(res.IsCacheHit())
 }
 
 func newBoolCmd(res valkey.ValkeyResult) *BoolCmd {
@@ -474,6 +486,7 @@ func (cmd *DurationCmd) from(res valkey.ValkeyResult) {
 		return
 	}
 	cmd.SetVal(time.Duration(val))
+	cmd.setIsCacheHit(res.IsCacheHit())
 }
 
 func newDurationCmd(res valkey.ValkeyResult, precision time.Duration) *DurationCmd {
@@ -529,6 +542,7 @@ func (cmd *SliceCmd) from(res valkey.ValkeyResult) {
 		}
 	}
 	cmd.SetVal(vals)
+	cmd.setIsCacheHit(res.IsCacheHit())
 }
 
 // newSliceCmd returns SliceCmd according to input arguments, if the caller is JSONObjKeys,
@@ -557,6 +571,7 @@ func (cmd *StringSliceCmd) from(res valkey.ValkeyResult) {
 	val, err := res.AsStrSlice()
 	cmd.SetVal(val)
 	cmd.SetErr(err)
+	cmd.setIsCacheHit(res.IsCacheHit())
 }
 
 func newStringSliceCmd(res valkey.ValkeyResult) *StringSliceCmd {
@@ -566,19 +581,24 @@ func newStringSliceCmd(res valkey.ValkeyResult) *StringSliceCmd {
 }
 
 type IntSliceCmd struct {
-	err error
-	val []int64
+	err        error
+	val        []int64
+	isCacheHit bool
 }
 
 func (cmd *IntSliceCmd) from(res valkey.ValkeyResult) {
 	cmd.val, cmd.err = res.AsIntSlice()
-
+	cmd.setIsCacheHit(res.IsCacheHit())
 }
 
 func newIntSliceCmd(res valkey.ValkeyResult) *IntSliceCmd {
 	cmd := &IntSliceCmd{}
 	cmd.from(res)
 	return cmd
+}
+
+func (cmd *IntSliceCmd) setIsCacheHit(isCacheHit bool) {
+	cmd.isCacheHit = isCacheHit
 }
 
 func (cmd *IntSliceCmd) SetVal(val []int64) {
@@ -601,6 +621,10 @@ func (cmd *IntSliceCmd) Result() ([]int64, error) {
 	return cmd.val, cmd.err
 }
 
+func (cmd *IntSliceCmd) IsCacheHit() bool {
+	return cmd.isCacheHit
+}
+
 type BoolSliceCmd struct {
 	baseCmd[[]bool]
 }
@@ -616,6 +640,7 @@ func (cmd *BoolSliceCmd) from(res valkey.ValkeyResult) {
 		val = append(val, i == 1)
 	}
 	cmd.SetVal(val)
+	cmd.setIsCacheHit(res.IsCacheHit())
 }
 
 func newBoolSliceCmd(res valkey.ValkeyResult) *BoolSliceCmd {
@@ -632,6 +657,7 @@ func (cmd *FloatSliceCmd) from(res valkey.ValkeyResult) {
 	val, err := res.AsFloatSlice()
 	cmd.SetErr(err)
 	cmd.SetVal(val)
+	cmd.setIsCacheHit(res.IsCacheHit())
 }
 
 func newFloatSliceCmd(res valkey.ValkeyResult) *FloatSliceCmd {
@@ -653,6 +679,7 @@ func (cmd *ZSliceCmd) from(res valkey.ValkeyResult) {
 			return
 		}
 		cmd.SetVal([]Z{{Member: s.Member, Score: s.Score}})
+		cmd.setIsCacheHit(res.IsCacheHit())
 	} else {
 		scores, err := res.AsZScores()
 		if err != nil {
@@ -664,6 +691,7 @@ func (cmd *ZSliceCmd) from(res valkey.ValkeyResult) {
 			val = append(val, Z{Member: s.Member, Score: s.Score})
 		}
 		cmd.SetVal(val)
+		cmd.setIsCacheHit(res.IsCacheHit())
 	}
 }
 
@@ -687,6 +715,7 @@ func (cmd *FloatCmd) from(res valkey.ValkeyResult) {
 	val, err := res.AsFloat64()
 	cmd.SetErr(err)
 	cmd.SetVal(val)
+	cmd.setIsCacheHit(res.IsCacheHit())
 }
 
 func newFloatCmd(res valkey.ValkeyResult) *FloatCmd {
@@ -881,6 +910,7 @@ func (cmd *StringStringMapCmd) from(res valkey.ValkeyResult) {
 	val, err := res.AsStrMap()
 	cmd.SetErr(err)
 	cmd.SetVal(val)
+	cmd.setIsCacheHit(res.IsCacheHit())
 }
 
 func newStringStringMapCmd(res valkey.ValkeyResult) *StringStringMapCmd {
@@ -1753,6 +1783,7 @@ func (cmd *RankWithScoreCmd) from(res valkey.ValkeyResult) {
 			cmd.val.Score, _ = vs[1].AsFloat64()
 		}
 	}
+	cmd.setIsCacheHit(res.IsCacheHit())
 }
 
 func newRankWithScoreCmd(res valkey.ValkeyResult) *RankWithScoreCmd {
@@ -2027,6 +2058,7 @@ func (cmd *GeoPosCmd) from(res valkey.ValkeyResult) {
 		})
 	}
 	cmd.SetVal(val)
+	cmd.setIsCacheHit(res.IsCacheHit())
 }
 
 func newGeoPosCmd(res valkey.ValkeyResult) *GeoPosCmd {
@@ -2041,6 +2073,7 @@ type GeoLocationCmd struct {
 
 func (cmd *GeoLocationCmd) from(res valkey.ValkeyResult) {
 	cmd.val, cmd.err = res.AsGeosearch()
+	cmd.setIsCacheHit(res.IsCacheHit())
 }
 
 func newGeoLocationCmd(res valkey.ValkeyResult) *GeoLocationCmd {
@@ -2674,6 +2707,7 @@ func (cmd *BFInfoCmd) from(res valkey.ValkeyResult) {
 		return
 	}
 	cmd.SetVal(info)
+	cmd.setIsCacheHit(res.IsCacheHit())
 }
 
 func newBFInfoCmd(res valkey.ValkeyResult) *BFInfoCmd {
@@ -2764,6 +2798,7 @@ func (cmd *CFInfoCmd) from(res valkey.ValkeyResult) {
 		return
 	}
 	cmd.SetVal(info)
+	cmd.setIsCacheHit(res.IsCacheHit())
 }
 
 func newCFInfoCmd(res valkey.ValkeyResult) *CFInfoCmd {
@@ -2800,6 +2835,7 @@ func (cmd *CMSInfoCmd) from(res valkey.ValkeyResult) {
 		return
 	}
 	cmd.SetVal(info)
+	cmd.setIsCacheHit(res.IsCacheHit())
 }
 
 func newCMSInfoCmd(res valkey.ValkeyResult) *CMSInfoCmd {
@@ -2855,6 +2891,7 @@ func (cmd *TopKInfoCmd) from(res valkey.ValkeyResult) {
 		return
 	}
 	cmd.SetVal(info)
+	cmd.setIsCacheHit(res.IsCacheHit())
 }
 
 func newTopKInfoCmd(res valkey.ValkeyResult) *TopKInfoCmd {
@@ -2874,6 +2911,7 @@ func (cmd *MapStringIntCmd) from(res valkey.ValkeyResult) {
 		return
 	}
 	cmd.SetVal(m)
+	cmd.setIsCacheHit(res.IsCacheHit())
 }
 
 func newMapStringIntCmd(res valkey.ValkeyResult) *MapStringIntCmd {
@@ -3281,6 +3319,7 @@ func (cmd *JSONCmd) from(res valkey.ValkeyResult) {
 		cmd.SetErr(err)
 		return
 	}
+	cmd.setIsCacheHit(res.IsCacheHit())
 	switch {
 	// JSON.GET
 	case msg.IsString():
@@ -3362,6 +3401,7 @@ func (cmd *IntPointerSliceCmd) from(res valkey.ValkeyResult) {
 		intPtrSlice[i] = &length
 	}
 	cmd.SetVal(intPtrSlice)
+	cmd.setIsCacheHit(res.IsCacheHit())
 }
 
 // newIntPointerSliceCmd initialises an IntPointerSliceCmd
@@ -3394,6 +3434,7 @@ func (cmd *JSONSliceCmd) from(res valkey.ValkeyResult) {
 		anySlice[i] = anyE
 	}
 	cmd.SetVal(anySlice)
+	cmd.setIsCacheHit(res.IsCacheHit())
 }
 
 func newJSONSliceCmd(res valkey.ValkeyResult) *JSONSliceCmd {
