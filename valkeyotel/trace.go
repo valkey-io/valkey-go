@@ -217,8 +217,6 @@ type otelclient struct {
 	sAttrs          trace.SpanStartEventOption
 	tAttrs          trace.SpanStartEventOption
 	dbStmtFunc      StatementFunc
-	addOpts         []metric.AddOption
-	recordOpts      []metric.RecordOption
 	histogramOption HistogramOption
 	commandMetrics
 }
@@ -364,8 +362,6 @@ func (o *otelclient) Nodes() map[string]valkey.Client {
 			meter:           o.meter,
 			cscMiss:         o.cscMiss,
 			cscHits:         o.cscHits,
-			addOpts:         o.addOpts,
-			recordOpts:      o.recordOpts,
 			sAttrs:          serverAttrs(addr),
 			tAttrs:          o.tAttrs,
 			histogramOption: o.histogramOption,
