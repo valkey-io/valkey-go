@@ -239,7 +239,7 @@ func readA(i *bufio.Reader, length int64) (*ValkeyMessage, int64, error) {
 	var err error
 
 	msgs := make([]ValkeyMessage, length)
-	for n := int64(0); n < length; n++ {
+	for n := range length {
 		if msgs[n], err = readNextMessage(i); err != nil {
 			return nil, 0, err
 		}
