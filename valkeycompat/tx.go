@@ -51,6 +51,12 @@ func (c *TxPipeline) Exec(ctx context.Context) ([]Cmder, error) {
 			err: resp[i+1].NonValkeyError(),
 			val: r,
 		})))
+
+		if err == nil {
+			if subErr := rets[i].Err(); subErr != nil {
+				err = subErr
+			}
+		}
 	}
 	return rets, err
 }
