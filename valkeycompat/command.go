@@ -1278,7 +1278,6 @@ func newXAutoClaimJustIDCmd(res valkey.ValkeyResult) *XAutoClaimJustIDCmd {
 	cmd := &XAutoClaimJustIDCmd{}
 	cmd.from(res)
 	return cmd
-
 }
 
 func (cmd *XAutoClaimJustIDCmd) SetVal(val []string, start string) {
@@ -3303,14 +3302,14 @@ func (cmd *JSONCmd) Val() string {
 // https://github.com/redis/go-redis/blob/v9.3.0/json.go#L105
 func (cmd *JSONCmd) Expanded() (any, error) {
 	if cmd.typ == TYP_STRING {
-		return cmd.Val(), nil
+		return cmd.Val(), cmd.Err()
 	}
 	// TYP_ARRAY
 	return cmd.expanded, nil
 }
 
 func (cmd *JSONCmd) Result() (string, error) {
-	return cmd.Val(), nil
+	return cmd.Val(), cmd.Err()
 }
 
 func (cmd *JSONCmd) from(res valkey.ValkeyResult) {
@@ -5123,7 +5122,6 @@ func (cmd *SlowLogCmd) from(res valkey.ValkeyResult) {
 	logEntries := make([]*SlowLog, 0, len(arr))
 	for _, msg := range arr {
 		log, err := msg.ToArray()
-
 		if err != nil {
 			cmd.SetErr(err)
 			return
@@ -5447,7 +5445,6 @@ func (cmd *FunctionStatsCmd) from(res valkey.ValkeyResult) {
 				return
 			}
 		}
-
 	}
 	cmd.SetVal(fstats)
 }
@@ -5499,7 +5496,6 @@ type Engine struct {
 }
 
 func (cmd *FunctionStatsCmd) parseEngines(msg valkey.ValkeyMessage) ([]Engine, error) {
-
 	engineMap, err := msg.AsMap()
 	if err != nil {
 		if valkey.IsValkeyNil(err) {
