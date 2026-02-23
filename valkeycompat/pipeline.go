@@ -3208,12 +3208,6 @@ func (c *Pipeline) Exec(ctx context.Context) ([]Cmder, error) {
 
 	var err error
 	for i, r := range p.DoMulti(ctx, cmds...) {
-		if err == nil {
-			if subErr := r.NonValkeyError(); subErr != nil {
-				err = subErr
-			}
-		}
-
 		rets[i].SetErr(nil)
 		rets[i].from(r)
 

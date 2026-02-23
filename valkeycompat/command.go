@@ -3305,7 +3305,7 @@ func (cmd *JSONCmd) Expanded() (any, error) {
 		return cmd.Val(), cmd.Err()
 	}
 	// TYP_ARRAY
-	return cmd.expanded, nil
+	return cmd.expanded, cmd.Err()
 }
 
 func (cmd *JSONCmd) Result() (string, error) {
