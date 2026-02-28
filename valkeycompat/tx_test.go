@@ -165,4 +165,15 @@ func testAdapterTxPipeline(resp3 bool) {
 		}, k1)
 		Expect(err).To(MatchError(valkey.ErrDedicatedClientRecycled))
 	})
+
+	It("should catch first cmder error", func() {
+		k1 := "_k1_not_exists"
+		var cmder Cmder
+		_, err := adapter.TxPipelined(ctx, func(pipe Pipeliner) error {
+			pipe.Del(ctx, k1)
+			cmder = pipe.JSONSet(ctx, k1, "status", 1)
+			return nil
+		})
+		Expect(err).To(Equal(cmder.Err()))
+	})
 }
