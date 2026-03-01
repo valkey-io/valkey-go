@@ -117,12 +117,13 @@ func testAdapterPipeline(resp3 bool) {
 
 	It("should catch first cmder error", func() {
 		k1 := "_k1_not_exists"
-		cmders, err := adapter.Pipelined(ctx, func(pipe Pipeliner) error {
+		var cmder *JSONCmd
+		_, err := adapter.Pipelined(ctx, func(pipe Pipeliner) error {
 			pipe.Del(ctx, k1)
-			pipe.JSONSet(ctx, k1, "status", 1)
+			cmder = pipe.JSONGet(ctx, k1)
 			return nil
 		})
-		Expect(err).To(Equal(cmders[1].Err()))
+		Expect(err).To(Equal(cmder.Err()))
 	})
 }
 
