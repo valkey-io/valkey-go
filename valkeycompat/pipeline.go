@@ -3212,9 +3212,7 @@ func (c *Pipeline) Exec(ctx context.Context) ([]Cmder, error) {
 		rets[i].from(r)
 
 		if err == nil {
-			if subErr := rets[i].Err(); subErr != nil {
-				err = subErr
-			}
+			err = rets[i].Err()
 		}
 	}
 

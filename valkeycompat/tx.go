@@ -53,9 +53,7 @@ func (c *TxPipeline) Exec(ctx context.Context) ([]Cmder, error) {
 		})))
 
 		if err == nil {
-			if subErr := rets[i].Err(); subErr != nil {
-				err = subErr
-			}
+			err = rets[i].Err()
 		}
 	}
 	return rets, err
