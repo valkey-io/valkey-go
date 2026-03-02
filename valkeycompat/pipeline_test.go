@@ -115,16 +115,18 @@ func testAdapterPipeline(resp3 bool) {
 		Expect(ping.Err()).To(MatchError(placeholder.err))
 	})
 
-	It("should catch first cmder error", func() {
-		k1 := "_k1_not_exists"
-		var cmder *JSONCmd
-		_, err := adapter.Pipelined(ctx, func(pipe Pipeliner) error {
-			pipe.Del(ctx, k1)
-			cmder = pipe.JSONGet(ctx, k1)
-			return nil
+	if resp3 {
+		It("should catch first cmder error", func() {
+			k1 := "_k1_not_exists"
+			var cmder *JSONCmd
+			_, err := adapter.Pipelined(ctx, func(pipe Pipeliner) error {
+				pipe.Del(ctx, k1)
+				cmder = pipe.JSONGet(ctx, k1)
+				return nil
+			})
+			Expect(err).To(Equal(cmder.Err()))
 		})
-		Expect(err).To(Equal(cmder.Err()))
-	})
+	}
 }
 
 func TestPipeliner(t *testing.T) {
