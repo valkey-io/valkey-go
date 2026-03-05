@@ -57,18 +57,20 @@ func TestAdapter(t *testing.T) {
 }
 
 var (
-	err                error
-	ctx                context.Context
-	clientresp2        valkey.Client
-	clientsearchresp2  valkey.Client
-	clusterresp2       valkey.Client
-	clientresp3        valkey.Client
-	clusterresp3       valkey.Client
-	adapterresp2       Cmdable
-	adaptersearchresp2 Cmdable
-	adaptercluster2    Cmdable
-	adapterresp3       Cmdable
-	adaptercluster3    Cmdable
+	err                 error
+	ctx                 context.Context
+	clientresp2         valkey.Client
+	clientsearchresp2   valkey.Client
+	clusterresp2        valkey.Client
+	clientresp3         valkey.Client
+	clusterresp3        valkey.Client
+	clientresp3redis86  valkey.Client
+	adapterresp2        Cmdable
+	adaptersearchresp2  Cmdable
+	adaptercluster2     Cmdable
+	adapterresp3        Cmdable
+	adaptercluster3     Cmdable
+	adapterresp3redis86 Cmdable
 )
 
 var _ = BeforeSuite(func() {
@@ -85,6 +87,12 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	adapterresp3 = NewAdapter(clientresp3)
 	adaptercluster3 = NewAdapter(clusterresp3)
+	clientresp3redis86, err = valkey.NewClient(valkey.ClientOption{
+		InitAddress: []string{"127.0.0.1:6382"},
+		ClientName:  "valkey",
+	})
+	Expect(err).NotTo(HaveOccurred())
+	adapterresp3redis86 = NewAdapter(clientresp3redis86)
 	clientresp2, err = valkey.NewClient(valkey.ClientOption{
 		InitAddress:  []string{"127.0.0.1:6356"},
 		ClientName:   "valkey",
@@ -113,6 +121,11 @@ var _ = AfterSuite(func() {
 	Expect(adapterresp3.FlushDB(ctx).Err()).NotTo(HaveOccurred())
 	Expect(adapterresp3.Quit(ctx).Err()).NotTo(HaveOccurred())
 	clientresp3.Close()
+
+	Expect(adapterresp3redis86.FlushDB(ctx).Err()).NotTo(HaveOccurred())
+	Expect(adapterresp3redis86.Quit(ctx).Err()).NotTo(HaveOccurred())
+	clientresp3redis86.Close()
+
 	Expect(adapterresp2.FlushDB(ctx).Err()).NotTo(HaveOccurred())
 	Expect(adapterresp2.Quit(ctx).Err()).NotTo(HaveOccurred())
 	clientresp2.Close()
@@ -123,6 +136,7 @@ var _ = Describe("RESP3 Commands", func() {
 	testAdapterCache(true)
 	testCluster(true)
 	testAdapterSearchRESP3()
+	testAdapterRedis86()
 })
 
 var _ = Describe("RESP2 Commands", func() {
@@ -11969,6 +11983,128 @@ func testAdapterCache(resp3 bool) {
 				// RESP2 v RESP3
 				Expect(cmd2.Val()[0]).To(Or(Equal([]interface{}{"boolean"}), Equal("boolean")))
 			})
+		})
+	})
+}
+
+func testAdapterRedis86() {
+	var adapter Cmdable
+
+	BeforeEach(func() {
+		adapter = adapterresp3redis86
+		Expect(adapter.FlushDB(ctx).Err()).NotTo(HaveOccurred())
+		Expect(adapter.FlushAll(ctx).Err()).NotTo(HaveOccurred())
+	})
+
+	Describe("Redis 8.6+ commands", func() {
+		It("should XAdd with IDMP (idempotent production)", func() {
+			streamName := "idmp-stream"
+			id1, err := adapter.XAdd(ctx, XAddArgs{
+				Stream:       streamName,
+				ProducerID:   "producer1",
+				IdempotentID: "msg1",
+				Values:       map[string]any{"field": "value1"},
+			}).Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(id1).NotTo(BeEmpty())
+
+			id2, err := adapter.XAdd(ctx, XAddArgs{
+				Stream:       streamName,
+				ProducerID:   "producer1",
+				IdempotentID: "msg1",
+				Values:       map[string]any{"field": "value2"},
+			}).Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(id2).To(Equal(id1))
+
+			vals, err := adapter.XRange(ctx, streamName, "-", "+").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(vals).To(HaveLen(1))
+			Expect(vals[0].ID).To(Equal(id1))
+
+			id3, err := adapter.XAdd(ctx, XAddArgs{
+				Stream:       streamName,
+				ProducerID:   "producer1",
+				IdempotentID: "msg2",
+				Values:       map[string]any{"field": "value3"},
+			}).Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(id3).NotTo(Equal(id1))
+
+			vals, err = adapter.XRange(ctx, streamName, "-", "+").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(vals).To(HaveLen(2))
+		})
+
+		It("should XAdd with IDMPAUTO (auto-generated idempotent ID)", func() {
+			streamName := "idmpauto-stream"
+
+			id1, err := adapter.XAdd(ctx, XAddArgs{
+				Stream:         streamName,
+				ProducerID:     "producer1",
+				IdempotentAuto: true,
+				Values:         map[string]any{"field": "value1", "order": "123"},
+			}).Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(id1).NotTo(BeEmpty())
+
+			id2, err := adapter.XAdd(ctx, XAddArgs{
+				Stream:         streamName,
+				ProducerID:     "producer1",
+				IdempotentAuto: true,
+				Values:         map[string]any{"field": "value1", "order": "123"},
+			}).Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(id2).To(Equal(id1))
+
+			vals, err := adapter.XRange(ctx, streamName, "-", "+").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(vals).To(HaveLen(1))
+
+			id3, err := adapter.XAdd(ctx, XAddArgs{
+				Stream:         streamName,
+				ProducerID:     "producer1",
+				IdempotentAuto: true,
+				Values:         map[string]any{"field": "value2", "order": "456"},
+			}).Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(id3).NotTo(Equal(id1))
+
+			vals, err = adapter.XRange(ctx, streamName, "-", "+").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(vals).To(HaveLen(2))
+		})
+
+		It("should XCfgSet configure idempotent production settings", func() {
+			streamName := "xcfgset-stream"
+
+			_, err := adapter.XAdd(ctx, XAddArgs{
+				Stream: streamName,
+				Values: map[string]any{"field": "value"},
+			}).Result()
+			Expect(err).NotTo(HaveOccurred())
+
+			status, err := adapter.XCfgSet(ctx, XCfgSetArgs{
+				Stream:   streamName,
+				Duration: 200,
+				MaxSize:  500,
+			}).Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(status).To(Equal("OK"))
+
+			status, err = adapter.XCfgSet(ctx, XCfgSetArgs{
+				Stream:   streamName,
+				Duration: 300,
+			}).Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(status).To(Equal("OK"))
+
+			status, err = adapter.XCfgSet(ctx, XCfgSetArgs{
+				Stream:  streamName,
+				MaxSize: 1000,
+			}).Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(status).To(Equal("OK"))
 		})
 	})
 }

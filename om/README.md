@@ -16,7 +16,7 @@ import (
 
 type Example struct {
     Key  string    `json:"key" valkey:",key"`   // the valkey:",key" is required to indicate which field is the ULID key
-    Ver  int64     `json:"ver" valkey:",ver"`   // the valkey:",ver" is required to do optimistic locking to prevent lost update
+    Ver  int64     `json:"ver" valkey:",ver"`   // the valkey:",ver" is optional for optimistic locking to prevent lost update
     ExAt time.Time `json:"exat" valkey:",exat"` // the valkey:",exat" is optional for setting record expiry with unix timestamp
     Str  string    `json:"str"`                // both NewHashRepository and NewJSONRepository use json tag as field name
 }
@@ -95,6 +95,27 @@ repo2 := om.NewHashRepository("my_prefix", Example{}, c, om.WithIndexName("my_in
 Setting a `valkey:",exat"` tag on a `time.Time` field will set `PEXPIREAT` on the record accordingly when calling `.Save()`.
 
 If the `time.Time` is zero, then the expiry will be untouched when calling `.Save()`.
+
+### Optimistic Locking with Version Field
+
+The `valkey:",ver"` tag on an `int64` field enables optimistic locking to prevent lost updates. When saving an entity:
+- If the version in Valkey doesn't match the entity's version, `Save()` returns `ErrVersionMismatch`
+- On successful save, the version is automatically incremented
+
+If you don't need optimistic locking, you can omit the `valkey:",ver"` field entirely:
+
+```golang
+type VerlessExample struct {
+    Key  string `valkey:",key"`
+    Data string `json:"data"`
+}
+
+repo := om.NewHashRepository("my_prefix", VerlessExample{}, c)
+exp := repo.NewEntity()
+exp.Data = "value"
+repo.Save(ctx, exp) // succeeds without version checking
+repo.Save(ctx, exp) // succeeds again - no version conflict
+```
 
 ### Object Mapping Limitation
 
