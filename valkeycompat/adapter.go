@@ -53,7 +53,7 @@ var Nil = valkey.Nil
 
 type Cmdable interface {
 	CoreCmdable
-	Cache(ttl time.Duration) *CacheCompat
+	Cache(ttl time.Duration) CacheCompat
 
 	Subscribe(ctx context.Context, channels ...string) PubSub
 	PSubscribe(ctx context.Context, patterns ...string) PubSub
@@ -669,8 +669,8 @@ func (c *Compat) Client() valkey.Client {
 	return c.client
 }
 
-func (c *Compat) Cache(ttl time.Duration) *CacheCompat {
-	return &CacheCompat{client: c.client, ttl: ttl}
+func (c *Compat) Cache(ttl time.Duration) CacheCompat {
+	return CacheCompat{client: c.client, ttl: ttl}
 }
 
 func (c *Compat) Command(ctx context.Context) *CommandsInfoCmd {
