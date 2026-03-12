@@ -26,14 +26,14 @@ func (DefaultOpNameResolver) OpName(_ context.Context, cmd valkey.Completed) str
 }
 
 func (r DefaultOpNameResolver) MultiOpName(_ context.Context, cmds valkey.Commands) string {
-	switch len(cmds) {
-	case 0:
+	if len(cmds) == 0 {
 		return ""
-	case 1:
-		return cmds[0].Commands()[0]
 	}
 	if r.Limit > 0 && len(cmds) > r.Limit {
 		cmds = cmds[:r.Limit]
+	}
+	if len(cmds) == 1 {
+		return cmds[0].Commands()[0]
 	}
 
 	size := len(cmds) - 1
@@ -41,7 +41,7 @@ func (r DefaultOpNameResolver) MultiOpName(_ context.Context, cmds valkey.Comman
 		size += len(cmd.Commands()[0])
 	}
 
-	sb := new(strings.Builder)
+	sb := strings.Builder{}
 	sb.Grow(size)
 	sb.WriteString(cmds[0].Commands()[0])
 	for _, cmd := range cmds[1:] {
@@ -52,14 +52,14 @@ func (r DefaultOpNameResolver) MultiOpName(_ context.Context, cmds valkey.Comman
 }
 
 func (r DefaultOpNameResolver) MultiCacheableOpName(_ context.Context, cmds []valkey.CacheableTTL) string {
-	switch len(cmds) {
-	case 0:
+	if len(cmds) == 0 {
 		return ""
-	case 1:
-		return cmds[0].Cmd.Commands()[0]
 	}
 	if r.Limit > 0 && len(cmds) > r.Limit {
 		cmds = cmds[:r.Limit]
+	}
+	if len(cmds) == 1 {
+		return cmds[0].Cmd.Commands()[0]
 	}
 
 	size := len(cmds) - 1
@@ -67,7 +67,7 @@ func (r DefaultOpNameResolver) MultiCacheableOpName(_ context.Context, cmds []va
 		size += len(cmd.Cmd.Commands()[0])
 	}
 
-	sb := new(strings.Builder)
+	sb := strings.Builder{}
 	sb.Grow(size)
 	sb.WriteString(cmds[0].Cmd.Commands()[0])
 	for _, cmd := range cmds[1:] {
