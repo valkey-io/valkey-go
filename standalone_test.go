@@ -1035,7 +1035,7 @@ func TestStandaloneReadNodeSelector(t *testing.T) {
 				return cmd.IsReadOnly()
 			},
 			ReadNodeSelector: func(slot uint16, nodes []NodeInfo) int {
-				for i := 1; i < len(nodes); i++ {
+				for i := 0; i < len(nodes); i++ {
 					if nodes[i].AZ == "us-east-1a" {
 						return i
 					}

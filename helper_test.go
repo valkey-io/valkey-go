@@ -1794,17 +1794,6 @@ func TestAZAffinityNodesSelection(t *testing.T) {
 			}
 		})
 
-		t.Run("AZAffinityReplicasAndPrimary Same-AZ Primary", func(t *testing.T) {
-			// Client: A, Primary: A, Replicas: B
-			primAZ, rep1AZ, rep2AZ = "zone-A", "zone-B", "zone-B"
-			client := buildClient(AZAffinityReplicasAndPrimaryNodeSelector("zone-A"), []string{"127.0.0.1:6380", "127.0.0.1:6381"})
-
-			resp := client.Do(context.Background(), client.B().Get().Key("k").Build())
-			if val, _ := resp.ToString(); val != "primary" {
-				t.Fatalf("expected primary, got %v", val)
-			}
-		})
-
 		t.Run("AZAffinityReplicasAndPrimary Remote Replica", func(t *testing.T) {
 			// Client: A, All Nodes: B
 			primAZ, rep1AZ, rep2AZ = "zone-B", "zone-B", "zone-B"
@@ -1913,21 +1902,6 @@ func TestAZAffinityNodesSelection(t *testing.T) {
 			}
 		})
 
-		t.Run("AZAffinityReplicasAndPrimary Same-AZ Primary", func(t *testing.T) {
-			// Client in az-1. Replica 1 is az-1.
-			// Wait, we want to test Priority 2 (Primary).
-			// So let's make all Replicas "remote".
-			primAZ = "az-1"
-			rep1AZ, rep2AZ, rep3AZ = "az-2", "az-3", "az-4"
-
-			client := buildCluster(AZAffinityReplicasAndPrimaryNodeSelector("az-1"))
-
-			// Should prioritize Primary (Same AZ) over Replicas (Different AZ)
-			resp := client.Do(context.Background(), client.B().Get().Key("k").Build())
-			if val, _ := resp.ToString(); val != "primary" {
-				t.Fatalf("expected primary (same AZ), got %v", val)
-			}
-		})
 	})
 
 	t.Run("zero allocation guarantee", func(t *testing.T) {

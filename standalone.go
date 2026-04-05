@@ -77,14 +77,11 @@ func (s *standalone) B() Builder {
 
 func (s *standalone) pick(slot uint16) *singleClient {
 	if s.nodeSelector != nil {
-		rIndex := s.nodeSelector(slot, s.nodes)
-		if rIndex < 0 || rIndex >= len(s.nodes) {
-			rIndex = 0
-		}
-		if rIndex == 0 {
+		rIndex := s.nodeSelector(slot, s.nodes[1:])
+		if rIndex < 0 || rIndex >= len(s.nodes)-1 {
 			return s.primary.Load()
 		}
-		return s.replicas[rIndex-1]
+		return s.replicas[rIndex]
 	}
 
 	if len(s.replicas) == 1 {

@@ -463,9 +463,11 @@ func (c *clusterClient) _pick(slot uint16, toReplica bool) (p conn) {
 		if nodes := c.rslots[slot]; len(nodes) > 0 {
 			rIndex := 0
 			if c.opt.ReadNodeSelector != nil {
-				rIndex = c.opt.ReadNodeSelector(slot, nodes)
-				if rIndex < 0 || rIndex >= len(nodes) {
+				rIndex = c.opt.ReadNodeSelector(slot, nodes[1:])
+				if rIndex < 0 || rIndex >= len(nodes)-1 {
 					rIndex = 0
+				} else {
+					rIndex = rIndex + 1
 				}
 			}
 			p = nodes[rIndex].conn
@@ -620,10 +622,13 @@ func (c *clusterClient) _pickMulti(multi []Completed) (retries *connretry, init 
 					bm.Set(i)
 					rIndex := 0
 					if c.opt.ReadNodeSelector != nil {
-						rIndex = c.opt.ReadNodeSelector(slot, nodes)
-						if rIndex < 0 || rIndex >= len(nodes) {
+						rIndex = c.opt.ReadNodeSelector(slot, nodes[1:])
+						if rIndex < 0 || rIndex >= len(nodes)-1 {
 							rIndex = 0
-						} else if rIndex != 0 { // the default itor[i] is 0
+						} else {
+							rIndex = rIndex + 1
+						}
+						if rIndex != 0 {
 							itor[i] = rIndex
 						}
 					}
@@ -1111,9 +1116,11 @@ func (c *clusterClient) _pickMultiCache(multi []CacheableTTL) *connretrycache {
 				if nodes := c.rslots[slot]; len(nodes) > 0 {
 					rIndex := 0
 					if c.opt.ReadNodeSelector != nil {
-						rIndex = c.opt.ReadNodeSelector(slot, nodes)
-						if rIndex < 0 || rIndex >= len(nodes) {
+						rIndex = c.opt.ReadNodeSelector(slot, nodes[1:])
+						if rIndex < 0 || rIndex >= len(nodes)-1 {
 							rIndex = 0
+						} else {
+							rIndex = rIndex + 1
 						}
 					}
 					p = nodes[rIndex].conn

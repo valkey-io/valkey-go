@@ -394,14 +394,14 @@ func (s *Scanner) Err() error {
 }
 
 // PreferReplicaNodeSelector prioritizes reading from any replica using Round-Robin.
-// If no replicas are available, it falls back to the primary.
+// If no replicas are available, it falls back to the primary (by returning -1).
 func PreferReplicaNodeSelector() ReadNodeSelectorFunc {
 	var counter atomic.Uint32
 	return func(_ uint16, nodes []NodeInfo) int {
 		length := uint32(len(nodes))
-		if length > 1 {
+		if length > 0 {
 			c := counter.Add(1)
-			return int(c%(length-1)) + 1
+			return int(c % length)
 		}
 		return -1
 	}
@@ -409,33 +409,27 @@ func PreferReplicaNodeSelector() ReadNodeSelectorFunc {
 
 // AZAffinityNodeSelector prioritizes replicas in the same AZ using Round-Robin.
 func AZAffinityNodeSelector(clientAZ string) ReadNodeSelectorFunc {
-	return newAZSelector(clientAZ, 1)
+	return newAZSelector(clientAZ, 0)
 }
 
 // AZAffinityReplicasAndPrimaryNodeSelector prioritizes:
 // 1. Same-AZ Replicas
-// 2. Same-AZ Primary
-// 3. Any Replica
-// 4. Primary
+// 2. Any Replica
+// 3. Primary (returned as -1 to signal fallback)
 func AZAffinityReplicasAndPrimaryNodeSelector(clientAZ string) ReadNodeSelectorFunc {
 	var counter atomic.Uint32
 	return func(_ uint16, nodes []NodeInfo) int {
 		// Same-AZ Replicas
-		if idx := pickAZ(nodes, clientAZ, 1, &counter); idx != -1 {
+		if idx := pickAZ(nodes, clientAZ, 0, &counter); idx != -1 {
 			return idx
 		}
 
 		length := uint32(len(nodes))
 
-		// Same-AZ Primary
-		if length > 0 && nodes[0].AZ == clientAZ {
-			return 0
-		}
-
 		// Any Replica
-		if length > 1 {
+		if length > 0 {
 			c := counter.Add(1)
-			return int(c%(length-1)) + 1
+			return int(c % length)
 		}
 		return -1
 	}

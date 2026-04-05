@@ -141,7 +141,7 @@ type ClientOption struct {
 	// NOTE: This function must be used with the SendToReplicas function.
 	ReplicaSelector ReplicaSelectorFunc
 
-	// ReadNodeSelector returns index of node selected for a read only command.
+	// ReadNodeSelector returns index of replica node selected for a read only command.
 	// If set, ReadNodeSelector is prioritized over ReplicaSelector.
 	// If the returned index is out of range, the primary node will be selected.
 	// The function is called only when SendToReplicas returns true.

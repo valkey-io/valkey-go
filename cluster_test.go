@@ -9124,7 +9124,7 @@ func TestClusterClient_ReadNodeSelector_SendToOnlyPrimaryNodeWhenPrimaryNodeSele
 				return true
 			},
 			ReadNodeSelector: func(slot uint16, nodes []NodeInfo) int {
-				return 0
+				return -1
 			},
 		},
 		func(dst string, opt *ClientOption) conn {
@@ -10175,7 +10175,7 @@ func TestClusterClient_ReadNodeSelector_SendReadOperationToReplicaNodeWriteOpera
 				return cmd.IsReadOnly()
 			},
 			ReadNodeSelector: func(slot uint16, nodes []NodeInfo) int {
-				return 1
+				return 0
 			},
 		},
 		func(dst string, opt *ClientOption) conn {
@@ -10826,7 +10826,7 @@ func TestClusterClient_Refresh_MissingSlotsForReplicas_Do(t *testing.T) {
 				return true
 			},
 			ReadNodeSelector: func(_ uint16, _ []NodeInfo) int {
-				return 1
+				return 0
 			},
 		},
 		func(dst string, opt *ClientOption) conn {
@@ -10879,7 +10879,7 @@ func TestClusterClient_Refresh_MissingSlotsForReplicas_DoMulti(t *testing.T) {
 				return true
 			},
 			ReadNodeSelector: func(_ uint16, _ []NodeInfo) int {
-				return 1
+				return 0
 			},
 		},
 		func(dst string, opt *ClientOption) conn {
@@ -10934,7 +10934,7 @@ func TestClusterClient_Refresh_MissingSlotsForReplicas_DoMultiCache(t *testing.T
 				return true
 			},
 			ReadNodeSelector: func(_ uint16, _ []NodeInfo) int {
-				return 1
+				return 0
 			},
 		},
 		func(dst string, opt *ClientOption) conn {
