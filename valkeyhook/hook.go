@@ -117,6 +117,10 @@ func (d *dedicated) SetPubSubHooks(hooks valkey.PubSubHooks) <-chan error {
 	return d.client.SetPubSubHooks(hooks)
 }
 
+func (d *dedicated) SetOnInvalidations(fn func([]valkey.ValkeyMessage)) <-chan error {
+	return d.client.SetOnInvalidations(fn)
+}
+
 func (d *dedicated) Close() {
 	d.client.Close()
 }

@@ -117,7 +117,7 @@ func (l *rateLimiter) AllowN(ctx context.Context, identifier string, n int64, op
 	offset = len(bufs.keyBuf)
 	bufs.keyBuf = append(bufs.keyBuf, key...)
 	bufs.keyBuf = append(bufs.keyBuf, ":ex"...)
-	expiresAtKey := rueidis.BinaryString(bufs.keyBuf[offset:])
+	expiresAtKey := valkey.BinaryString(bufs.keyBuf[offset:])
 
 	offset = len(bufs.keyBuf)
 	bufs.keyBuf = strconv.AppendInt(bufs.keyBuf, n, 10)

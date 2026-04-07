@@ -365,8 +365,8 @@ func TestRateLimiter_AllowN_Dragonfly(t *testing.T) {
 		t.Skip()
 	}
 
-	limiter, err := rueidislimiter.NewRateLimiter(rueidislimiter.RateLimiterOption{
-		ClientOption: rueidis.ClientOption{
+	limiter, err := valkeylimiter.NewRateLimiter(valkeylimiter.RateLimiterOption{
+		ClientOption: valkey.ClientOption{
 			InitAddress: []string{"127.0.0.1:6333"},
 		},
 		KeyPrefix: "dragonfly_allow_n_test",
