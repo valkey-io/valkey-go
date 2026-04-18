@@ -1452,7 +1452,7 @@ func (c *Compat) HSet(ctx context.Context, key string, values ...any) *IntCmd {
 
 // HMSet is a deprecated version of HSet left for compatibility with Valkey 3.
 func (c *Compat) HMSet(ctx context.Context, key string, values ...any) *BoolCmd {
-	partial := c.client.B().Hset().Key(key).FieldValue()
+	partial := c.client.B().Hmset().Key(key).FieldValue()
 
 	args := argsToSlice(values)
 	for i := 0; i < len(args); i += 2 {
