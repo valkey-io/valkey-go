@@ -2417,6 +2417,37 @@
   "FUNCTION STATS": {
     "group": "scripting"
   },
+  "GCRA": {
+    "summary": "Rate limit via GCRA (Generic Cell Rate Algorithm).",
+    "complexity": "O(1)",
+    "arguments": [
+      {
+        "name": "key",
+        "type": "key",
+        "key_spec_index": 0
+      },
+      {
+        "name": "max-burst",
+        "type": "integer"
+      },
+      {
+        "name": "tokens-per-period",
+        "type": "integer"
+      },
+      {
+        "name": "period",
+        "type": "double"
+      },
+      {
+        "name": "count",
+        "type": "integer",
+        "token": "TOKENS",
+        "optional": true
+      }
+    ],
+    "since": "8.8.0",
+    "group": "rate_limit"
+  },
   "GEOADD": {
     "summary": "Add one or more geospatial items in the geospatial index represented using a sorted set",
     "complexity": "O(log(N)) for each item added, where N is the number of elements in the sorted set.",
