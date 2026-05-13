@@ -533,7 +533,7 @@ client, err := valkey.NewClient(valkey.ClientOption{
   InitAddress:         []string{"address.example.com:6379"},
   EnableReplicaAZInfo: true,
   SendToReplicas: func(cmd valkey.Completed) bool {
-    return cmd.IsReadOnly()
+    return cmd.IsReadOnly() && !cmd.NoReply()
   },
   ReadNodeSelector: valkey.AZAffinityNodeSelector("us-east-1a"),
 })
@@ -544,7 +544,7 @@ client, err := valkey.NewClient(valkey.ClientOption{
   InitAddress:         []string{"address.example.com:6379"},
   EnableReplicaAZInfo: true,
   SendToReplicas: func(cmd valkey.Completed) bool {
-    return cmd.IsReadOnly()
+    return cmd.IsReadOnly() && !cmd.NoReply()
   },
   ReadNodeSelector: func(slot uint16, nodes []valkey.NodeInfo) int {
     for i, node := range nodes {
