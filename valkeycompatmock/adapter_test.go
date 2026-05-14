@@ -362,9 +362,9 @@ func TestPipeline(t *testing.T) {
 		}
 	}
 	{
-		any := errors.New("any")
+		anyErr := errors.New("any")
 		cm.ExpectGet("k1").SetVal("v1")
-		cm.ExpectGet("k2").SetErr(any)
+		cm.ExpectGet("k2").SetErr(anyErr)
 		cm.ExpectGet("k3").RedisNil()
 
 		p := rdb.Pipeline()
@@ -602,44 +602,44 @@ func TestSetErr(t *testing.T) {
 	raw := mock.NewClient(ctrl)
 	cm := NewAdapter(raw)
 	rdb := valkeycompat.NewAdapter(raw)
-	any := errors.New("any")
+	anyErr := errors.New("any")
 
 	cases := []struct {
 		setup func()
 		call  func() error
 	}{
-		{func() { cm.ExpectGet("k").SetErr(any) }, func() error { return rdb.Get(ctx, "k").Err() }},
-		{func() { cm.ExpectSet("k", "v", 0).SetErr(any) }, func() error { return rdb.Set(ctx, "k", "v", 0).Err() }},
-		{func() { cm.ExpectSetNX("k", "v", 0).SetErr(any) }, func() error { return rdb.SetNX(ctx, "k", "v", 0).Err() }},
-		{func() { cm.ExpectGetSet("k", "v").SetErr(any) }, func() error { return rdb.GetSet(ctx, "k", "v").Err() }},
-		{func() { cm.ExpectAppend("k", "v").SetErr(any) }, func() error { return rdb.Append(ctx, "k", "v").Err() }},
-		{func() { cm.ExpectStrLen("k").SetErr(any) }, func() error { return rdb.StrLen(ctx, "k").Err() }},
-		{func() { cm.ExpectIncr("k").SetErr(any) }, func() error { return rdb.Incr(ctx, "k").Err() }},
-		{func() { cm.ExpectIncrBy("k", 1).SetErr(any) }, func() error { return rdb.IncrBy(ctx, "k", 1).Err() }},
-		{func() { cm.ExpectDecr("k").SetErr(any) }, func() error { return rdb.Decr(ctx, "k").Err() }},
-		{func() { cm.ExpectDecrBy("k", 1).SetErr(any) }, func() error { return rdb.DecrBy(ctx, "k", 1).Err() }},
-		{func() { cm.ExpectMGet("k").SetErr(any) }, func() error { return rdb.MGet(ctx, "k").Err() }},
-		{func() { cm.ExpectMSet("k", "v").SetErr(any) }, func() error { return rdb.MSet(ctx, "k", "v").Err() }},
-		{func() { cm.ExpectDel("k").SetErr(any) }, func() error { return rdb.Del(ctx, "k").Err() }},
-		{func() { cm.ExpectExists("k").SetErr(any) }, func() error { return rdb.Exists(ctx, "k").Err() }},
-		{func() { cm.ExpectType("k").SetErr(any) }, func() error { return rdb.Type(ctx, "k").Err() }},
-		{func() { cm.ExpectExpire("k", time.Second).SetErr(any) }, func() error { return rdb.Expire(ctx, "k", time.Second).Err() }},
-		{func() { cm.ExpectTTL("k").SetErr(any) }, func() error { return rdb.TTL(ctx, "k").Err() }},
-		{func() { cm.ExpectPing().SetErr(any) }, func() error { return rdb.Ping(ctx).Err() }},
-		{func() { cm.ExpectEcho("hi").SetErr(any) }, func() error { return rdb.Echo(ctx, "hi").Err() }},
-		{func() { cm.ExpectHGet("h", "f").SetErr(any) }, func() error { return rdb.HGet(ctx, "h", "f").Err() }},
-		{func() { cm.ExpectHSet("h", "f", "v").SetErr(any) }, func() error { return rdb.HSet(ctx, "h", "f", "v").Err() }},
-		{func() { cm.ExpectHDel("h", "f").SetErr(any) }, func() error { return rdb.HDel(ctx, "h", "f").Err() }},
-		{func() { cm.ExpectHGetAll("h").SetErr(any) }, func() error { return rdb.HGetAll(ctx, "h").Err() }},
-		{func() { cm.ExpectLPush("l", "x").SetErr(any) }, func() error { return rdb.LPush(ctx, "l", "x").Err() }},
-		{func() { cm.ExpectRPush("l", "x").SetErr(any) }, func() error { return rdb.RPush(ctx, "l", "x").Err() }},
-		{func() { cm.ExpectLPop("l").SetErr(any) }, func() error { return rdb.LPop(ctx, "l").Err() }},
-		{func() { cm.ExpectRPop("l").SetErr(any) }, func() error { return rdb.RPop(ctx, "l").Err() }},
-		{func() { cm.ExpectLLen("l").SetErr(any) }, func() error { return rdb.LLen(ctx, "l").Err() }},
-		{func() { cm.ExpectSAdd("s", "x").SetErr(any) }, func() error { return rdb.SAdd(ctx, "s", "x").Err() }},
-		{func() { cm.ExpectSRem("s", "x").SetErr(any) }, func() error { return rdb.SRem(ctx, "s", "x").Err() }},
-		{func() { cm.ExpectSMembers("s").SetErr(any) }, func() error { return rdb.SMembers(ctx, "s").Err() }},
-		{func() { cm.ExpectEval("x", []string{}).SetErr(any) }, func() error { return rdb.Eval(ctx, "x", []string{}).Err() }},
+		{func() { cm.ExpectGet("k").SetErr(anyErr) }, func() error { return rdb.Get(ctx, "k").Err() }},
+		{func() { cm.ExpectSet("k", "v", 0).SetErr(anyErr) }, func() error { return rdb.Set(ctx, "k", "v", 0).Err() }},
+		{func() { cm.ExpectSetNX("k", "v", 0).SetErr(anyErr) }, func() error { return rdb.SetNX(ctx, "k", "v", 0).Err() }},
+		{func() { cm.ExpectGetSet("k", "v").SetErr(anyErr) }, func() error { return rdb.GetSet(ctx, "k", "v").Err() }},
+		{func() { cm.ExpectAppend("k", "v").SetErr(anyErr) }, func() error { return rdb.Append(ctx, "k", "v").Err() }},
+		{func() { cm.ExpectStrLen("k").SetErr(anyErr) }, func() error { return rdb.StrLen(ctx, "k").Err() }},
+		{func() { cm.ExpectIncr("k").SetErr(anyErr) }, func() error { return rdb.Incr(ctx, "k").Err() }},
+		{func() { cm.ExpectIncrBy("k", 1).SetErr(anyErr) }, func() error { return rdb.IncrBy(ctx, "k", 1).Err() }},
+		{func() { cm.ExpectDecr("k").SetErr(anyErr) }, func() error { return rdb.Decr(ctx, "k").Err() }},
+		{func() { cm.ExpectDecrBy("k", 1).SetErr(anyErr) }, func() error { return rdb.DecrBy(ctx, "k", 1).Err() }},
+		{func() { cm.ExpectMGet("k").SetErr(anyErr) }, func() error { return rdb.MGet(ctx, "k").Err() }},
+		{func() { cm.ExpectMSet("k", "v").SetErr(anyErr) }, func() error { return rdb.MSet(ctx, "k", "v").Err() }},
+		{func() { cm.ExpectDel("k").SetErr(anyErr) }, func() error { return rdb.Del(ctx, "k").Err() }},
+		{func() { cm.ExpectExists("k").SetErr(anyErr) }, func() error { return rdb.Exists(ctx, "k").Err() }},
+		{func() { cm.ExpectType("k").SetErr(anyErr) }, func() error { return rdb.Type(ctx, "k").Err() }},
+		{func() { cm.ExpectExpire("k", time.Second).SetErr(anyErr) }, func() error { return rdb.Expire(ctx, "k", time.Second).Err() }},
+		{func() { cm.ExpectTTL("k").SetErr(anyErr) }, func() error { return rdb.TTL(ctx, "k").Err() }},
+		{func() { cm.ExpectPing().SetErr(anyErr) }, func() error { return rdb.Ping(ctx).Err() }},
+		{func() { cm.ExpectEcho("hi").SetErr(anyErr) }, func() error { return rdb.Echo(ctx, "hi").Err() }},
+		{func() { cm.ExpectHGet("h", "f").SetErr(anyErr) }, func() error { return rdb.HGet(ctx, "h", "f").Err() }},
+		{func() { cm.ExpectHSet("h", "f", "v").SetErr(anyErr) }, func() error { return rdb.HSet(ctx, "h", "f", "v").Err() }},
+		{func() { cm.ExpectHDel("h", "f").SetErr(anyErr) }, func() error { return rdb.HDel(ctx, "h", "f").Err() }},
+		{func() { cm.ExpectHGetAll("h").SetErr(anyErr) }, func() error { return rdb.HGetAll(ctx, "h").Err() }},
+		{func() { cm.ExpectLPush("l", "x").SetErr(anyErr) }, func() error { return rdb.LPush(ctx, "l", "x").Err() }},
+		{func() { cm.ExpectRPush("l", "x").SetErr(anyErr) }, func() error { return rdb.RPush(ctx, "l", "x").Err() }},
+		{func() { cm.ExpectLPop("l").SetErr(anyErr) }, func() error { return rdb.LPop(ctx, "l").Err() }},
+		{func() { cm.ExpectRPop("l").SetErr(anyErr) }, func() error { return rdb.RPop(ctx, "l").Err() }},
+		{func() { cm.ExpectLLen("l").SetErr(anyErr) }, func() error { return rdb.LLen(ctx, "l").Err() }},
+		{func() { cm.ExpectSAdd("s", "x").SetErr(anyErr) }, func() error { return rdb.SAdd(ctx, "s", "x").Err() }},
+		{func() { cm.ExpectSRem("s", "x").SetErr(anyErr) }, func() error { return rdb.SRem(ctx, "s", "x").Err() }},
+		{func() { cm.ExpectSMembers("s").SetErr(anyErr) }, func() error { return rdb.SMembers(ctx, "s").Err() }},
+		{func() { cm.ExpectEval("x", []string{}).SetErr(anyErr) }, func() error { return rdb.Eval(ctx, "x", []string{}).Err() }},
 	}
 	for _, c := range cases {
 		c.setup()
@@ -693,3 +693,128 @@ func TestStr(t *testing.T) {
 type binMarshaler struct{ data string }
 
 func (b binMarshaler) MarshalBinary() ([]byte, error) { return []byte(b.data), nil }
+
+type hsetStruct struct {
+	Name string `valkey:"name"`
+	Age  int    `valkey:"age"`
+}
+
+type hsetStructWithOmit struct {
+	Name string  `valkey:"name"`
+	Note string  `valkey:"note,omitempty"`
+	Ptr  *string `valkey:"ptr"`
+}
+
+func TestHSetVariants(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	ctx := context.Background()
+
+	{
+		raw := mock.NewClient(ctrl)
+		cm := NewAdapter(raw)
+		rdb := valkeycompat.NewAdapter(raw)
+		cm.ExpectHSet("h", map[string]string{"a": "1", "b": "2", "c": "3"}).SetVal(3)
+		if _, err := rdb.HSet(ctx, "h", map[string]string{"c": "3", "a": "1", "b": "2"}).Result(); err != nil {
+			t.Fatalf("unexpected err %v", err)
+		}
+	}
+	{
+		raw := mock.NewClient(ctrl)
+		cm := NewAdapter(raw)
+		rdb := valkeycompat.NewAdapter(raw)
+		cm.ExpectHSet("h", map[string]any{"a": 1, "b": "two"}).SetVal(2)
+		if _, err := rdb.HSet(ctx, "h", map[string]any{"b": "two", "a": 1}).Result(); err != nil {
+			t.Fatalf("unexpected err %v", err)
+		}
+	}
+	{
+		raw := mock.NewClient(ctrl)
+		cm := NewAdapter(raw)
+		rdb := valkeycompat.NewAdapter(raw)
+		cm.ExpectHSet("h", hsetStruct{Name: "alice", Age: 30}).SetVal(2)
+		if _, err := rdb.HSet(ctx, "h", hsetStruct{Name: "alice", Age: 30}).Result(); err != nil {
+			t.Fatalf("unexpected err %v", err)
+		}
+	}
+	{
+		raw := mock.NewClient(ctrl)
+		cm := NewAdapter(raw)
+		rdb := valkeycompat.NewAdapter(raw)
+		cm.ExpectHSet("h", &hsetStruct{Name: "bob", Age: 0}).SetVal(2)
+		if _, err := rdb.HSet(ctx, "h", &hsetStruct{Name: "bob", Age: 0}).Result(); err != nil {
+			t.Fatalf("unexpected err %v", err)
+		}
+	}
+	{
+		raw := mock.NewClient(ctrl)
+		cm := NewAdapter(raw)
+		rdb := valkeycompat.NewAdapter(raw)
+		cm.ExpectHSet("h", hsetStructWithOmit{Name: "x"}).SetVal(1)
+		if _, err := rdb.HSet(ctx, "h", hsetStructWithOmit{Name: "x"}).Result(); err != nil {
+			t.Fatalf("unexpected err %v", err)
+		}
+	}
+	{
+		raw := mock.NewClient(ctrl)
+		cm := NewAdapter(raw)
+		rdb := valkeycompat.NewAdapter(raw)
+		s := "v"
+		cm.ExpectHSet("h", hsetStructWithOmit{Name: "x", Ptr: &s}).SetVal(2)
+		if _, err := rdb.HSet(ctx, "h", hsetStructWithOmit{Name: "x", Ptr: &s}).Result(); err != nil {
+			t.Fatalf("unexpected err %v", err)
+		}
+	}
+	{
+		raw := mock.NewClient(ctrl)
+		cm := NewAdapter(raw)
+		rdb := valkeycompat.NewAdapter(raw)
+		cm.ExpectHSet("h", []any{"a", 1, "b", 2}).SetVal(2)
+		if _, err := rdb.HSet(ctx, "h", []any{"a", 1, "b", 2}).Result(); err != nil {
+			t.Fatalf("unexpected err %v", err)
+		}
+	}
+	{
+		raw := mock.NewClient(ctrl)
+		cm := NewAdapter(raw)
+		rdb := valkeycompat.NewAdapter(raw)
+		cm.ExpectHSet("h", []string{"a", "1"}).SetVal(1)
+		if _, err := rdb.HSet(ctx, "h", []string{"a", "1"}).Result(); err != nil {
+			t.Fatalf("unexpected err %v", err)
+		}
+	}
+}
+
+func TestMSetVariants(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	ctx := context.Background()
+
+	{
+		raw := mock.NewClient(ctrl)
+		cm := NewAdapter(raw)
+		rdb := valkeycompat.NewAdapter(raw)
+		cm.ExpectMSet(map[string]string{"a": "1", "b": "2"}).SetVal("OK")
+		if err := rdb.MSet(ctx, map[string]string{"b": "2", "a": "1"}).Err(); err != nil {
+			t.Fatalf("unexpected err %v", err)
+		}
+	}
+	{
+		raw := mock.NewClient(ctrl)
+		cm := NewAdapter(raw)
+		rdb := valkeycompat.NewAdapter(raw)
+		cm.ExpectMSet(map[string]any{"a": 1, "b": "two"}).SetVal("OK")
+		if err := rdb.MSet(ctx, map[string]any{"b": "two", "a": 1}).Err(); err != nil {
+			t.Fatalf("unexpected err %v", err)
+		}
+	}
+	{
+		raw := mock.NewClient(ctrl)
+		cm := NewAdapter(raw)
+		rdb := valkeycompat.NewAdapter(raw)
+		cm.ExpectMSet([]string{"a", "1", "b", "2"}).SetVal("OK")
+		if err := rdb.MSet(ctx, []string{"a", "1", "b", "2"}).Err(); err != nil {
+			t.Fatalf("unexpected err %v", err)
+		}
+	}
+}

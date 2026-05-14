@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding"
 	"fmt"
+	"reflect"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -250,11 +253,8 @@ func (m *ClientMock) ExpectMGet(keys ...string) *ExpectedSlice {
 }
 
 func (m *ClientMock) ExpectMSet(values ...any) *ExpectedStatus {
-	args := []string{"MSET"}
-	for _, v := range values {
-		args = append(args, str(v))
-	}
-	e := m.push(mock.Match(args...), mock.Result(mock.ValkeyString("OK")))
+	pairs := argsToSlice(values)
+	e := m.push(pairsMatcher("MSET", "", pairs), mock.Result(mock.ValkeyString("OK")))
 	return &ExpectedStatus{exp: e}
 }
 
@@ -264,8 +264,8 @@ func (m *ClientMock) ExpectHGet(key, field string) *ExpectedString {
 }
 
 func (m *ClientMock) ExpectHSet(key string, values ...any) *ExpectedInt {
-	args := append([]string{"HSET", key}, hsetArgsToSlice(values)...)
-	e := m.push(mock.Match(args...), mock.Result(mock.ValkeyInt64(0)))
+	pairs := argsToSlice(values)
+	e := m.push(pairsMatcher("HSET", key, pairs), mock.Result(mock.ValkeyInt64(0)))
 	return &ExpectedInt{exp: e}
 }
 
@@ -372,36 +372,165 @@ func delMatcher(keys ...string) gomock.Matcher {
 	return mock.Match(args...)
 }
 
-func hsetArgsToSlice(values []any) []string {
-	if len(values) == 1 {
-		switch v := values[0].(type) {
-		case []string:
-			return v
-		case []any:
-			out := make([]string, 0, len(v))
-			for _, x := range v {
-				out = append(out, str(x))
+func argsToSlice(src []any) []string {
+	if len(src) == 1 {
+		return argToSlice(src[0])
+	}
+	dst := make([]string, 0, len(src))
+	for _, v := range src {
+		dst = append(dst, str(v))
+	}
+	return dst
+}
+
+func argToSlice(arg any) []string {
+	switch arg := arg.(type) {
+	case []string:
+		return arg
+	case []any:
+		dst := make([]string, 0, len(arg))
+		for _, v := range arg {
+			dst = append(dst, str(v))
+		}
+		return dst
+	case map[string]any:
+		dst := make([]string, 0, len(arg)*2)
+		for k, v := range arg {
+			dst = append(dst, k, str(v))
+		}
+		return dst
+	case map[string]string:
+		dst := make([]string, 0, len(arg)*2)
+		for k, v := range arg {
+			dst = append(dst, k, v)
+		}
+		return dst
+	default:
+		v := reflect.ValueOf(arg)
+		if v.Kind() == reflect.Ptr {
+			if v.IsNil() {
+				return nil
 			}
-			return out
-		case map[string]any:
-			out := make([]string, 0, len(v)*2)
-			for k, x := range v {
-				out = append(out, k, str(x))
-			}
-			return out
-		case map[string]string:
-			out := make([]string, 0, len(v)*2)
-			for k, x := range v {
-				out = append(out, k, x)
-			}
-			return out
+			v = v.Elem()
+		}
+		if v.Kind() == reflect.Struct {
+			return appendStructField(v)
+		}
+		return []string{str(arg)}
+	}
+}
+
+func appendStructField(v reflect.Value) []string {
+	typ := v.Type()
+	dst := make([]string, 0, typ.NumField()*2)
+	for i := 0; i < typ.NumField(); i++ {
+		tag := typ.Field(i).Tag.Get("valkey")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		name, opt, _ := strings.Cut(tag, ",")
+		if name == "" {
+			continue
+		}
+		field := v.Field(i)
+		if omitEmpty(opt) && isEmptyValue(field) {
+			continue
+		}
+		if field.Kind() == reflect.Pointer && field.IsNil() {
+			continue
+		}
+		if field.Kind() == reflect.Pointer && field.Elem().CanInterface() {
+			dst = append(dst, name, str(field.Elem().Interface()))
+			continue
+		}
+		if field.CanInterface() {
+			dst = append(dst, name, str(field.Interface()))
 		}
 	}
-	out := make([]string, 0, len(values))
-	for _, v := range values {
-		out = append(out, str(v))
+	return dst
+}
+
+func omitEmpty(opt string) bool {
+	for opt != "" {
+		var name string
+		name, opt, _ = strings.Cut(opt, ",")
+		if name == "omitempty" {
+			return true
+		}
+	}
+	return false
+}
+
+func isEmptyValue(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.Array, reflect.Map, reflect.Slice, reflect.String:
+		return v.Len() == 0
+	case reflect.Bool:
+		return !v.Bool()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return v.Int() == 0
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return v.Uint() == 0
+	case reflect.Float32, reflect.Float64:
+		return v.Float() == 0
+	case reflect.Interface, reflect.Pointer:
+		return v.IsNil()
+	}
+	return false
+}
+
+func pairsMatcher(cmd, key string, pairs []string) gomock.Matcher {
+	prefixLen := 1
+	if key != "" {
+		prefixLen = 2
+	}
+	wantSorted := sortedPairs(pairs)
+	desc := []string{cmd}
+	if key != "" {
+		desc = append(desc, key)
+	}
+	desc = append(desc, pairs...)
+	return mock.MatchFn(func(got []string) bool {
+		if len(got) != prefixLen+len(pairs) {
+			return false
+		}
+		if got[0] != cmd {
+			return false
+		}
+		if key != "" && got[1] != key {
+			return false
+		}
+		return equalSorted(wantSorted, sortedPairs(got[prefixLen:]))
+	}, desc...)
+}
+
+func sortedPairs(flat []string) []string {
+	if len(flat)%2 != 0 {
+		out := append([]string(nil), flat...)
+		return out
+	}
+	pairs := make([][2]string, 0, len(flat)/2)
+	for i := 0; i < len(flat); i += 2 {
+		pairs = append(pairs, [2]string{flat[i], flat[i+1]})
+	}
+	sort.Slice(pairs, func(i, j int) bool { return pairs[i][0] < pairs[j][0] })
+	out := make([]string, 0, len(flat))
+	for _, p := range pairs {
+		out = append(out, p[0], p[1])
 	}
 	return out
+}
+
+func equalSorted(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func evalMatcher(script string, keys []string, args ...any) gomock.Matcher {
