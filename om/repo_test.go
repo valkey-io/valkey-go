@@ -6,8 +6,18 @@ import (
 	"github.com/valkey-io/valkey-go"
 )
 
-func setup(t *testing.T) valkey.Client {
-	client, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{"127.0.0.1:6377"}})
+type option func(*valkey.ClientOption)
+
+func withRedis86(c *valkey.ClientOption) {
+	c.InitAddress = []string{"127.0.0.1:6382"}
+}
+
+func setup(t *testing.T, opts ...option) valkey.Client {
+	clientOption := &valkey.ClientOption{InitAddress: []string{"127.0.0.1:6377"}}
+	for _, opt := range opts {
+		opt(clientOption)
+	}
+	client, err := valkey.NewClient(*clientOption)
 	if err != nil {
 		t.Fatal(err)
 	}
