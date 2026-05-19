@@ -75,6 +75,9 @@ func newStructSpec(t reflect.Type, fieldTag string) *structSpec {
 		f := t.Field(i)
 
 		tag := f.Tag.Get(fieldTag)
+		if tag == "" {
+			tag = f.Tag.Get("redis")
+		}
 		if tag == "" || tag == "-" {
 			continue
 		}
