@@ -238,6 +238,23 @@ var _ = Describe("Scan", func() {
 		}))
 	})
 
+	It("falls back to redis tag when valkey tag is missing", func() {
+		type goRedis struct {
+			Name string `redis:"name"`
+			Age  int    `redis:"age"`
+		}
+		var g goRedis
+		Expect(Scan(&g, []string{"name", "age"}, i{"alice", "30"})).NotTo(HaveOccurred())
+		Expect(g).To(Equal(goRedis{Name: "alice", Age: 30}))
+
+		type both struct {
+			Name string `redis:"redis_name" valkey:"valkey_name"`
+		}
+		var b both
+		Expect(Scan(&b, []string{"valkey_name", "redis_name"}, i{"v", "r"})).NotTo(HaveOccurred())
+		Expect(b.Name).To(Equal("v"))
+	})
+
 	It("catches bad values", func() {
 		var d data
 
