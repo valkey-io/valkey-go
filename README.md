@@ -332,7 +332,7 @@ err := client.Receive(ctx, client.B().Subscribe().Channel("news").Build(), func(
 
 #### Cleanup on Receive return
 
-Note that `client.Receive()` doesn't unsubscribe channels automatically. Use `valkey.WithOnReceiveReturnHook` when you need to execute cleanup commands (e.g., `UNSUBSCRIBE`) on the underlying connection when a `client.Receive()` is about to return.
+Note that `client.Receive()` doesn't unsubscribe channels automatically when it is about to return. Use `valkey.WithOnReceiveReturnHook` if you need to execute cleanup commands (e.g., `UNSUBSCRIBE`) on the underlying connection.
 
 ```go
 ctx, cancel := context.WithCancel(context.Background())
