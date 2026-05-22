@@ -54,6 +54,25 @@ func (c *call) LazyDo(threshold time.Duration, fn func() error) {
 	}(ts.Add(threshold), ch, fn)
 }
 
+// DelayDo sleeps for delay then runs fn, deduping concurrent callers via singleflight.
+// Unlike LazyDo, it does not enforce a minimum gap since the last completion.
+func (c *call) DelayDo(delay time.Duration, fn func() error) {
+	c.mu.Lock()
+	ch := c.ch
+	if ch != nil {
+		c.mu.Unlock()
+		return
+	}
+	ch = make(chan struct{})
+	c.ch = ch
+	c.cn++
+	c.mu.Unlock()
+	go func(ch chan struct{}, fn func() error) {
+		time.Sleep(delay)
+		c.do(ch, fn)
+	}(ch, fn)
+}
+
 func (c *call) do(ch chan struct{}, fn func() error) (err error) {
 	err = fn()
 	c.mu.Lock()

@@ -100,6 +100,9 @@ func newClusterClient(opt *ClientOption, connFn connFn, retryer retryHandler) (*
 		return nil, err
 	}
 
+	if d := client.clusterRefreshStartDelay(); d > 0 {
+		time.Sleep(d)
+	}
 	if err := client.refresh(context.Background()); err != nil {
 		return client, err
 	}
@@ -153,7 +156,60 @@ func (c *clusterClient) refresh(ctx context.Context) (err error) {
 }
 
 func (c *clusterClient) lazyRefresh() {
+	if c.opt.EnableClusterRefreshSpread {
+		c.sc.DelayDo(c.clusterRefreshStartDelay(), c._refresh)
+		return
+	}
 	c.sc.LazyDo(time.Second, c._refresh)
+}
+
+func (c *clusterClient) clusterRefreshStartDelay() time.Duration {
+	if !c.opt.EnableClusterRefreshSpread {
+		return 0
+	}
+	maxDelay := c.clusterRefreshMaxDelay()
+	return time.Duration(util.FastRand(int(maxDelay))) + time.Nanosecond
+}
+
+func (c *clusterClient) clusterRefreshMaxDelay() time.Duration {
+	if maxDelay := c.opt.ClusterRefreshMaxDelay; maxDelay > 0 {
+		return maxDelay
+	}
+	c.mu.RLock()
+	n := len(c.conns)
+	c.mu.RUnlock()
+	return clusterRefreshAutoMaxDelay(n)
+}
+
+func (c *clusterClient) clusterRefreshBatchDelay() time.Duration {
+	if !c.opt.EnableClusterRefreshSpread {
+		return 0
+	}
+	return clusterRefreshBatchDelayFromMaxDelay(c.clusterRefreshMaxDelay())
+}
+
+func clusterRefreshBatchDelayFromMaxDelay(maxDelay time.Duration) time.Duration {
+	switch {
+	case maxDelay <= time.Second:
+		return 0
+	case maxDelay >= 30*time.Second:
+		return 100 * time.Millisecond
+	default:
+		// Linearly scale 1s..30s max delay from 0ms to 100ms batch delay.
+		return (maxDelay - time.Second) * 100 * time.Millisecond / (29 * time.Second)
+	}
+}
+
+func clusterRefreshAutoMaxDelay(n int) time.Duration {
+	switch {
+	case n < 100:
+		return time.Second
+	case n >= 1000:
+		return 30 * time.Second
+	default:
+		// Linearly scale 100..1000 nodes from 1s to 30s.
+		return time.Second + time.Duration(n-100)*(29*time.Second)/900
+	}
 }
 
 type clusterslots struct {
@@ -195,9 +251,14 @@ func (c *clusterClient) _refresh() (err error) {
 	c.mu.RUnlock()
 
 	var result clusterslots
+	batchDelay := c.clusterRefreshBatchDelay()
+	n := 4
 	for i := 0; i < cap(results); i++ {
-		if i&3 == 0 { // batch CLUSTER SLOTS/CLUSTER SHARDS for every 4 connections
-			for j := i; j < i+4 && j < len(pending); j++ {
+		if i%n == 0 { // batch CLUSTER SLOTS/CLUSTER SHARDS for every n connections
+			if i > 0 && batchDelay > 0 {
+				time.Sleep(batchDelay)
+			}
+			for j := i; j < i+n && j < len(pending); j++ {
 				go func(c conn, timeout time.Duration) {
 					results <- getClusterSlots(c, timeout)
 				}(pending[j], c.opt.ConnWriteTimeout)

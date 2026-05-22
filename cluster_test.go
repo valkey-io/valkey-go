@@ -10957,3 +10957,100 @@ func TestClusterClient_Refresh_MissingSlotsForReplicas_DoMultiCache(t *testing.T
 		}
 	}
 }
+
+func TestClusterRefreshAutoMaxDelay(t *testing.T) {
+	tests := []struct {
+		conns int
+		want  time.Duration
+	}{
+		{conns: 1, want: time.Second},
+		{conns: 99, want: time.Second},
+		{conns: 100, want: time.Second},
+		{conns: 550, want: 15500 * time.Millisecond},
+		{conns: 1000, want: 30 * time.Second},
+		{conns: 1200, want: 30 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%d", tt.conns), func(t *testing.T) {
+			if got := clusterRefreshAutoMaxDelay(tt.conns); got != tt.want {
+				t.Fatalf("got %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClusterRefreshBatchDelayFromMaxDelay(t *testing.T) {
+	tests := []struct {
+		maxDelay time.Duration
+		want     time.Duration
+	}{
+		{maxDelay: time.Second, want: 0},
+		{maxDelay: 15500 * time.Millisecond, want: 50 * time.Millisecond},
+		{maxDelay: 30 * time.Second, want: 100 * time.Millisecond},
+		{maxDelay: 60 * time.Second, want: 100 * time.Millisecond},
+	}
+	for _, tt := range tests {
+		t.Run(tt.maxDelay.String(), func(t *testing.T) {
+			if got := clusterRefreshBatchDelayFromMaxDelay(tt.maxDelay); got != tt.want {
+				t.Fatalf("got %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClusterRefreshStartDelayZeroWhenDisabled(t *testing.T) {
+	c := &clusterClient{opt: &ClientOption{
+		ClusterRefreshMaxDelay: 30 * time.Second,
+	}}
+	if d := c.clusterRefreshStartDelay(); d != 0 {
+		t.Fatalf("expected 0 with EnableClusterRefreshSpread disabled, got %v", d)
+	}
+}
+
+func TestClusterRefreshStartDelayWithinBound(t *testing.T) {
+	maxDelay := 30 * time.Second
+	c := &clusterClient{opt: &ClientOption{
+		EnableClusterRefreshSpread: true,
+		ClusterRefreshMaxDelay:     maxDelay,
+	}}
+	for i := 0; i < 1000; i++ {
+		d := c.clusterRefreshStartDelay()
+		if d <= 0 || d > maxDelay {
+			t.Fatalf("iteration %d: start delay %v out of (0, %v]", i, d, maxDelay)
+		}
+	}
+}
+
+func TestClusterRefreshStartDelayDistributesOverWindow(t *testing.T) {
+	maxDelay := 30 * time.Second
+	c := &clusterClient{opt: &ClientOption{
+		EnableClusterRefreshSpread: true,
+		ClusterRefreshMaxDelay:     maxDelay,
+	}}
+	const N = 10000
+	var sum, min, max time.Duration
+	min = maxDelay
+	for i := 0; i < N; i++ {
+		d := c.clusterRefreshStartDelay()
+		sum += d
+		if d < min {
+			min = d
+		}
+		if d > max {
+			max = d
+		}
+	}
+	avg := sum / N
+	expectedAvg := maxDelay / 2
+	lo := time.Duration(float64(expectedAvg) * 0.9)
+	hi := time.Duration(float64(expectedAvg) * 1.1)
+	if avg < lo || avg > hi {
+		t.Fatalf("avg %v outside expected [%v, %v]", avg, lo, hi)
+	}
+	if min <= 0 || min > maxDelay/100 {
+		t.Fatalf("min %v too high, expected near 0", min)
+	}
+	if max < maxDelay*9/10 {
+		t.Fatalf("max %v too low, expected near %v", max, maxDelay)
+	}
+}
