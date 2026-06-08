@@ -36,26 +36,7 @@ func (c *call) Do(ctx context.Context, fn func() error) error {
 	return c.do(ch, fn)
 }
 
-func (c *call) LazyDo(threshold time.Duration, fn func() error) {
-	c.mu.Lock()
-	ch := c.ch
-	if ch != nil {
-		c.mu.Unlock()
-		return
-	}
-	ch = make(chan struct{})
-	c.ch = ch
-	c.cn++
-	ts := c.ts
-	c.mu.Unlock()
-	go func(ts time.Time, ch chan struct{}, fn func() error) {
-		time.Sleep(time.Until(ts))
-		c.do(ch, fn)
-	}(ts.Add(threshold), ch, fn)
-}
-
 // DelayDo sleeps for delay then runs fn, deduping concurrent callers via singleflight.
-// Unlike LazyDo, it does not enforce a minimum gap since the last completion.
 func (c *call) DelayDo(delay time.Duration, fn func() error) {
 	c.mu.Lock()
 	ch := c.ch

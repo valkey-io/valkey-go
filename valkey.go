@@ -243,15 +243,6 @@ type ClientOption struct {
 	// produce notable CPU usage reduction under load. Ref: https://github.com/redis/rueidis/issues/156
 	MaxFlushDelay time.Duration
 
-	// EnableClusterRefreshSpread spreads lazy cluster topology refreshes across a delay window.
-	// Default false keeps upstream LazyDo behavior unchanged.
-	EnableClusterRefreshSpread bool
-
-	// ClusterRefreshMaxDelay is the maximum delay before a lazy cluster topology refresh starts.
-	// It is only used when EnableClusterRefreshSpread is true. When zero, the max delay is
-	// derived from the current cluster connection count.
-	ClusterRefreshMaxDelay time.Duration
-
 	// ClusterOption is the options for the valkey cluster client.
 	ClusterOption ClusterOption
 

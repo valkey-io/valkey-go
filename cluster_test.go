@@ -10998,21 +10998,9 @@ func TestClusterRefreshBatchDelayFromMaxDelay(t *testing.T) {
 	}
 }
 
-func TestClusterRefreshStartDelayZeroWhenDisabled(t *testing.T) {
-	c := &clusterClient{opt: &ClientOption{
-		ClusterRefreshMaxDelay: 30 * time.Second,
-	}}
-	if d := c.clusterRefreshStartDelay(); d != 0 {
-		t.Fatalf("expected 0 with EnableClusterRefreshSpread disabled, got %v", d)
-	}
-}
-
 func TestClusterRefreshStartDelayWithinBound(t *testing.T) {
 	maxDelay := 30 * time.Second
-	c := &clusterClient{opt: &ClientOption{
-		EnableClusterRefreshSpread: true,
-		ClusterRefreshMaxDelay:     maxDelay,
-	}}
+	c := clusterClientWithConnCount(1000)
 	for i := 0; i < 1000; i++ {
 		d := c.clusterRefreshStartDelay()
 		if d <= 0 || d > maxDelay {
@@ -11023,10 +11011,7 @@ func TestClusterRefreshStartDelayWithinBound(t *testing.T) {
 
 func TestClusterRefreshStartDelayDistributesOverWindow(t *testing.T) {
 	maxDelay := 30 * time.Second
-	c := &clusterClient{opt: &ClientOption{
-		EnableClusterRefreshSpread: true,
-		ClusterRefreshMaxDelay:     maxDelay,
-	}}
+	c := clusterClientWithConnCount(1000)
 	const N = 10000
 	var sum, min, max time.Duration
 	min = maxDelay
@@ -11053,4 +11038,12 @@ func TestClusterRefreshStartDelayDistributesOverWindow(t *testing.T) {
 	if max < maxDelay*9/10 {
 		t.Fatalf("max %v too low, expected near %v", max, maxDelay)
 	}
+}
+
+func clusterClientWithConnCount(n int) *clusterClient {
+	conns := make(map[string]connrole, n)
+	for i := 0; i < n; i++ {
+		conns[fmt.Sprintf("%d", i)] = connrole{}
+	}
+	return &clusterClient{conns: conns}
 }

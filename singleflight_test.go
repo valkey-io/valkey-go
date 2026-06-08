@@ -83,28 +83,6 @@ func TestSingleFlightWithContext(t *testing.T) {
 	}
 }
 
-func TestSingleFlightLazyDo(t *testing.T) {
-	defer ShouldNotLeak(SetupLeakDetection())
-	ch := make(chan struct{})
-	sg := call{}
-	sg.LazyDo(time.Second, func() error {
-		<-ch
-		return nil
-	})
-	cn := 0
-	sg.LazyDo(time.Second, func() error {
-		cn++ // this should not occur
-		return nil
-	})
-	if cn != 0 {
-		t.Fatalf("unexpected cn %v", cn)
-	}
-	if sc := sg.suppressing(); sc != 1 {
-		t.Fatalf("unexpected suppressing %v", sc)
-	}
-	close(ch)
-}
-
 func TestSingleFlightDelayDoDedupesInFlight(t *testing.T) {
 	defer ShouldNotLeak(SetupLeakDetection())
 	ch := make(chan struct{})
