@@ -798,6 +798,86 @@ func TestClusterClientInit(t *testing.T) {
 		}
 	})
 
+	t.Run("Refresh prefers InitAddress and falls back", func(t *testing.T) {
+		var mu sync.Mutex
+		var calls []string
+		behavior := map[string]func() ValkeyResult{}
+		initAddrs := map[string]struct{}{
+			"127.0.0.1:0": {},
+		}
+		client, err := newClusterClient(
+			&ClientOption{
+				InitAddress: []string{"127.0.0.1:0"},
+				ClusterOption: ClusterOption{
+					PreferInitAddressRefresh: true,
+				},
+			},
+			func(dst string, opt *ClientOption) conn {
+				return &mockConn{
+					AddrFn: func() string { return dst },
+					DoFn: func(cmd Completed) ValkeyResult {
+						mu.Lock()
+						calls = append(calls, dst)
+						fn := behavior[dst]
+						mu.Unlock()
+						if fn != nil {
+							return fn()
+						}
+						return slotsMultiResp
+					},
+				}
+			},
+			newRetryer(defaultRetryDelayFn),
+		)
+		if err != nil {
+			t.Fatalf("unexpected err %v", err)
+		}
+
+		resetCalls := func() {
+			mu.Lock()
+			defer mu.Unlock()
+			calls = nil
+		}
+		snapshotCalls := func() []string {
+			mu.Lock()
+			defer mu.Unlock()
+			return append([]string(nil), calls...)
+		}
+		setBehavior := func(addr string, fn func() ValkeyResult) {
+			mu.Lock()
+			defer mu.Unlock()
+			behavior[addr] = fn
+		}
+		emptyResp := func() ValkeyResult {
+			return newResult(slicemsg('*', []ValkeyMessage{}), nil)
+		}
+
+		resetCalls()
+		if err := client.refresh(context.Background()); err != nil {
+			t.Fatalf("unexpected err %v", err)
+		}
+		for _, addr := range snapshotCalls() {
+			if _, ok := initAddrs[addr]; !ok {
+				t.Fatalf("unexpected fallback refresh call %v", addr)
+			}
+		}
+
+		setBehavior("127.0.0.1:0", emptyResp)
+		resetCalls()
+		if err := client.refresh(context.Background()); err != nil {
+			t.Fatalf("unexpected err %v", err)
+		}
+		var fallbackCalled bool
+		for _, addr := range snapshotCalls() {
+			if _, ok := initAddrs[addr]; !ok {
+				fallbackCalled = true
+			}
+		}
+		if !fallbackCalled {
+			t.Fatalf("expected fallback refresh call")
+		}
+	})
+
 	t.Run("Refresh no slots cluster", func(t *testing.T) {
 		if _, err := newClusterClient(
 			&ClientOption{InitAddress: []string{":0"}},

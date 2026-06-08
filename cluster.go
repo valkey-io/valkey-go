@@ -229,37 +229,15 @@ func getClusterSlots(c conn, timeout time.Duration) clusterslots {
 }
 
 func (c *clusterClient) _refresh() (err error) {
-	c.mu.RLock()
-	results := make(chan clusterslots, len(c.conns))
-	pending := make([]conn, 0, len(c.conns))
-	for _, cc := range c.conns {
-		pending = append(pending, cc.conn)
-	}
-	c.mu.RUnlock()
-
-	var result clusterslots
 	batchDelay := c.clusterRefreshBatchDelay()
-	for i := 0; i < cap(results); i++ {
-		if i&3 == 0 { // batch CLUSTER SLOTS/CLUSTER SHARDS for every 4 connections
-			if i > 0 && batchDelay > 0 {
-				time.Sleep(batchDelay)
-			}
-			for j := i; j < i+4 && j < len(pending); j++ {
-				go func(c conn, timeout time.Duration) {
-					results <- getClusterSlots(c, timeout)
-				}(pending[j], c.opt.ConnWriteTimeout)
-			}
-		}
-		result = <-results
-		err = result.reply.Error()
-		if len(result.reply.val.values()) != 0 {
-			break
-		}
+	preferred, fallback := c.clusterRefreshConns()
+	result, err := c.refreshConns(preferred, batchDelay)
+	if len(result.reply.val.values()) == 0 && len(fallback) > 0 {
+		result, err = c.refreshConns(fallback, batchDelay)
 	}
 	if err != nil {
 		return err
 	}
-	pending = nil
 
 	groups := result.parse(c.opt.TLSConfig != nil)
 	conns := make(map[string]connrole, len(groups))
@@ -384,6 +362,55 @@ func (c *clusterClient) _refresh() (err error) {
 	}
 
 	return nil
+}
+
+func (c *clusterClient) clusterRefreshConns() (preferred, fallback []conn) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if !c.opt.ClusterOption.PreferInitAddressRefresh {
+		fallback = make([]conn, 0, len(c.conns))
+		for _, cc := range c.conns {
+			fallback = append(fallback, cc.conn)
+		}
+		return nil, fallback
+	}
+
+	initAddrs := make(map[string]struct{}, len(c.opt.InitAddress))
+	for _, addr := range c.opt.InitAddress {
+		initAddrs[addr] = struct{}{}
+		if cc, ok := c.conns[addr]; ok {
+			preferred = append(preferred, cc.conn)
+		}
+	}
+	fallback = make([]conn, 0, len(c.conns))
+	for addr, cc := range c.conns {
+		if _, ok := initAddrs[addr]; !ok {
+			fallback = append(fallback, cc.conn)
+		}
+	}
+	return preferred, fallback
+}
+
+func (c *clusterClient) refreshConns(pending []conn, batchDelay time.Duration) (result clusterslots, err error) {
+	results := make(chan clusterslots, len(pending))
+	for i := 0; i < len(pending); i++ {
+		if i&3 == 0 { // batch CLUSTER SLOTS/CLUSTER SHARDS for every 4 connections
+			if i > 0 && batchDelay > 0 {
+				time.Sleep(batchDelay)
+			}
+			for j := i; j < i+4 && j < len(pending); j++ {
+				go func(c conn, timeout time.Duration) {
+					results <- getClusterSlots(c, timeout)
+				}(pending[j], c.opt.ConnWriteTimeout)
+			}
+		}
+		result = <-results
+		err = result.reply.Error()
+		if len(result.reply.val.values()) != 0 {
+			break
+		}
+	}
+	return result, err
 }
 
 func (c *clusterClient) single() (conn conn) {

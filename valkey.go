@@ -310,6 +310,10 @@ type ClusterOption struct {
 	// Cluster topology cache refresh happens always in the background after a successful scan.
 	ShardsRefreshInterval time.Duration
 
+	// PreferInitAddressRefresh tries ClientOption.InitAddress nodes first during cluster topology refresh.
+	// If they do not return topology, refresh falls back to other known cluster connections.
+	PreferInitAddressRefresh bool
+
 	// MaxMovedRedirections is the maximum number of times to retry a command when receiving MOVED|ASK responses.
 	// If set to 0 (default), MOVED|ASK retries will continue until the context timeout.
 	// If set to a positive value, the client will return an error after that many MOVED|ASK redirects.
