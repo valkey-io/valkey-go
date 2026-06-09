@@ -12,6 +12,10 @@ const (
 	unsubTag     = uint16(1<<9) | noRetTag
 	pipeTag      = uint16(1 << 8) // make blocking mode request can use auto pipelining
 	retryableTag = uint16(1 << 7) // make command retryable
+	// directCacheCommitTag marks a cacheable command whose reply the
+	// read goroutine commits directly to the client-side cache (no
+	// MULTI/EXEC unwrap). Set via Completed.ToDirectCacheCommit().
+	directCacheCommitTag = uint16(1 << 6)
 	// InitSlot indicates that the command be sent to any valkey node in cluster
 	InitSlot = uint16(1 << 14)
 	// NoSlot indicates that the command has no key slot specified
@@ -134,6 +138,13 @@ func (c Completed) ToRetryable() Completed {
 	return c
 }
 
+// ToDirectCacheCommit returns a copy of this command with
+// directCacheCommitTag set. See the tag's definition.
+func (c Completed) ToDirectCacheCommit() Completed {
+	c.cf |= directCacheCommitTag
+	return c
+}
+
 // IsEmpty checks if it is an empty command.
 func (c *Completed) IsEmpty() bool {
 	return c.cs == nil || len(c.cs.s) == 0
@@ -142,6 +153,11 @@ func (c *Completed) IsEmpty() bool {
 // IsOptIn checks if it is client side caching opt-int command.
 func (c *Completed) IsOptIn() bool {
 	return c.cf&optInTag == optInTag
+}
+
+// IsDirectCacheCommit reports whether directCacheCommitTag is set.
+func (c *Completed) IsDirectCacheCommit() bool {
+	return c.cf&directCacheCommitTag == directCacheCommitTag
 }
 
 // IsBlock checks if it is blocking command which needs to be process by dedicated connection.
@@ -227,7 +243,7 @@ func (c *Cacheable) Commands() []string {
 
 // IsMGet returns if the command is MGET
 func (c *Cacheable) IsMGet() bool {
-	return c.cf == mtGetTag
+	return c.cf&mtGetTag == mtGetTag
 }
 
 // MGetCacheCmd returns the cache command of the MGET singular command
@@ -251,7 +267,7 @@ func CacheKey(c Cacheable) (key, command string) {
 
 	kp := 1
 
-	if c.cf == scrRoTag {
+	if c.cf&scrRoTag == scrRoTag {
 		if c.cs.s[2] != "1" {
 			panic(multiKeyCacheErr)
 		}

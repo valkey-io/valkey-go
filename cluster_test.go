@@ -7364,6 +7364,57 @@ func TestClusterClientCacheASKRetry(t *testing.T) {
 			t.Fatalf("expected 2 attempts, got %v", attempts)
 		}
 	})
+
+	t.Run("DoCache Retry on ASK with StaticClientTTL", func(t *testing.T) {
+		client, m := setup()
+		askDone := false
+		m.DoCacheFn = func(cmd Cacheable, ttl time.Duration) ValkeyResult {
+			return newResult(strmsg('-', "ASK 0 :0"), nil)
+		}
+		m.DoMultiFn = func(multi ...Completed) *valkeyresults {
+			askDone = true
+			// askingMultiCache under WithStaticClientTTL must emit a
+			// stride-3 packet per key: [OPT_IN, ASKING, cmd]. The full
+			// stride-6 standard wire would be 6 cmds for one key.
+			if len(multi) != 3 {
+				t.Errorf("expected 3 cmds on ASK wire under StaticClientTTL, got %d", len(multi))
+			}
+			// Reply at offset 2 is the cmd reply directly (no EXEC unwrap).
+			return &valkeyresults{s: []ValkeyResult{{}, {}, newResult(strmsg('+', "OK"), nil)}}
+		}
+		ctx := WithStaticClientTTL(context.Background())
+		resp := client.DoCache(ctx, client.B().Get().Key("a1").Cache(), 10*time.Second)
+		if v, err := resp.ToString(); err != nil || v != "OK" {
+			t.Fatalf("unexpected response %v %v", v, err)
+		}
+		if !askDone {
+			t.Fatalf("ASK redirect path never fired")
+		}
+	})
+
+	t.Run("DoMultiCache Retry on ASK with StaticClientTTL", func(t *testing.T) {
+		client, m := setup()
+		askDone := false
+		m.DoMultiCacheFn = func(multi ...CacheableTTL) *valkeyresults {
+			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('-', "ASK 0 :0"), nil)}}
+		}
+		m.DoMultiFn = func(multi ...Completed) *valkeyresults {
+			askDone = true
+			if len(multi) != 3 {
+				t.Errorf("expected 3 cmds on ASK wire under StaticClientTTL (1 key × stride 3), got %d", len(multi))
+			}
+			return &valkeyresults{s: []ValkeyResult{{}, {}, newResult(strmsg('+', "OK"), nil)}}
+		}
+		ctx := WithStaticClientTTL(context.Background())
+		resps := client.DoMultiCache(ctx, CT(client.B().Get().Key("a1").Cache(), 10*time.Second))
+		if v, err := resps[0].ToString(); err != nil || v != "OK" {
+			t.Fatalf("unexpected response %v %v", v, err)
+		}
+		if !askDone {
+			t.Fatalf("ASK redirect path never fired")
+		}
+	})
+
 }
 
 //gocyclo:ignore
