@@ -1737,9 +1737,9 @@ func BenchmarkSingleClient_DoCache(b *testing.B) {
 		b.StopTimer()
 	})
 	b.Run("DoCacheGet", func(b *testing.B) {
-		// Single-key GET (MGET is a carve-out for WithStaticClientTTL — it
-		// falls through to doCacheMGet, so a fair StaticClientTTL comparison
-		// uses GET).
+		// Single-key GET — MGET falls back to the default client-side
+		// cache path before .StaticTTL() is consulted, so a fair
+		// static-TTL comparison uses GET.
 		b.ResetTimer()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
@@ -1751,11 +1751,10 @@ func BenchmarkSingleClient_DoCache(b *testing.B) {
 		b.StopTimer()
 	})
 	b.Run("DoCacheGetStaticClientTTL", func(b *testing.B) {
-		staticCtx := WithStaticClientTTL(ctx)
 		b.ResetTimer()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				if err := client.DoCache(staticCtx, client.B().Get().Key("0").Cache(), time.Minute).Error(); err != nil {
+				if err := client.DoCache(ctx, client.B().Get().Key("0").Cache().StaticTTL(), time.Minute).Error(); err != nil {
 					b.Errorf("unexpected %v", err)
 				}
 			}

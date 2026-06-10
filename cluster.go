@@ -1034,21 +1034,31 @@ func (c *clusterClient) askingMultiCache(cc conn, ctx context.Context, multi []C
 	// ASK-redirected requests run on a different connection from the one
 	// holding the original Flight slot; this function never mutates the
 	// cache. The origin slot was already cancelled on -ASK.
-	skipMultiExec := hasStaticClientTTL(ctx)
+	//
+	// All-or-nothing gate: only take the stride-3 direct path when every
+	// CacheableTTL in the batch is tagged with .StaticTTL(). A mixed
+	// batch falls back to the standard stride-6 wrapped wire.
+	skipMultiExec := true
+	for _, ct := range multi {
+		if !cmds.IsStaticTTL(Completed(ct.Cmd)) {
+			skipMultiExec = false
+			break
+		}
+	}
 	var (
 		commands []Completed
 		stride   int
 		offset   int
 	)
 	if skipMultiExec {
-		// Wire per key: [OPT_IN, ASKING, cmd]. Cmd is NOT tagged with
-		// ToDirectCacheCommit — this connection has no Flight slot to
-		// resolve, so the read loop's direct-commit gate must not fire.
+		// Wire per key: [OPT_IN, ASKING, cmd]. The staticTTLTag is
+		// stripped — this connection has no Flight slot for the key,
+		// so the read loop's direct-commit gate must not fire.
 		stride = 3
 		offset = 2
 		commands = make([]Completed, 0, len(multi)*stride)
 		for _, cmd := range multi {
-			commands = append(commands, cc.OptInCmd(), cmds.AskingCmd, Completed(cmd.Cmd))
+			commands = append(commands, cc.OptInCmd(), cmds.AskingCmd, cmds.ClearStaticTTL(Completed(cmd.Cmd)))
 		}
 	} else {
 		// Wire per key: [OPT_IN, ASKING, MULTI, PTTL, cmd, EXEC].

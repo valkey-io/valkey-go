@@ -12,10 +12,10 @@ const (
 	unsubTag     = uint16(1<<9) | noRetTag
 	pipeTag      = uint16(1 << 8) // make blocking mode request can use auto pipelining
 	retryableTag = uint16(1 << 7) // make command retryable
-	// directCacheCommitTag marks a cacheable command whose reply the
-	// read goroutine commits directly to the client-side cache (no
-	// MULTI/EXEC unwrap). Set via Completed.ToDirectCacheCommit().
-	directCacheCommitTag = uint16(1 << 6)
+	// staticTTLTag marks a cacheable command whose reply the read
+	// goroutine commits directly to the client-side cache (no
+	// MULTI/EXEC unwrap). Set via Cacheable.StaticTTL().
+	staticTTLTag = uint16(1 << 6)
 	// InitSlot indicates that the command be sent to any valkey node in cluster
 	InitSlot = uint16(1 << 14)
 	// NoSlot indicates that the command has no key slot specified
@@ -138,13 +138,6 @@ func (c Completed) ToRetryable() Completed {
 	return c
 }
 
-// ToDirectCacheCommit returns a copy of this command with
-// directCacheCommitTag set. See the tag's definition.
-func (c Completed) ToDirectCacheCommit() Completed {
-	c.cf |= directCacheCommitTag
-	return c
-}
-
 // IsEmpty checks if it is an empty command.
 func (c *Completed) IsEmpty() bool {
 	return c.cs == nil || len(c.cs.s) == 0
@@ -155,9 +148,21 @@ func (c *Completed) IsOptIn() bool {
 	return c.cf&optInTag == optInTag
 }
 
-// IsDirectCacheCommit reports whether directCacheCommitTag is set.
-func (c *Completed) IsDirectCacheCommit() bool {
-	return c.cf&directCacheCommitTag == directCacheCommitTag
+// IsStaticTTL reports whether the cacheable command was tagged with
+// Cacheable.StaticTTL. When set, the connection's read goroutine
+// commits the reply directly to the client-side cache and skips the
+// MULTI/PTTL/EXEC wrapper.
+func IsStaticTTL(c Completed) bool {
+	return c.cf&staticTTLTag == staticTTLTag
+}
+
+// ClearStaticTTL returns a copy of c with staticTTLTag cleared. Used
+// on ASK-redirect wires, where the redirected connection has no
+// Flight slot for the key and the read goroutine must not fire its
+// direct-commit gate.
+func ClearStaticTTL(c Completed) Completed {
+	c.cf &^= staticTTLTag
+	return c
 }
 
 // IsBlock checks if it is blocking command which needs to be process by dedicated connection.
@@ -226,6 +231,32 @@ type Cacheable Completed
 // Pin prevents a Cacheable to be recycled
 func (c Cacheable) Pin() Cacheable {
 	c.cs.r = 1
+	return c
+}
+
+// StaticTTL marks the cacheable command so DoCache / DoMultiCache
+// skip the MULTI/PTTL/EXEC wrapper and use the caller-provided ttl
+// as authoritative for the client-side cache entry's lifetime.
+// Intended for callers whose freshness is enforced by active CLIENT
+// TRACKING invalidations on the cluster — writes that explicitly
+// invalidate the affected cached keys, making the per-read PTTL
+// clamp redundant — or who are willing to accept the client-supplied
+// ttl as the sole staleness bound: the client-side cache entry
+// expires at populate_time + ttl regardless of the server-side key's
+// PTTL. CLIENT TRACKING invalidations and LRU eviction still purge
+// entries; nothing extends them.
+//
+// MGET / JSON.MGET commands fall back to the default client-side
+// cache wire shape, which closely follows the Valkey-side key TTL
+// via the per-read PTTL clamp. DoCache dispatches them to a
+// dedicated multi-key path before this tag is consulted; DoMultiCache
+// rejects MGET outright.
+//
+// For DoMultiCache, the direct wire is taken only when every command
+// in the batch is tagged with StaticTTL. A batch containing any
+// untagged command falls back to the standard wire for all of them.
+func (c Cacheable) StaticTTL() Cacheable {
+	c.cf |= staticTTLTag
 	return c
 }
 

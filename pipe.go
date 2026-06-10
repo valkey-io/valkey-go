@@ -621,13 +621,13 @@ func (p *pipe) _backgroundRead() (err error) {
 			if multi == nil {
 				multi = ones
 			}
-		} else if multi[ff].IsDirectCacheCommit() {
-			// WithStaticClientTTL path: msg is the cacheable reply
-			// directly (no EXEC unwrap). Must be checked before the
-			// standard CSC gate below — an array reply of length >= 2 on
-			// that gate's offset would otherwise match incidentally.
-			// Typed wire errors cancel the L1 slot rather than caching
-			// them with cacheMark.
+		} else if cmds.IsStaticTTL(multi[ff]) {
+			// StaticTTL path: msg is the cacheable reply directly (no
+			// EXEC unwrap). Must be checked before the standard CSC
+			// gate below — an array reply of length >= 2 on that gate's
+			// offset would otherwise match incidentally. Typed wire
+			// errors cancel the client-side cache slot rather than
+			// caching them with cacheMark.
 			cacheable := Cacheable(multi[ff])
 			ck, cc := cmds.CacheKey(cacheable)
 			if err := msg.Error(); err != nil && err != Nil {
@@ -1493,10 +1493,10 @@ func (p *pipe) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) Va
 	} else if entry != nil {
 		return newResult(entry.Wait(ctx))
 	}
-	if hasStaticClientTTL(ctx) {
+	if cmds.IsStaticTTL(Completed(cmd)) {
 		// Wire: [OPT_IN, cmd]. The read goroutine resolves the Flight
-		// slot via the IsDirectCacheCommit gate.
-		resp := p.DoMulti(ctx, p.optInCmd(), Completed(cmd).ToDirectCacheCommit())
+		// slot via the IsStaticTTL gate.
+		resp := p.DoMulti(ctx, p.optInCmd(), Completed(cmd))
 		defer resultsp.Put(resp)
 		// Transport errors only — wire replies are handled by the read
 		// loop. Checking .err (not .Error()) avoids double-touching.
@@ -1657,15 +1657,24 @@ func (p *pipe) DoMultiCache(ctx context.Context, multi ...CacheableTTL) *valkeyr
 			panic(panicmgetcsc)
 		}
 	}
-	skipMultiExec := hasStaticClientTTL(ctx)
-	// Wire shape per miss: stride-2 [OPT_IN, tagged cmd] under
-	// skipMultiExec, stride-5 [OPT_IN, MULTI, PTTL, cmd, EXEC] otherwise.
+	// All-or-nothing: only take the stride-2 direct path when every
+	// CacheableTTL in the batch was tagged with .StaticTTL(). A mixed
+	// batch falls back to the standard stride-5 wrapped wire.
+	skipMultiExec := true
+	for _, ct := range multi {
+		if !cmds.IsStaticTTL(Completed(ct.Cmd)) {
+			skipMultiExec = false
+			break
+		}
+	}
+	// Wire shape per miss: stride-2 [OPT_IN, cmd] under skipMultiExec,
+	// stride-5 [OPT_IN, MULTI, PTTL, cmd, EXEC] otherwise.
 	if cache, ok := p.cache.(*lru); ok {
 		missed := cache.Flights(now, multi, results.s, entries.e)
 		for _, i := range missed {
 			ct := multi[i]
 			if skipMultiExec {
-				missing = append(missing, p.optInCmd(), Completed(ct.Cmd).ToDirectCacheCommit())
+				missing = append(missing, p.optInCmd(), Completed(ct.Cmd))
 			} else {
 				ck, _ := cmds.CacheKey(ct.Cmd)
 				missing = append(missing, p.optInCmd(), cmds.MultiCmd, cmds.NewCompleted([]string{"PTTL", ck}), Completed(ct.Cmd), cmds.ExecCmd)
@@ -1684,7 +1693,7 @@ func (p *pipe) DoMultiCache(ctx context.Context, multi ...CacheableTTL) *valkeyr
 				continue
 			}
 			if skipMultiExec {
-				missing = append(missing, p.optInCmd(), Completed(ct.Cmd).ToDirectCacheCommit())
+				missing = append(missing, p.optInCmd(), Completed(ct.Cmd))
 			} else {
 				missing = append(missing, p.optInCmd(), cmds.MultiCmd, cmds.NewCompleted([]string{"PTTL", ck}), Completed(ct.Cmd), cmds.ExecCmd)
 			}

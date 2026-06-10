@@ -7373,17 +7373,16 @@ func TestClusterClientCacheASKRetry(t *testing.T) {
 		}
 		m.DoMultiFn = func(multi ...Completed) *valkeyresults {
 			askDone = true
-			// askingMultiCache under WithStaticClientTTL must emit a
-			// stride-3 packet per key: [OPT_IN, ASKING, cmd]. The full
-			// stride-6 standard wire would be 6 cmds for one key.
+			// askingMultiCache under .StaticTTL() must emit a stride-3
+			// packet per key: [OPT_IN, ASKING, cmd]. The full stride-6
+			// standard wire would be 6 cmds for one key.
 			if len(multi) != 3 {
-				t.Errorf("expected 3 cmds on ASK wire under StaticClientTTL, got %d", len(multi))
+				t.Errorf("expected 3 cmds on ASK wire under .StaticTTL(), got %d", len(multi))
 			}
 			// Reply at offset 2 is the cmd reply directly (no EXEC unwrap).
 			return &valkeyresults{s: []ValkeyResult{{}, {}, newResult(strmsg('+', "OK"), nil)}}
 		}
-		ctx := WithStaticClientTTL(context.Background())
-		resp := client.DoCache(ctx, client.B().Get().Key("a1").Cache(), 10*time.Second)
+		resp := client.DoCache(context.Background(), client.B().Get().Key("a1").Cache().StaticTTL(), 10*time.Second)
 		if v, err := resp.ToString(); err != nil || v != "OK" {
 			t.Fatalf("unexpected response %v %v", v, err)
 		}
@@ -7401,12 +7400,11 @@ func TestClusterClientCacheASKRetry(t *testing.T) {
 		m.DoMultiFn = func(multi ...Completed) *valkeyresults {
 			askDone = true
 			if len(multi) != 3 {
-				t.Errorf("expected 3 cmds on ASK wire under StaticClientTTL (1 key × stride 3), got %d", len(multi))
+				t.Errorf("expected 3 cmds on ASK wire under .StaticTTL() (1 key × stride 3), got %d", len(multi))
 			}
 			return &valkeyresults{s: []ValkeyResult{{}, {}, newResult(strmsg('+', "OK"), nil)}}
 		}
-		ctx := WithStaticClientTTL(context.Background())
-		resps := client.DoMultiCache(ctx, CT(client.B().Get().Key("a1").Cache(), 10*time.Second))
+		resps := client.DoMultiCache(context.Background(), CT(client.B().Get().Key("a1").Cache().StaticTTL(), 10*time.Second))
 		if v, err := resps[0].ToString(); err != nil || v != "OK" {
 			t.Fatalf("unexpected response %v %v", v, err)
 		}
