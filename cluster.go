@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math/rand"
 	"net"
 	"strconv"
 	"sync"
@@ -100,9 +101,6 @@ func newClusterClient(opt *ClientOption, connFn connFn, retryer retryHandler) (*
 		return nil, err
 	}
 
-	if d := client.clusterRefreshStartDelay(); d > 0 {
-		time.Sleep(d)
-	}
 	if err := client.refresh(context.Background()); err != nil {
 		return client, err
 	}
@@ -230,11 +228,7 @@ func getClusterSlots(c conn, timeout time.Duration) clusterslots {
 
 func (c *clusterClient) _refresh() (err error) {
 	batchDelay := c.clusterRefreshBatchDelay()
-	preferred, fallback := c.clusterRefreshConns()
-	result, err := c.refreshConns(preferred, batchDelay)
-	if len(result.reply.val.values()) == 0 && len(fallback) > 0 {
-		result, err = c.refreshConns(fallback, batchDelay)
-	}
+	result, err := c.refreshConns(c.clusterRefreshConns(), batchDelay)
 	if err != nil {
 		return err
 	}
@@ -364,31 +358,26 @@ func (c *clusterClient) _refresh() (err error) {
 	return nil
 }
 
-func (c *clusterClient) clusterRefreshConns() (preferred, fallback []conn) {
+func (c *clusterClient) clusterRefreshConns() []conn {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if !c.opt.ClusterOption.PreferInitAddressRefresh {
-		fallback = make([]conn, 0, len(c.conns))
+		pending := make([]conn, 0, len(c.conns))
 		for _, cc := range c.conns {
-			fallback = append(fallback, cc.conn)
+			pending = append(pending, cc.conn)
 		}
-		return nil, fallback
+		rand.Shuffle(len(pending), func(i, j int) { pending[i], pending[j] = pending[j], pending[i] })
+		return pending
 	}
 
-	initAddrs := make(map[string]struct{}, len(c.opt.InitAddress))
+	pending := make([]conn, 0, len(c.opt.InitAddress))
 	for _, addr := range c.opt.InitAddress {
-		initAddrs[addr] = struct{}{}
 		if cc, ok := c.conns[addr]; ok {
-			preferred = append(preferred, cc.conn)
+			pending = append(pending, cc.conn)
 		}
 	}
-	fallback = make([]conn, 0, len(c.conns))
-	for addr, cc := range c.conns {
-		if _, ok := initAddrs[addr]; !ok {
-			fallback = append(fallback, cc.conn)
-		}
-	}
-	return preferred, fallback
+	rand.Shuffle(len(pending), func(i, j int) { pending[i], pending[j] = pending[j], pending[i] })
+	return pending
 }
 
 func (c *clusterClient) refreshConns(pending []conn, batchDelay time.Duration) (result clusterslots, err error) {

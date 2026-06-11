@@ -798,7 +798,7 @@ func TestClusterClientInit(t *testing.T) {
 		}
 	})
 
-	t.Run("Refresh prefers InitAddress and falls back", func(t *testing.T) {
+	t.Run("Refresh prefers InitAddress only", func(t *testing.T) {
 		var mu sync.Mutex
 		var calls []string
 		behavior := map[string]func() ValkeyResult{}
@@ -873,8 +873,8 @@ func TestClusterClientInit(t *testing.T) {
 				fallbackCalled = true
 			}
 		}
-		if !fallbackCalled {
-			t.Fatalf("expected fallback refresh call")
+		if fallbackCalled {
+			t.Fatalf("unexpected fallback refresh call")
 		}
 	})
 
