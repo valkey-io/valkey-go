@@ -6705,3 +6705,81 @@ func TestClientSideCachingStaticClientTTLCleanupNoRaceWithReadLoop(t *testing.T)
 		}
 	})
 }
+
+// TestClientSideCachingStaticClientTTLDoCacheCancelOnTransportError exercises
+// the caller-side cleanup when DoMulti reports a transport error on the inner
+// cmd (resp.s[1].err non-nil — distinct from a wire-level ValkeyError). The
+// static-TTL DoCache path must Cancel() the Flight slot so a follow-up DoCache
+// on the same key takes a fresh wire trip rather than waiting on a stranded
+// slot.
+func TestClientSideCachingStaticClientTTLDoCacheCancelOnTransportError(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+	p, mock, cancel, _ := setup(t, ClientOption{})
+	defer cancel()
+
+	cancelledCtx, cancelCtx := context.WithCancel(context.Background())
+	cancelCtx()
+
+	r := p.DoCache(cancelledCtx, Cacheable(cmds.NewCompleted([]string{"GET", "txerr_k"})).StaticTTL(), 10*time.Second)
+	if !errors.Is(r.err, context.Canceled) {
+		t.Fatalf("expected context.Canceled on transport error, got %v", r.err)
+	}
+
+	// Follow-up with fresh ctx must take a fresh wire trip — the slot was cancelled.
+	go func() {
+		mock.Expect("CLIENT", "CACHING", "YES").
+			Expect("GET", "txerr_k").
+			ReplyString("OK").
+			ReplyString("fresh")
+	}()
+	freshCtx, freshCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer freshCancel()
+	v, err := p.DoCache(freshCtx, Cacheable(cmds.NewCompleted([]string{"GET", "txerr_k"})).StaticTTL(), 10*time.Second).ToMessage()
+	if err != nil {
+		t.Fatalf("fresh DoCache: %v (likely a leaked Flight slot)", err)
+	}
+	if v.string() != "fresh" {
+		t.Fatalf("fresh DoCache: expected %q got %q", "fresh", v.string())
+	}
+}
+
+// TestClientSideCachingStaticClientTTLDoMultiCache_CustomCacheStore exercises
+// the non-LRU branch of DoMultiCache. When NewCacheStoreFn returns a custom
+// CacheStore (anything that isn't *lru, e.g. via NewSimpleCacheAdapter), the
+// missing-list build loop takes a separate per-key Flight() path instead of
+// the LRU's batch Flights() optimization; the skipMultiExec arm of that path
+// needs its own coverage.
+func TestClientSideCachingStaticClientTTLDoMultiCache_CustomCacheStore(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+	p, mock, cancel, _ := setup(t, ClientOption{
+		NewCacheStoreFn: func(option CacheStoreOption) CacheStore {
+			return NewSimpleCacheAdapter(&simple{store: map[string]ValkeyMessage{}})
+		},
+	})
+	defer cancel()
+
+	go func() {
+		mock.Expect("CLIENT", "CACHING", "YES").
+			Expect("GET", "ak").
+			Expect("CLIENT", "CACHING", "YES").
+			Expect("GET", "bk").
+			ReplyString("OK").
+			ReplyString("av").
+			ReplyString("OK").
+			ReplyString("bv")
+	}()
+
+	results := p.DoMultiCache(context.Background(),
+		CT(Cacheable(cmds.NewCompleted([]string{"GET", "ak"})).StaticTTL(), 10*time.Second),
+		CT(Cacheable(cmds.NewCompleted([]string{"GET", "bk"})).StaticTTL(), 10*time.Second),
+	)
+	for i, want := range []string{"av", "bv"} {
+		v, err := results.s[i].ToMessage()
+		if err != nil {
+			t.Fatalf("at %d: %v", i, err)
+		}
+		if v.string() != want {
+			t.Fatalf("at %d: expected %q got %q", i, want, v.string())
+		}
+	}
+}
