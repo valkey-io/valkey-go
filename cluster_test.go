@@ -7481,6 +7481,89 @@ func TestClusterClientCacheASKRetry(t *testing.T) {
 			t.Fatalf("expected 2 attempts, got %v", attempts)
 		}
 	})
+
+	t.Run("DoCache Retry on ASK with StaticClientTTL", func(t *testing.T) {
+		client, m := setup()
+		askDone := false
+		m.DoCacheFn = func(cmd Cacheable, ttl time.Duration) ValkeyResult {
+			return newResult(strmsg('-', "ASK 0 :0"), nil)
+		}
+		m.DoMultiFn = func(multi ...Completed) *valkeyresults {
+			askDone = true
+			// askingMultiCache under .StaticTTL() must emit a stride-3
+			// packet per key: [OPT_IN, ASKING, cmd]. The full stride-6
+			// standard wire would be 6 cmds for one key.
+			if len(multi) != 3 {
+				t.Errorf("expected 3 cmds on ASK wire under .StaticTTL(), got %d", len(multi))
+			}
+			// Reply at offset 2 is the cmd reply directly (no EXEC unwrap).
+			return &valkeyresults{s: []ValkeyResult{{}, {}, newResult(strmsg('+', "OK"), nil)}}
+		}
+		resp := client.DoCache(context.Background(), client.B().Get().Key("a1").Cache().StaticTTL(), 10*time.Second)
+		if v, err := resp.ToString(); err != nil || v != "OK" {
+			t.Fatalf("unexpected response %v %v", v, err)
+		}
+		if !askDone {
+			t.Fatalf("ASK redirect path never fired")
+		}
+	})
+
+	t.Run("DoMultiCache Retry on ASK with StaticClientTTL", func(t *testing.T) {
+		client, m := setup()
+		askDone := false
+		m.DoMultiCacheFn = func(multi ...CacheableTTL) *valkeyresults {
+			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('-', "ASK 0 :0"), nil)}}
+		}
+		m.DoMultiFn = func(multi ...Completed) *valkeyresults {
+			askDone = true
+			if len(multi) != 3 {
+				t.Errorf("expected 3 cmds on ASK wire under .StaticTTL() (1 key × stride 3), got %d", len(multi))
+			}
+			return &valkeyresults{s: []ValkeyResult{{}, {}, newResult(strmsg('+', "OK"), nil)}}
+		}
+		resps := client.DoMultiCache(context.Background(), CT(client.B().Get().Key("a1").Cache().StaticTTL(), 10*time.Second))
+		if v, err := resps[0].ToString(); err != nil || v != "OK" {
+			t.Fatalf("unexpected response %v %v", v, err)
+		}
+		if !askDone {
+			t.Fatalf("ASK redirect path never fired")
+		}
+	})
+
+	t.Run("DoCache Retry on ASK with StaticClientTTL transport error", func(t *testing.T) {
+		client, m := setup()
+		askDone := false
+		errInjected := false
+		m.DoCacheFn = func(cmd Cacheable, ttl time.Duration) ValkeyResult {
+			return newResult(strmsg('-', "ASK 0 :0"), nil)
+		}
+		m.DoMultiFn = func(multi ...Completed) *valkeyresults {
+			askDone = true
+			if !errInjected {
+				// First askingMultiCache call: inject a transport error on the
+				// cmd offset (stride-3, offset 2) to exercise the .StaticTTL()
+				// ASK-redirect error-propagation branch.
+				errInjected = true
+				return &valkeyresults{s: []ValkeyResult{
+					{}, {},
+					newErrResult(errors.New("transport: connection closed")),
+				}}
+			}
+			// shouldRefreshRetry treats non-ValkeyError as RedirectRetry, so
+			// the cluster client loops back through pick → DoCache → ASK →
+			// askingMultiCache. On the second pass, succeed so the test
+			// terminates instead of retrying forever.
+			return &valkeyresults{s: []ValkeyResult{{}, {}, newResult(strmsg('+', "OK"), nil)}}
+		}
+		resp := client.DoCache(context.Background(), client.B().Get().Key("a1").Cache().StaticTTL(), 10*time.Second)
+		if v, err := resp.ToString(); err != nil || v != "OK" {
+			t.Fatalf("unexpected final response %v %v", v, err)
+		}
+		if !askDone || !errInjected {
+			t.Fatalf("ASK redirect transport-error path never fired (askDone=%v errInjected=%v)", askDone, errInjected)
+		}
+	})
+
 }
 
 //gocyclo:ignore

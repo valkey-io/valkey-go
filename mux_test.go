@@ -1199,6 +1199,55 @@ func BenchmarkClientSideCaching(b *testing.B) {
 			}
 		})
 	})
+	b.Run("DoCacheStaticClientTTL", func(b *testing.B) {
+		m := setup(b)
+		cmd := Cacheable(cmds.NewCompleted([]string{"GET", "a"})).StaticTTL()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				m.DoCache(context.Background(), cmd, time.Second*5)
+			}
+		})
+	})
+}
+
+// BenchmarkClientSideCachingMiss forces every iteration to be a
+// client-side cache miss by reading a unique key, so each call
+// exercises the wire round-trip instead of the client-side cache
+// hot-path. This is what isolates the wire-shape cost difference
+// between the standard CSC [OPT_IN, MULTI, PTTL, cmd, EXEC] packet
+// and the Cacheable.StaticTTL [OPT_IN, cmd] packet.
+func BenchmarkClientSideCachingMiss(b *testing.B) {
+	setup := func(b *testing.B) *mux {
+		c := makeMux("127.0.0.1:6379", &ClientOption{CacheSizeEachConn: DefaultCacheBytes}, func(_ context.Context, dst string, opt *ClientOption) (conn net.Conn, err error) {
+			return net.Dial("tcp", dst)
+		})
+		if err := c.Dial(); err != nil {
+			panic(err)
+		}
+		b.SetParallelism(100)
+		b.ResetTimer()
+		return c
+	}
+	b.Run("DoCache", func(b *testing.B) {
+		m := setup(b)
+		var counter atomic.Uint64
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				key := strconv.FormatUint(counter.Add(1), 10)
+				m.DoCache(context.Background(), Cacheable(cmds.NewCompleted([]string{"GET", key})), time.Minute)
+			}
+		})
+	})
+	b.Run("DoCacheStaticClientTTL", func(b *testing.B) {
+		m := setup(b)
+		var counter atomic.Uint64
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				key := strconv.FormatUint(counter.Add(1), 10)
+				m.DoCache(context.Background(), Cacheable(cmds.NewCompleted([]string{"GET", key})).StaticTTL(), time.Minute)
+			}
+		})
+	})
 }
 
 type mockWire struct {

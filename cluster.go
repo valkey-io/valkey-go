@@ -1043,10 +1043,44 @@ func (c *clusterClient) askingMulti(cc conn, ctx context.Context, multi []Comple
 }
 
 func (c *clusterClient) askingMultiCache(cc conn, ctx context.Context, multi []CacheableTTL) *valkeyresults {
-	commands := make([]Completed, 0, len(multi)*6)
-	for _, cmd := range multi {
-		ck, _ := cmds.CacheKey(cmd.Cmd)
-		commands = append(commands, cc.OptInCmd(), cmds.AskingCmd, cmds.MultiCmd, cmds.NewCompleted([]string{"PTTL", ck}), Completed(cmd.Cmd), cmds.ExecCmd)
+	// ASK-redirected requests run on a different connection from the one
+	// holding the original Flight slot; this function never mutates the
+	// cache. The origin slot was already cancelled on -ASK.
+	//
+	// All-or-nothing gate: only take the stride-3 direct path when every
+	// CacheableTTL in the batch is tagged with .StaticTTL(). A mixed
+	// batch falls back to the standard stride-6 wrapped wire.
+	skipMultiExec := true
+	for _, ct := range multi {
+		if !cmds.IsStaticTTL(Completed(ct.Cmd)) {
+			skipMultiExec = false
+			break
+		}
+	}
+	var (
+		commands []Completed
+		stride   int
+		offset   int
+	)
+	if skipMultiExec {
+		// Wire per key: [OPT_IN, ASKING, cmd]. The staticTTLTag is
+		// stripped — this connection has no Flight slot for the key,
+		// so the read loop's direct-commit gate must not fire.
+		stride = 3
+		offset = 2
+		commands = make([]Completed, 0, len(multi)*stride)
+		for _, cmd := range multi {
+			commands = append(commands, cc.OptInCmd(), cmds.AskingCmd, cmds.ClearStaticTTL(Completed(cmd.Cmd)))
+		}
+	} else {
+		// Wire per key: [OPT_IN, ASKING, MULTI, PTTL, cmd, EXEC].
+		stride = 6
+		offset = 5
+		commands = make([]Completed, 0, len(multi)*stride)
+		for _, cmd := range multi {
+			ck, _ := cmds.CacheKey(cmd.Cmd)
+			commands = append(commands, cc.OptInCmd(), cmds.AskingCmd, cmds.MultiCmd, cmds.NewCompleted([]string{"PTTL", ck}), Completed(cmd.Cmd), cmds.ExecCmd)
+		}
 	}
 	results := resultsp.Get(0, len(multi))
 	resps := cc.DoMulti(ctx, commands...)
@@ -1054,9 +1088,9 @@ func (c *clusterClient) askingMultiCache(cc conn, ctx context.Context, multi []C
 		var ml []Completed
 	recover:
 		ml = ml[:0]
-		for i := 5; i < len(resps.s); i += 6 { // check exec command error only
+		for i := offset; i < len(resps.s); i += stride {
 			if resps.s[i].NonValkeyError() == errConnExpired {
-				ml = commands[i-5:]
+				ml = commands[i-offset:]
 				break
 			}
 		}
@@ -1066,14 +1100,21 @@ func (c *clusterClient) askingMultiCache(cc conn, ctx context.Context, multi []C
 			goto recover
 		}
 	}
-	for i := 5; i < len(resps.s); i += 6 {
-		if arr, err := resps.s[i].ToArray(); err != nil {
-			if preErr := resps.s[i-1].Error(); preErr != nil { // if {Cmd} get a ValkeyError
-				err = preErr
+	if skipMultiExec {
+		// Cmd reply is the user-visible result directly (no EXEC unwrap).
+		for i := offset; i < len(resps.s); i += stride {
+			results.s = append(results.s, resps.s[i])
+		}
+	} else {
+		for i := offset; i < len(resps.s); i += stride {
+			if arr, err := resps.s[i].ToArray(); err != nil {
+				if preErr := resps.s[i-1].Error(); preErr != nil { // if {Cmd} get a ValkeyError
+					err = preErr
+				}
+				results.s = append(results.s, newErrResult(err))
+			} else {
+				results.s = append(results.s, newResult(arr[len(arr)-1], nil))
 			}
-			results.s = append(results.s, newErrResult(err))
-		} else {
-			results.s = append(results.s, newResult(arr[len(arr)-1], nil))
 		}
 	}
 	resultsp.Put(resps)
