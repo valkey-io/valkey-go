@@ -52,6 +52,7 @@ type wire interface {
 	Info() map[string]ValkeyMessage
 	Version() int
 	AZ() string
+	Role() string
 	Error() error
 	Close()
 
@@ -999,6 +1000,11 @@ func (p *pipe) Version() int {
 func (p *pipe) AZ() string {
 	infoAvailabilityZone := p.info["availability_zone"]
 	return infoAvailabilityZone.string()
+}
+
+func (p *pipe) Role() string {
+	infoRole := p.info["role"]
+	return infoRole.string()
 }
 
 func (p *pipe) Do(ctx context.Context, cmd Completed) (resp ValkeyResult) {
