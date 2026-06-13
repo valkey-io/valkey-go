@@ -1091,11 +1091,7 @@ func (c *clusterClient) askingMultiCache(cc conn, ctx context.Context, multi []C
 	if skipMultiExec {
 		// Cmd reply is the user-visible result directly (no EXEC unwrap).
 		for i := offset; i < len(resps.s); i += stride {
-			if resps.s[i].err != nil {
-				results.s = append(results.s, newErrResult(resps.s[i].err))
-			} else {
-				results.s = append(results.s, newResult(resps.s[i].val, nil))
-			}
+			results.s = append(results.s, resps.s[i])
 		}
 	} else {
 		for i := offset; i < len(resps.s); i += stride {
