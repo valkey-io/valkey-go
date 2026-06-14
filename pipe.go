@@ -1657,9 +1657,9 @@ func (p *pipe) DoMultiCache(ctx context.Context, multi ...CacheableTTL) *valkeyr
 			panic(panicmgetcsc)
 		}
 	}
-	// All-or-nothing: only take the stride-2 direct path when every
-	// CacheableTTL in the batch was tagged with .StaticTTL(). A mixed
-	// batch falls back to the standard stride-5 wrapped wire.
+	// All-or-nothing: stride-2 only when every cmd is tagged; otherwise
+	// stride-5 with the tag stripped so the static-TTL gate cannot fire
+	// on "QUEUED" inside MULTI/EXEC.
 	skipMultiExec := true
 	for _, ct := range multi {
 		if !cmds.IsStaticTTL(Completed(ct.Cmd)) {
@@ -1667,8 +1667,7 @@ func (p *pipe) DoMultiCache(ctx context.Context, multi ...CacheableTTL) *valkeyr
 			break
 		}
 	}
-	// Wire shape per miss: stride-2 [OPT_IN, cmd] under skipMultiExec,
-	// stride-5 [OPT_IN, MULTI, PTTL, cmd, EXEC] otherwise.
+	// stride-2 [OPT_IN, cmd] vs. stride-5 [OPT_IN, MULTI, PTTL, cmd, EXEC].
 	if cache, ok := p.cache.(*lru); ok {
 		missed := cache.Flights(now, multi, results.s, entries.e)
 		for _, i := range missed {
@@ -1677,7 +1676,7 @@ func (p *pipe) DoMultiCache(ctx context.Context, multi ...CacheableTTL) *valkeyr
 				missing = append(missing, p.optInCmd(), Completed(ct.Cmd))
 			} else {
 				ck, _ := cmds.CacheKey(ct.Cmd)
-				missing = append(missing, p.optInCmd(), cmds.MultiCmd, cmds.NewCompleted([]string{"PTTL", ck}), Completed(ct.Cmd), cmds.ExecCmd)
+				missing = append(missing, p.optInCmd(), cmds.MultiCmd, cmds.NewCompleted([]string{"PTTL", ck}), cmds.ClearStaticTTL(Completed(ct.Cmd)), cmds.ExecCmd)
 			}
 		}
 	} else {
@@ -1695,7 +1694,7 @@ func (p *pipe) DoMultiCache(ctx context.Context, multi ...CacheableTTL) *valkeyr
 			if skipMultiExec {
 				missing = append(missing, p.optInCmd(), Completed(ct.Cmd))
 			} else {
-				missing = append(missing, p.optInCmd(), cmds.MultiCmd, cmds.NewCompleted([]string{"PTTL", ck}), Completed(ct.Cmd), cmds.ExecCmd)
+				missing = append(missing, p.optInCmd(), cmds.MultiCmd, cmds.NewCompleted([]string{"PTTL", ck}), cmds.ClearStaticTTL(Completed(ct.Cmd)), cmds.ExecCmd)
 			}
 		}
 	}

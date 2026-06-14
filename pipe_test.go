@@ -6783,3 +6783,82 @@ func TestClientSideCachingStaticClientTTLDoMultiCache_CustomCacheStore(t *testin
 		}
 	}
 }
+
+// TestClientSideCachingStaticClientTTLDoMultiCacheMixedNoPollution pins
+// the all-or-nothing enforcement for DoMultiCache: when the batch contains
+// at least one untagged cmd, every cmd's wire-side Completed must have
+// staticTTLTag cleared. Otherwise the read loop's static-TTL gate fires on
+// the cmd's "QUEUED" reply inside MULTI/EXEC and Update()s the cache (and
+// resolves the Flight slot) with "QUEUED" before the standard CSC gate can
+// fill in the real EXEC-unwrapped value — leaving the cache permanently
+// polluted for the tagged-but-mixed key.
+func TestClientSideCachingStaticClientTTLDoMultiCacheMixedNoPollution(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+	p, mock, cancel, _ := setup(t, ClientOption{})
+	defer cancel()
+
+	// Mixed batch: k1 tagged with .StaticTTL(), k2 untagged.
+	// Since not all are tagged, DoMultiCache picks the wrapped stride-5
+	// wire for the entire batch.
+	go func() {
+		mock.Expect("CLIENT", "CACHING", "YES").
+			Expect("MULTI").
+			Expect("PTTL", "k1").
+			Expect("GET", "k1").
+			Expect("EXEC").
+			Expect("CLIENT", "CACHING", "YES").
+			Expect("MULTI").
+			Expect("PTTL", "k2").
+			Expect("GET", "k2").
+			Expect("EXEC").
+			ReplyString("OK").
+			ReplyString("OK").
+			ReplyString("QUEUED").
+			ReplyString("QUEUED").
+			Reply(slicemsg('*', []ValkeyMessage{
+				{typ: ':', intlen: 10000},
+				strmsg('$', "v1"),
+			})).
+			ReplyString("OK").
+			ReplyString("OK").
+			ReplyString("QUEUED").
+			ReplyString("QUEUED").
+			Reply(slicemsg('*', []ValkeyMessage{
+				{typ: ':', intlen: 10000},
+				strmsg('$', "v2"),
+			}))
+	}()
+
+	results := p.DoMultiCache(context.Background(),
+		CT(Cacheable(cmds.NewCompleted([]string{"GET", "k1"})).StaticTTL(), 10*time.Second),
+		CT(Cacheable(cmds.NewCompleted([]string{"GET", "k2"})), 10*time.Second),
+	)
+
+	// First-pass results: both must be the real values.
+	for i, want := range []string{"v1", "v2"} {
+		v, err := results.s[i].ToMessage()
+		if err != nil {
+			t.Fatalf("first-pass result[%d]: err %v", i, err)
+		}
+		if v.string() != want {
+			t.Fatalf("first-pass result[%d]: got %q want %q", i, v.string(), want)
+		}
+	}
+
+	// Second pass — read each key. If the cache state for k1 is polluted
+	// with "QUEUED", we'd see it here. The mock has no more wire to serve,
+	// so a real cache hit returns instantly; a miss would deadlock the test.
+	r1 := p.DoCache(context.Background(),
+		Cacheable(cmds.NewCompleted([]string{"GET", "k1"})).StaticTTL(),
+		10*time.Second).val
+	if r1.string() != "v1" {
+		t.Fatalf("k1 cache state after mixed batch: got %q want %q (pollution)", r1.string(), "v1")
+	}
+
+	r2 := p.DoCache(context.Background(),
+		Cacheable(cmds.NewCompleted([]string{"GET", "k2"})),
+		10*time.Second).val
+	if r2.string() != "v2" {
+		t.Fatalf("k2 cache state: got %q want %q", r2.string(), "v2")
+	}
+}

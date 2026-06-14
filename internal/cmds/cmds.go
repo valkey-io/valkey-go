@@ -157,9 +157,8 @@ func IsStaticTTL(c Completed) bool {
 }
 
 // ClearStaticTTL returns a copy of c with staticTTLTag cleared. Used
-// on ASK-redirect wires, where the redirected connection has no
-// Flight slot for the key and the read goroutine must not fire its
-// direct-commit gate.
+// at wrapped-wire (MULTI/EXEC) build sites so the read goroutine's
+// direct-commit gate cannot fire on the cmd's "QUEUED" reply.
 func ClearStaticTTL(c Completed) Completed {
 	c.cf &^= staticTTLTag
 	return c
@@ -254,7 +253,9 @@ func (c Cacheable) Pin() Cacheable {
 //
 // For DoMultiCache, the direct wire is taken only when every command
 // in the batch is tagged with StaticTTL. A batch containing any
-// untagged command falls back to the standard wire for all of them.
+// untagged command falls back to the standard wire for all of them
+// (the all-or-nothing rule). For best results, prefer batches that
+// are either fully tagged or fully untagged.
 func (c Cacheable) StaticTTL() Cacheable {
 	c.cf |= staticTTLTag
 	return c

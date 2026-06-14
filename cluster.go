@@ -1031,13 +1031,9 @@ func (c *clusterClient) askingMulti(cc conn, ctx context.Context, multi []Comple
 }
 
 func (c *clusterClient) askingMultiCache(cc conn, ctx context.Context, multi []CacheableTTL) *valkeyresults {
-	// ASK-redirected requests run on a different connection from the one
-	// holding the original Flight slot; this function never mutates the
-	// cache. The origin slot was already cancelled on -ASK.
-	//
-	// All-or-nothing gate: only take the stride-3 direct path when every
-	// CacheableTTL in the batch is tagged with .StaticTTL(). A mixed
-	// batch falls back to the standard stride-6 wrapped wire.
+	// Runs on the ASK-target (cc); origin's Flight slot was cancelled
+	// on -ASK. ASK-target's read loop populates its own cache as a
+	// pre-warm. All-or-nothing: stride-3 only when every cmd is tagged.
 	skipMultiExec := true
 	for _, ct := range multi {
 		if !cmds.IsStaticTTL(Completed(ct.Cmd)) {
@@ -1051,23 +1047,22 @@ func (c *clusterClient) askingMultiCache(cc conn, ctx context.Context, multi []C
 		offset   int
 	)
 	if skipMultiExec {
-		// Wire per key: [OPT_IN, ASKING, cmd]. The staticTTLTag is
-		// stripped — this connection has no Flight slot for the key,
-		// so the read loop's direct-commit gate must not fire.
+		// [OPT_IN, ASKING, cmd]
 		stride = 3
 		offset = 2
 		commands = make([]Completed, 0, len(multi)*stride)
 		for _, cmd := range multi {
-			commands = append(commands, cc.OptInCmd(), cmds.AskingCmd, cmds.ClearStaticTTL(Completed(cmd.Cmd)))
+			commands = append(commands, cc.OptInCmd(), cmds.AskingCmd, Completed(cmd.Cmd))
 		}
 	} else {
-		// Wire per key: [OPT_IN, ASKING, MULTI, PTTL, cmd, EXEC].
+		// [OPT_IN, ASKING, MULTI, PTTL, cmd, EXEC]; tag stripped so the
+		// static-TTL gate cannot fire on "QUEUED" inside MULTI/EXEC.
 		stride = 6
 		offset = 5
 		commands = make([]Completed, 0, len(multi)*stride)
 		for _, cmd := range multi {
 			ck, _ := cmds.CacheKey(cmd.Cmd)
-			commands = append(commands, cc.OptInCmd(), cmds.AskingCmd, cmds.MultiCmd, cmds.NewCompleted([]string{"PTTL", ck}), Completed(cmd.Cmd), cmds.ExecCmd)
+			commands = append(commands, cc.OptInCmd(), cmds.AskingCmd, cmds.MultiCmd, cmds.NewCompleted([]string{"PTTL", ck}), cmds.ClearStaticTTL(Completed(cmd.Cmd)), cmds.ExecCmd)
 		}
 	}
 	results := resultsp.Get(0, len(multi))
