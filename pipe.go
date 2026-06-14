@@ -622,7 +622,7 @@ func (p *pipe) _backgroundRead() (err error) {
 				multi = ones
 			}
 		} else if cmds.IsStaticTTL(multi[ff]) {
-			// StaticTTL path: msg is the cacheable reply directly (no
+			// ToStaticTTL path: msg is the cacheable reply directly (no
 			// EXEC unwrap). Must be checked before the standard CSC
 			// gate below — an array reply of length >= 2 on that gate's
 			// offset would otherwise match incidentally. Typed wire

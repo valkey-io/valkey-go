@@ -34,7 +34,7 @@ func TestCacheable_Scripting(t *testing.T) {
 func TestCacheable_Scripting_WithStaticTTLTag(t *testing.T) {
 	// Regression guard. CacheKey's script branch uses bitmask matching
 	// (`c.cf&scrRoTag == scrRoTag`); if anyone changes it to strict
-	// equality, this test fails. Cacheable.StaticTTL OR's staticTTLTag
+	// equality, this test fails. Cacheable.ToStaticTTL OR's staticTTLTag
 	// onto scripting cacheables — strict equality would skip the script
 	// branch, return s[1] (the script hash) as the cache key instead of
 	// s[3] (the data key), and silently deadlock EVALSHA_RO callers
@@ -43,7 +43,7 @@ func TestCacheable_Scripting_WithStaticTTLTag(t *testing.T) {
 	tagged := Cacheable{
 		cs: newCommandSlice([]string{"EVALSHA_RO", "sha1", "1", "OOO", "XXX"}),
 		cf: scrRoTag,
-	}.StaticTTL()
+	}.ToStaticTTL()
 	key, cmd := CacheKey(tagged)
 	if key != "OOO" || cmd != "EVALSHA_ROsha11XXX" {
 		t.Fatalf("script-branch key extraction broke under staticTTLTag: got key=%v cmd=%v", key, cmd)
@@ -58,7 +58,7 @@ func TestCacheable_IsMGet(t *testing.T) {
 
 func TestCacheable_IsMGet_WithStaticTTLTag(t *testing.T) {
 	// IsMGet must use bitmask matching; extra tag bits must not flip it false.
-	tagged := Cacheable(NewMGetCompleted([]string{"MGET", "K"})).StaticTTL()
+	tagged := Cacheable(NewMGetCompleted([]string{"MGET", "K"})).ToStaticTTL()
 	if !tagged.IsMGet() {
 		t.Fatalf("MGET cmd with staticTTLTag should still be IsMGet")
 	}
@@ -126,15 +126,15 @@ func TestIsStaticTTL(t *testing.T) {
 	if cmd := NewCompleted([]string{"GET", "k"}); IsStaticTTL(cmd) {
 		t.Fatalf("plain Completed must not carry staticTTLTag")
 	}
-	if cmd := Completed(Cacheable(NewCompleted([]string{"GET", "k"})).StaticTTL()); !IsStaticTTL(cmd) {
-		t.Fatalf("Cacheable.StaticTTL must set the tag")
+	if cmd := Completed(Cacheable(NewCompleted([]string{"GET", "k"})).ToStaticTTL()); !IsStaticTTL(cmd) {
+		t.Fatalf("Cacheable.ToStaticTTL must set the tag")
 	}
 	// OR-not-overwrite: chained builders must preserve every prior bit.
 	base := Cacheable(NewCompleted([]string{"GET", "k"}))
 	base.cf |= retryableTag
-	cmd := Completed(base.StaticTTL())
+	cmd := Completed(base.ToStaticTTL())
 	if !IsStaticTTL(cmd) || !cmd.IsRetryable() {
-		t.Fatalf("Cacheable.StaticTTL must OR the tag in, preserving prior flags")
+		t.Fatalf("Cacheable.ToStaticTTL must OR the tag in, preserving prior flags")
 	}
 	if IsStaticTTL(OptInCmd) || IsStaticTTL(OptInNopCmd) {
 		t.Fatalf("OPT_IN cmds must not carry staticTTLTag")
@@ -143,7 +143,7 @@ func TestIsStaticTTL(t *testing.T) {
 		t.Fatalf("transactional/ASKING cmds must not carry staticTTLTag")
 	}
 	// ClearStaticTTL strips the bit while preserving everything else.
-	tagged := Completed(base.StaticTTL())
+	tagged := Completed(base.ToStaticTTL())
 	cleared := ClearStaticTTL(tagged)
 	if IsStaticTTL(cleared) {
 		t.Fatalf("ClearStaticTTL must strip staticTTLTag")

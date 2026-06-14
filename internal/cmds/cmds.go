@@ -14,7 +14,7 @@ const (
 	retryableTag = uint16(1 << 7) // make command retryable
 	// staticTTLTag marks a cacheable command whose reply the read
 	// goroutine commits directly to the client-side cache (no
-	// MULTI/EXEC unwrap). Set via Cacheable.StaticTTL().
+	// MULTI/EXEC unwrap). Set via Cacheable.ToStaticTTL().
 	staticTTLTag = uint16(1 << 6)
 	// InitSlot indicates that the command be sent to any valkey node in cluster
 	InitSlot = uint16(1 << 14)
@@ -149,7 +149,7 @@ func (c *Completed) IsOptIn() bool {
 }
 
 // IsStaticTTL reports whether the cacheable command was tagged with
-// Cacheable.StaticTTL. When set, the connection's read goroutine
+// Cacheable.ToStaticTTL. When set, the connection's read goroutine
 // commits the reply directly to the client-side cache and skips the
 // MULTI/PTTL/EXEC wrapper.
 func IsStaticTTL(c Completed) bool {
@@ -233,7 +233,7 @@ func (c Cacheable) Pin() Cacheable {
 	return c
 }
 
-// StaticTTL marks the cacheable command so DoCache / DoMultiCache
+// ToStaticTTL marks the cacheable command so DoCache / DoMultiCache
 // skip the MULTI/PTTL/EXEC wrapper and use the caller-provided ttl
 // as authoritative for the client-side cache entry's lifetime.
 // Intended for callers whose freshness is enforced by active CLIENT
@@ -252,11 +252,11 @@ func (c Cacheable) Pin() Cacheable {
 // rejects MGET outright.
 //
 // For DoMultiCache, the direct wire is taken only when every command
-// in the batch is tagged with StaticTTL. A batch containing any
+// in the batch is tagged with ToStaticTTL. A batch containing any
 // untagged command falls back to the standard wire for all of them
 // (the all-or-nothing rule). For best results, prefer batches that
 // are either fully tagged or fully untagged.
-func (c Cacheable) StaticTTL() Cacheable {
+func (c Cacheable) ToStaticTTL() Cacheable {
 	c.cf |= staticTTLTag
 	return c
 }
