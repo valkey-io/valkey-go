@@ -621,13 +621,14 @@ func (p *pipe) _backgroundRead() (err error) {
 			if multi == nil {
 				multi = ones
 			}
-		} else if cmds.IsStaticTTL(multi[ff]) {
+		} else if ff > 0 && cmds.IsStaticTTL(multi[ff]) {
 			// ToStaticTTL path: msg is the cacheable reply directly (no
 			// EXEC unwrap). Must be checked before the standard CSC
 			// gate below — an array reply of length >= 2 on that gate's
-			// offset would otherwise match incidentally. Typed wire
-			// errors cancel the client-side cache slot rather than
-			// caching them with cacheMark.
+			// offset would otherwise match incidentally. The ff > 0
+			// guard skips the always-untagged OPT_IN reply at index 0.
+			// Typed wire errors cancel the client-side cache slot
+			// rather than caching them with cacheMark.
 			cacheable := Cacheable(multi[ff])
 			ck, cc := cmds.CacheKey(cacheable)
 			if err := msg.Error(); err != nil && err != Nil {
