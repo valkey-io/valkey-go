@@ -1248,6 +1248,61 @@ func BenchmarkClientSideCachingMiss(b *testing.B) {
 			}
 		})
 	})
+	// DoMultiCache batches: each iteration builds a fresh 5-key batch with
+	// unique keys (counter) to force every key to miss the client-side cache.
+	//
+	//   Standard:     all 5 cmds untagged → wrapped stride-5 wire per key.
+	//   StaticTTL:    all 5 cmds tagged   → stride-2 direct wire per key.
+	//   Mixed:        every other cmd tagged → still wrapped stride-5 (the
+	//                 all-or-nothing rule downgrades) with the tag stripped
+	//                 on the wire-side Completed.
+	const batchSize = 5
+	b.Run("DoMultiCacheStandard", func(b *testing.B) {
+		m := setup(b)
+		var counter atomic.Uint64
+		b.RunParallel(func(pb *testing.PB) {
+			batch := make([]CacheableTTL, batchSize)
+			for pb.Next() {
+				for i := range batch {
+					key := strconv.FormatUint(counter.Add(1), 10)
+					batch[i] = CT(Cacheable(cmds.NewCompleted([]string{"GET", key})), time.Minute)
+				}
+				m.DoMultiCache(context.Background(), batch...)
+			}
+		})
+	})
+	b.Run("DoMultiCacheStaticClientTTL", func(b *testing.B) {
+		m := setup(b)
+		var counter atomic.Uint64
+		b.RunParallel(func(pb *testing.PB) {
+			batch := make([]CacheableTTL, batchSize)
+			for pb.Next() {
+				for i := range batch {
+					key := strconv.FormatUint(counter.Add(1), 10)
+					batch[i] = CT(Cacheable(cmds.NewCompleted([]string{"GET", key})).ToStaticTTL(), time.Minute)
+				}
+				m.DoMultiCache(context.Background(), batch...)
+			}
+		})
+	})
+	b.Run("DoMultiCacheMixed", func(b *testing.B) {
+		m := setup(b)
+		var counter atomic.Uint64
+		b.RunParallel(func(pb *testing.PB) {
+			batch := make([]CacheableTTL, batchSize)
+			for pb.Next() {
+				for i := range batch {
+					key := strconv.FormatUint(counter.Add(1), 10)
+					c := Cacheable(cmds.NewCompleted([]string{"GET", key}))
+					if i%2 == 0 {
+						c = c.ToStaticTTL()
+					}
+					batch[i] = CT(c, time.Minute)
+				}
+				m.DoMultiCache(context.Background(), batch...)
+			}
+		})
+	})
 }
 
 type mockWire struct {
