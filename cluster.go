@@ -159,7 +159,7 @@ func (c *clusterClient) lazyRefresh() {
 
 func (c *clusterClient) clusterRefreshStartDelay() time.Duration {
 	maxDelay := c.clusterRefreshMaxDelay()
-	return time.Duration(util.FastRand(int(maxDelay))) + time.Nanosecond
+	return time.Duration(util.FastRand(int(maxDelay)))
 }
 
 func (c *clusterClient) clusterRefreshMaxDelay() time.Duration {

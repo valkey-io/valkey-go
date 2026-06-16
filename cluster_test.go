@@ -11083,8 +11083,8 @@ func TestClusterRefreshStartDelayWithinBound(t *testing.T) {
 	c := clusterClientWithConnCount(1000)
 	for i := 0; i < 1000; i++ {
 		d := c.clusterRefreshStartDelay()
-		if d <= 0 || d > maxDelay {
-			t.Fatalf("iteration %d: start delay %v out of (0, %v]", i, d, maxDelay)
+		if d < 0 || d >= maxDelay {
+			t.Fatalf("iteration %d: start delay %v out of [0, %v)", i, d, maxDelay)
 		}
 	}
 }
@@ -11112,7 +11112,7 @@ func TestClusterRefreshStartDelayDistributesOverWindow(t *testing.T) {
 	if avg < lo || avg > hi {
 		t.Fatalf("avg %v outside expected [%v, %v]", avg, lo, hi)
 	}
-	if min <= 0 || min > maxDelay/100 {
+	if min > maxDelay/100 {
 		t.Fatalf("min %v too high, expected near 0", min)
 	}
 	if max < maxDelay*9/10 {
