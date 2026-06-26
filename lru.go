@@ -231,6 +231,7 @@ func (c *lru) Update(key, cmd string, value ValkeyMessage) (pxat int64) {
 					pxat = cpttl
 					value.setExpireAt(pxat)
 				}
+				value.stash = &cacheStash{}
 				e.val = value
 				e.size = entryBaseSize + 2*(len(key)+len(cmd)) + value.approximateSize()
 				c.size += e.size

@@ -10,6 +10,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -17,6 +18,13 @@ import (
 )
 
 const messageStructSize = int(unsafe.Sizeof(ValkeyMessage{}))
+
+// cacheStash holds a user-provided unmarshalled value associated with a cached ValkeyMessage.
+// It is shared by pointer between the cache entry and returned copies, so writes are visible
+// to subsequent cache hits. Access is synchronized via atomic operations.
+type cacheStash struct {
+	val atomic.Pointer[any]
+}
 
 // Nil represents a Valkey Nil message
 var Nil = &ValkeyError{typ: typeNull}
@@ -544,6 +552,16 @@ func (r ValkeyResult) CachePXAT() int64 {
 	return r.val.CachePXAT()
 }
 
+// CachePut delegates to ValkeyMessage.CachePut
+func (r ValkeyResult) CachePut(val any) {
+	r.val.CachePut(val)
+}
+
+// CacheGet delegates to ValkeyMessage.CacheGet
+func (r ValkeyResult) CacheGet() any {
+	return r.val.CacheGet()
+}
+
 // String returns human-readable representation of ValkeyResult
 func (r *ValkeyResult) String() string {
 	v, _ := (*prettyValkeyResult)(r).MarshalJSON()
@@ -570,6 +588,7 @@ func (r *prettyValkeyResult) MarshalJSON() ([]byte, error) {
 // ValkeyMessage is a valkey response message, it may be a nil response
 type ValkeyMessage struct {
 	attrs *ValkeyMessage
+	stash *cacheStash
 	bytes *byte
 	array *ValkeyMessage
 
@@ -1570,6 +1589,29 @@ func (m *ValkeyMessage) CachePXAT() int64 {
 		return -1
 	}
 	return milli
+}
+
+// CachePut stores a user-provided value alongside this cached ValkeyMessage.
+// On subsequent cache hits, the stored value can be retrieved with CacheGet,
+// avoiding repeated unmarshalling of the same response. CachePut is safe
+// for concurrent use and only works on messages returned from DoCache or
+// DoMultiCache.
+func (m *ValkeyMessage) CachePut(val any) {
+	if m.stash != nil {
+		m.stash.val.Store(&val)
+	}
+}
+
+// CacheGet retrieves the user-provided value previously stored with CachePut.
+// It returns nil if no value has been stored or if the message is not from the
+// client side cache.
+func (m *ValkeyMessage) CacheGet() any {
+	if m.stash != nil {
+		if p := m.stash.val.Load(); p != nil {
+			return *p
+		}
+	}
+	return nil
 }
 
 func (m *ValkeyMessage) relativePTTL(now time.Time) int64 {

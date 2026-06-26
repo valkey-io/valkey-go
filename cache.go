@@ -98,6 +98,7 @@ func (a *adapter) Update(key, cmd string, val ValkeyMessage) (sxat int64) {
 			sxat = flight.xat
 			val.setExpireAt(sxat)
 		}
+		val.stash = &cacheStash{}
 		a.store.Set(key+cmd, val)
 		flight.set(val, nil)
 		entries[cmd] = nil
