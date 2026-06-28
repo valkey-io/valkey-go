@@ -1315,6 +1315,7 @@ type mockWire struct {
 	DoMultiStreamFn func(pool *pool, cmd ...Completed) MultiValkeyResultStream
 	InfoFn          func() map[string]ValkeyMessage
 	AZFn            func() string
+	RoleFn          func() string
 	VersionFn       func() int
 	ErrorFn         func() error
 	CloseFn         func()
@@ -1433,6 +1434,13 @@ func (m *mockWire) Version() int {
 func (m *mockWire) AZ() string {
 	if m.AZFn != nil {
 		return m.AZFn()
+	}
+	return ""
+}
+
+func (m *mockWire) Role() string {
+	if m.RoleFn != nil {
+		return m.RoleFn()
 	}
 	return ""
 }

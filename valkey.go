@@ -322,10 +322,30 @@ type ClusterOption struct {
 
 // StandaloneOption is the options for the standalone client.
 type StandaloneOption struct {
-	// ReplicaAddress is the list of replicas for the primary node.
-	// Note that these addresses must be online and cannot be promoted.
-	// An example use case is the reader endpoint provided by cloud vendors.
+	// ReplicaAddress is the list of addresses the client may use for read
+	// traffic. Each entry should resolve to a single, stable node — typically
+	// a reader endpoint or a per-node DNS. For AZ-aware reads on cloud
+	// providers (e.g. AWS ElastiCache/MemoryDB in non-cluster mode), list
+	// each replica's per-node DNS so each connection lands on a known node.
+	//
+	// At init the client dials every entry and uses the role label cached
+	// from HELLO to skip any address that turns out to be the primary
+	// (de-duplicates against InitAddress).
+	//
+	// Behaviour when an entry fails to dial or reports itself as the primary
+	// depends on ReplicaRefreshInterval: with refresh disabled (the default)
+	// init is strict and returns an error; with refresh enabled init is
+	// lenient and silently drops the offending entry, leaving recovery to
+	// the periodic monitor.
 	ReplicaAddress []string
+	// ReplicaRefreshInterval, when non-zero, enables periodic monitoring of
+	// the addresses in ReplicaAddress.
+	// At each interval the client runs ROLE on the primary and every replica
+	// and rebuilds the routing pool: it promotes a new primary if the current
+	// one has been demoted, removes replicas that are unreachable or no
+	// longer synced (ROLE state != "connected") from the read pool, and
+	// re-dials addresses whose connection was previously dropped.
+	ReplicaRefreshInterval time.Duration
 	// EnableRedirect enables the CLIENT CAPA redirect feature for Valkey 8+
 	// When enabled, the client will send CLIENT CAPA redirect during connection
 	// initialization and handle REDIRECT responses from the server.
