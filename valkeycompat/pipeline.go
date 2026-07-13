@@ -77,7 +77,7 @@ type proxy struct {
 
 func (p *proxy) Do(_ context.Context, cmd valkey.Completed) valkey.ValkeyResult {
 	p.cmds = append(p.cmds, cmd)
-	return valkey.NewErrorResult(pipelineNotExeerrPipelineNotExecutedcutedErr)
+	return valkey.NewErrorResult(errPipelineNotExecuted)
 }
 
 func newPipeline(real valkey.Client) *Pipeline {
