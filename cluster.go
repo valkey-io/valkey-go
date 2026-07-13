@@ -615,7 +615,7 @@ func (c *clusterClient) do(ctx context.Context, cmd Completed) (resp ValkeyResul
 retry:
 	cc, err := c.pick(ctx, cmd.Slot(), c.toReplica(cmd))
 	if err != nil {
-		return NewErrResult(err)
+		return newErrResult(err)
 	}
 	resp = cc.Do(ctx, cmd)
 	if resp.NonValkeyError() == errConnExpired {
@@ -1001,7 +1001,7 @@ retry:
 func fillErrs(n int, err error) (results []ValkeyResult) {
 	results = resultsp.Get(n, n).s
 	for i := range results {
-		results[i] = NewErrResult(err)
+		results[i] = newErrResult(err)
 	}
 	return results
 }
@@ -1013,7 +1013,7 @@ func (c *clusterClient) doCache(ctx context.Context, cmd Cacheable, ttl time.Dur
 retry:
 	cc, err := c.pick(ctx, cmd.Slot(), c.toReplica(Completed(cmd)))
 	if err != nil {
-		return NewErrResult(err)
+		return newErrResult(err)
 	}
 	resp = cc.DoCache(ctx, cmd, ttl)
 	if resp.NonValkeyError() == errConnExpired {
@@ -1170,9 +1170,9 @@ func (c *clusterClient) askingMultiCache(cc conn, ctx context.Context, multi []C
 				if preErr := resps.s[i-1].Error(); preErr != nil { // if {Cmd} get a ValkeyError
 					err = preErr
 				}
-				results.s = append(results.s, NewErrResult(err))
+				results.s = append(results.s, newErrResult(err))
 			} else {
-				results.s = append(results.s, NewResult(arr[len(arr)-1], nil))
+				results.s = append(results.s, newResult(arr[len(arr)-1], nil))
 			}
 		}
 	}
@@ -1611,7 +1611,7 @@ func (c *dedicatedClusterClient) Do(ctx context.Context, cmd Completed) (resp Va
 	attempts := 1
 retry:
 	if w, err := c.acquire(ctx, cmd.Slot()); err != nil {
-		resp = NewErrResult(err)
+		resp = newErrResult(err)
 	} else {
 		resp = w.Do(ctx, cmd)
 		switch _, mode := c.client.shouldRefreshRetry(resp.Error(), ctx); mode {
@@ -1667,7 +1667,7 @@ retry:
 	} else {
 		resp = resultsp.Get(len(multi), len(multi)).s
 		for i := range resp {
-			resp[i] = NewErrResult(err)
+			resp[i] = newErrResult(err)
 		}
 	}
 	for i, cmd := range multi {

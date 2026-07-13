@@ -211,7 +211,7 @@ func TestMuxReuseWire(t *testing.T) {
 		m, checkClean := setupMux([]*mockWire{
 			{
 				DoFn: func(cmd Completed) ValkeyResult {
-					return NewResult(strmsg('+', "PONG"), nil)
+					return newResult(strmsg('+', "PONG"), nil)
 				},
 			},
 		})
@@ -234,7 +234,7 @@ func TestMuxReuseWire(t *testing.T) {
 			},
 			{
 				DoFn: func(cmd Completed) ValkeyResult {
-					return NewResult(strmsg('+', "ACQUIRED"), nil)
+					return newResult(strmsg('+', "ACQUIRED"), nil)
 				},
 			},
 			{
@@ -271,7 +271,7 @@ func TestMuxReuseWire(t *testing.T) {
 			t.Fatalf("unexpected response %v", val)
 		}
 
-		response <- NewResult(strmsg('+', "BLOCK_RESPONSE"), nil)
+		response <- newResult(strmsg('+', "BLOCK_RESPONSE"), nil)
 		<-blocking
 	})
 
@@ -282,12 +282,12 @@ func TestMuxReuseWire(t *testing.T) {
 			{
 				// leave first wire for pipeline calls
 				DoFn: func(cmd Completed) ValkeyResult {
-					return NewResult(strmsg('+', "PIPELINED"), nil)
+					return newResult(strmsg('+', "PIPELINED"), nil)
 				},
 			},
 			{
 				DoFn: func(cmd Completed) ValkeyResult {
-					return NewResult(strmsg('+', "ACQUIRED"), nil)
+					return newResult(strmsg('+', "ACQUIRED"), nil)
 				},
 			},
 			{
@@ -332,7 +332,7 @@ func TestMuxReuseWire(t *testing.T) {
 			t.Fatalf("unexpected response %v", val)
 		}
 
-		response <- NewResult(strmsg('+', "BLOCK_RESPONSE"), nil)
+		response <- newResult(strmsg('+', "BLOCK_RESPONSE"), nil)
 		<-blocking
 	})
 
@@ -343,12 +343,12 @@ func TestMuxReuseWire(t *testing.T) {
 			{
 				// leave first wire for pipeline calls
 				DoMultiFn: func(cmd ...Completed) *valkeyresults {
-					return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "PIPELINED"), nil)}}
+					return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "PIPELINED"), nil)}}
 				},
 			},
 			{
 				DoMultiFn: func(cmd ...Completed) *valkeyresults {
-					return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "ACQUIRED"), nil)}}
+					return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "ACQUIRED"), nil)}}
 				},
 			},
 			{
@@ -393,7 +393,7 @@ func TestMuxReuseWire(t *testing.T) {
 			t.Fatalf("unexpected response %v", val)
 		}
 
-		response <- NewResult(strmsg('+', "BLOCK_RESPONSE"), nil)
+		response <- newResult(strmsg('+', "BLOCK_RESPONSE"), nil)
 		<-blocking
 	})
 
@@ -406,7 +406,7 @@ func TestMuxReuseWire(t *testing.T) {
 			},
 			{
 				DoMultiFn: func(cmd ...Completed) *valkeyresults {
-					return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "ACQUIRED"), nil)}}
+					return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "ACQUIRED"), nil)}}
 				},
 			},
 			{
@@ -443,7 +443,7 @@ func TestMuxReuseWire(t *testing.T) {
 			t.Fatalf("unexpected response %v", val)
 		}
 
-		response <- NewResult(strmsg('+', "BLOCK_RESPONSE"), nil)
+		response <- newResult(strmsg('+', "BLOCK_RESPONSE"), nil)
 		<-blocking
 	})
 
@@ -493,7 +493,7 @@ func TestMuxReuseWire(t *testing.T) {
 					got := cmd.Commands()
 					if len(got) == 3 && got[0] == "CLIENT" && got[1] == "TRACKING" && got[2] == "OFF" {
 						trackingOffCalls++
-						return NewResult(strmsg('+', "OK"), nil)
+						return newResult(strmsg('+', "OK"), nil)
 					}
 					t.Fatalf("unexpected command: %v", got)
 					return ValkeyResult{}
@@ -535,7 +535,7 @@ func TestMuxReuseWire(t *testing.T) {
 				},
 				DoFn: func(cmd Completed) ValkeyResult {
 					doCalled = true
-					return NewResult(strmsg('+', "OK"), nil)
+					return newResult(strmsg('+', "OK"), nil)
 				},
 			},
 		})
@@ -628,7 +628,7 @@ func TestMuxDelegation(t *testing.T) {
 		m, checkClean := setupMux([]*mockWire{
 			{
 				DoFn: func(cmd Completed) ValkeyResult {
-					return NewErrResult(context.DeadlineExceeded)
+					return newErrResult(context.DeadlineExceeded)
 				},
 				ErrorFn: func() error {
 					return context.DeadlineExceeded
@@ -639,7 +639,7 @@ func TestMuxDelegation(t *testing.T) {
 					if cmd.Commands()[0] != "READONLY_COMMAND" {
 						t.Fatalf("command should be READONLY_COMMAND")
 					}
-					return NewResult(strmsg('+', "READONLY_COMMAND_RESPONSE"), nil)
+					return newResult(strmsg('+', "READONLY_COMMAND_RESPONSE"), nil)
 				},
 			},
 		})
@@ -674,7 +674,7 @@ func TestMuxDelegation(t *testing.T) {
 		m, checkClean := setupMux([]*mockWire{
 			{
 				DoMultiFn: func(multi ...Completed) *valkeyresults {
-					return &valkeyresults{s: []ValkeyResult{NewErrResult(context.DeadlineExceeded)}}
+					return &valkeyresults{s: []ValkeyResult{newErrResult(context.DeadlineExceeded)}}
 				},
 				ErrorFn: func() error {
 					return context.DeadlineExceeded
@@ -682,7 +682,7 @@ func TestMuxDelegation(t *testing.T) {
 			},
 			{
 				DoMultiFn: func(multi ...Completed) *valkeyresults {
-					return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "MULTI_COMMANDS_RESPONSE"), nil)}}
+					return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "MULTI_COMMANDS_RESPONSE"), nil)}}
 				},
 			},
 		})
@@ -717,7 +717,7 @@ func TestMuxDelegation(t *testing.T) {
 		m, checkClean := setupMux([]*mockWire{
 			{
 				DoCacheFn: func(cmd Cacheable, ttl time.Duration) ValkeyResult {
-					return NewErrResult(context.DeadlineExceeded)
+					return newErrResult(context.DeadlineExceeded)
 				},
 				ErrorFn: func() error {
 					return context.DeadlineExceeded
@@ -725,7 +725,7 @@ func TestMuxDelegation(t *testing.T) {
 			},
 			{
 				DoCacheFn: func(cmd Cacheable, ttl time.Duration) ValkeyResult {
-					return NewResult(strmsg('+', "READONLY_COMMAND_RESPONSE"), nil)
+					return newResult(strmsg('+', "READONLY_COMMAND_RESPONSE"), nil)
 				},
 			},
 		})
@@ -745,7 +745,7 @@ func TestMuxDelegation(t *testing.T) {
 		m, checkClean := setupMux([]*mockWire{
 			{
 				DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
-					return &valkeyresults{s: []ValkeyResult{NewErrResult(context.DeadlineExceeded)}}
+					return &valkeyresults{s: []ValkeyResult{newErrResult(context.DeadlineExceeded)}}
 				},
 				ErrorFn: func() error {
 					return context.DeadlineExceeded
@@ -753,7 +753,7 @@ func TestMuxDelegation(t *testing.T) {
 			},
 			{
 				DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
-					return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "MULTI_COMMANDS_RESPONSE"), nil)}}
+					return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "MULTI_COMMANDS_RESPONSE"), nil)}}
 				},
 			},
 		})
@@ -779,9 +779,9 @@ func TestMuxDelegation(t *testing.T) {
 					result := make([]ValkeyResult, len(multi))
 					for j, cmd := range multi {
 						if s := cmd.Cmd.Slot() & uint16(len(wires)-1); s != idx {
-							result[j] = NewErrResult(fmt.Errorf("wrong slot %v %v", s, idx))
+							result[j] = newErrResult(fmt.Errorf("wrong slot %v %v", s, idx))
 						} else {
-							result[j] = NewResult(strmsg('+', cmd.Cmd.Commands()[1]), nil)
+							result[j] = newResult(strmsg('+', cmd.Cmd.Commands()[1]), nil)
 						}
 					}
 					return &valkeyresults{s: result}
@@ -820,10 +820,10 @@ func TestMuxDelegation(t *testing.T) {
 				DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
 					for _, cmd := range multi {
 						if s := cmd.Cmd.Slot() & uint16(len(wires)-1); s != idx {
-							return &valkeyresults{s: []ValkeyResult{NewErrResult(fmt.Errorf("wrong slot %v %v", s, idx))}}
+							return &valkeyresults{s: []ValkeyResult{newErrResult(fmt.Errorf("wrong slot %v %v", s, idx))}}
 						}
 					}
-					return &valkeyresults{s: []ValkeyResult{NewErrResult(context.DeadlineExceeded)}}
+					return &valkeyresults{s: []ValkeyResult{newErrResult(context.DeadlineExceeded)}}
 				},
 				ErrorFn: func() error {
 					return context.DeadlineExceeded
@@ -921,7 +921,7 @@ func TestMuxDelegation(t *testing.T) {
 			<-blocked
 		}
 		for range 2 {
-			responses <- NewResult(strmsg('+', "BLOCK_COMMANDS_RESPONSE"), nil)
+			responses <- newResult(strmsg('+', "BLOCK_COMMANDS_RESPONSE"), nil)
 		}
 		wg.Wait()
 	})
@@ -934,7 +934,7 @@ func TestMuxDelegation(t *testing.T) {
 			},
 			{
 				DoFn: func(cmd Completed) ValkeyResult {
-					return NewErrResult(context.DeadlineExceeded)
+					return newErrResult(context.DeadlineExceeded)
 				},
 				ErrorFn: func() error {
 					return context.DeadlineExceeded
@@ -945,7 +945,7 @@ func TestMuxDelegation(t *testing.T) {
 			},
 			{
 				DoFn: func(cmd Completed) ValkeyResult {
-					return NewResult(strmsg('+', "OK"), nil)
+					return newResult(strmsg('+', "OK"), nil)
 				},
 			},
 		})
@@ -1013,7 +1013,7 @@ func TestMuxDelegation(t *testing.T) {
 			<-blocked
 		}
 		for range 2 {
-			responses <- NewResult(strmsg('+', "BLOCK_COMMANDS_RESPONSE"), nil)
+			responses <- newResult(strmsg('+', "BLOCK_COMMANDS_RESPONSE"), nil)
 		}
 		wg.Wait()
 	})
@@ -1066,7 +1066,7 @@ func TestMuxDelegation(t *testing.T) {
 			<-blocked
 		}
 		for range 2 {
-			responses <- NewResult(strmsg('+', "BLOCK_COMMANDS_RESPONSE"), nil)
+			responses <- newResult(strmsg('+', "BLOCK_COMMANDS_RESPONSE"), nil)
 		}
 		wg.Wait()
 	})
@@ -1079,7 +1079,7 @@ func TestMuxDelegation(t *testing.T) {
 			},
 			{
 				DoMultiFn: func(cmd ...Completed) *valkeyresults {
-					return &valkeyresults{s: []ValkeyResult{NewErrResult(context.DeadlineExceeded)}}
+					return &valkeyresults{s: []ValkeyResult{newErrResult(context.DeadlineExceeded)}}
 				},
 				ErrorFn: func() error {
 					return context.DeadlineExceeded
@@ -1090,7 +1090,7 @@ func TestMuxDelegation(t *testing.T) {
 			},
 			{
 				DoFn: func(cmd Completed) ValkeyResult {
-					return NewResult(strmsg('+', "OK"), nil)
+					return newResult(strmsg('+', "OK"), nil)
 				},
 			},
 		})
@@ -1123,7 +1123,7 @@ func TestMuxRegisterCloseHook(t *testing.T) {
 		m, checkClean := setupMux([]*mockWire{
 			{
 				DoFn: func(cmd Completed) ValkeyResult {
-					return NewResult(strmsg('+', "PONG1"), nil)
+					return newResult(strmsg('+', "PONG1"), nil)
 				},
 				SetOnCloseHookFn: func(fn func(error)) {
 					hook.Store(fn)
@@ -1131,7 +1131,7 @@ func TestMuxRegisterCloseHook(t *testing.T) {
 			},
 			{
 				DoFn: func(cmd Completed) ValkeyResult {
-					return NewResult(strmsg('+', "PONG2"), nil)
+					return newResult(strmsg('+', "PONG2"), nil)
 				},
 			},
 		})
@@ -1150,7 +1150,7 @@ func TestMuxRegisterCloseHook(t *testing.T) {
 		m, checkClean := setupMux([]*mockWire{
 			{
 				DoFn: func(cmd Completed) ValkeyResult {
-					return NewResult(strmsg('+', "PONG1"), nil)
+					return newResult(strmsg('+', "PONG1"), nil)
 				},
 				SetOnCloseHookFn: func(fn func(error)) {
 					hook.Store(fn)

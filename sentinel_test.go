@@ -43,7 +43,7 @@ func TestSentinelClientInit(t *testing.T) {
 			&ClientOption{InitAddress: []string{":0"}},
 			func(dst string, opt *ClientOption) conn {
 				return &mockConn{
-					DoMultiFn: func(cmd ...Completed) *valkeyresults { return &valkeyresults{s: []ValkeyResult{NewErrResult(v)}} },
+					DoMultiFn: func(cmd ...Completed) *valkeyresults { return &valkeyresults{s: []ValkeyResult{newErrResult(v)}} },
 				}
 			},
 			newRetryer(defaultRetryDelayFn),
@@ -58,8 +58,8 @@ func TestSentinelClientInit(t *testing.T) {
 			DoFn: func(cmd Completed) ValkeyResult { return ValkeyResult{} },
 			DoMultiFn: func(multi ...Completed) *valkeyresults {
 				return &valkeyresults{s: []ValkeyResult{
-					NewErrResult(v),
-					NewErrResult(v),
+					newErrResult(v),
+					newErrResult(v),
 				}}
 			},
 		}
@@ -73,7 +73,7 @@ func TestSentinelClientInit(t *testing.T) {
 							strmsg('+', "port"), strmsg('+', "0"),
 						}),
 					})},
-					NewErrResult(v),
+					newErrResult(v),
 				}}
 			},
 		}
@@ -184,8 +184,8 @@ func TestSentinelClientInit(t *testing.T) {
 			DoFn: func(cmd Completed) ValkeyResult { return ValkeyResult{} },
 			DoMultiFn: func(multi ...Completed) *valkeyresults {
 				return &valkeyresults{s: []ValkeyResult{
-					NewErrResult(v),
-					NewErrResult(v),
+					newErrResult(v),
+					newErrResult(v),
 				}}
 			},
 		}
@@ -199,7 +199,7 @@ func TestSentinelClientInit(t *testing.T) {
 							strmsg('+', "port"), strmsg('+', "0"),
 						}),
 					})},
-					NewErrResult(v),
+					newErrResult(v),
 				}}
 			},
 		}
@@ -446,7 +446,7 @@ func TestSentinelClientInit(t *testing.T) {
 				}
 				if dst == ":2" {
 					return &mockConn{
-						DoFn: func(cmd Completed) ValkeyResult { return NewErrResult(v) },
+						DoFn: func(cmd Completed) ValkeyResult { return newErrResult(v) },
 					}
 				}
 				if dst == ":3" {
@@ -480,7 +480,7 @@ func TestSentinelClientInit(t *testing.T) {
 		s0 := &mockConn{
 			DoFn: func(cmd Completed) ValkeyResult {
 				if atomic.LoadInt32(&disconnect) == 1 {
-					return NewErrResult(errors.New("die"))
+					return newErrResult(errors.New("die"))
 				}
 				return ValkeyResult{}
 			},
@@ -542,7 +542,7 @@ func TestSentinelClientInit(t *testing.T) {
 		r3 := &mockConn{
 			DoFn: func(cmd Completed) ValkeyResult {
 				if atomic.LoadInt32(&disconnect) == 1 {
-					return NewErrResult(errors.New("die"))
+					return newErrResult(errors.New("die"))
 				}
 				return ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "master")})}
 			},
@@ -709,7 +709,7 @@ func TestSentinelClientInit(t *testing.T) {
 		s0 := &mockConn{
 			DoFn: func(cmd Completed) ValkeyResult {
 				if atomic.LoadInt32(&disconnect) == 1 {
-					return NewErrResult(errors.New("die"))
+					return newErrResult(errors.New("die"))
 				}
 				return ValkeyResult{}
 			},
@@ -821,7 +821,7 @@ func TestSentinelClientInit(t *testing.T) {
 		r1 := &mockConn{
 			DoFn: func(cmd Completed) ValkeyResult {
 				if atomic.LoadInt32(&disconnect) == 1 {
-					return NewErrResult(errors.New("die"))
+					return newErrResult(errors.New("die"))
 				}
 				return ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "slave")})}
 			},
@@ -980,7 +980,7 @@ func TestSentinelRefreshAfterClose(t *testing.T) {
 					})},
 				}}
 			}
-			return &valkeyresults{s: []ValkeyResult{NewErrResult(ErrClosing), NewErrResult(ErrClosing)}}
+			return &valkeyresults{s: []ValkeyResult{newErrResult(ErrClosing), newErrResult(ErrClosing)}}
 		},
 	}
 	m := &mockConn{
@@ -1030,7 +1030,7 @@ func TestSentinelSwitchAfterClose(t *testing.T) {
 				first = false
 				return ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "master")})}
 			}
-			return NewErrResult(ErrClosing)
+			return newErrResult(ErrClosing)
 		},
 	}
 	client, err := newSentinelClient(
@@ -1120,7 +1120,7 @@ func TestSentinelClientDelegate(t *testing.T) {
 				t.Fatalf("unexpected command %v", cmd)
 			}
 			return &valkeyresults{s: []ValkeyResult{
-				NewResult(strmsg('+', "master"), nil),
+				newResult(strmsg('+', "master"), nil),
 			}}
 		}
 
@@ -1155,7 +1155,7 @@ func TestSentinelClientDelegate(t *testing.T) {
 			if !reflect.DeepEqual(cmd.Commands(), c.Commands()) {
 				t.Fatalf("unexpected command %v", cmd)
 			}
-			return NewResult(strmsg('+', "Do"), nil)
+			return newResult(strmsg('+', "Do"), nil)
 		}
 		if v, err := client.Do(context.Background(), c).ToString(); err != nil || v != "Do" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -1178,7 +1178,7 @@ func TestSentinelClientDelegate(t *testing.T) {
 			if !reflect.DeepEqual(cmd[0].Commands(), c.Commands()) {
 				t.Fatalf("unexpected command %v", cmd)
 			}
-			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "Do"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "Do"), nil)}}
 		}
 		if len(client.DoMulti(context.Background())) != 0 {
 			t.Fatalf("unexpected response length")
@@ -1207,7 +1207,7 @@ func TestSentinelClientDelegate(t *testing.T) {
 			if !reflect.DeepEqual(cmd.Commands(), c.Commands()) || ttl != 100 {
 				t.Fatalf("unexpected command %v, %v", cmd, ttl)
 			}
-			return NewResult(strmsg('+', "DoCache"), nil)
+			return newResult(strmsg('+', "DoCache"), nil)
 		}
 		if v, err := client.DoCache(context.Background(), c, 100).ToString(); err != nil || v != "DoCache" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -1220,7 +1220,7 @@ func TestSentinelClientDelegate(t *testing.T) {
 			if !reflect.DeepEqual(multi[0].Cmd.Commands(), c.Commands()) || multi[0].TTL != 100 {
 				t.Fatalf("unexpected command %v, %v", multi[0].Cmd, multi[0].TTL)
 			}
-			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "DoCache"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "DoCache"), nil)}}
 		}
 		if len(client.DoMultiCache(context.Background())) != 0 {
 			t.Fatalf("unexpected response length")
@@ -1276,10 +1276,10 @@ func TestSentinelClientDelegate(t *testing.T) {
 	t.Run("Dedicated Delegate", func(t *testing.T) {
 		w := &mockWire{
 			DoFn: func(cmd Completed) ValkeyResult {
-				return NewResult(strmsg('+', "Delegate"), nil)
+				return newResult(strmsg('+', "Delegate"), nil)
 			},
 			DoMultiFn: func(cmd ...Completed) *valkeyresults {
-				return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "Delegate"), nil)}}
+				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "Delegate"), nil)}}
 			},
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 				return ErrClosing
@@ -1325,10 +1325,10 @@ func TestSentinelClientDelegate(t *testing.T) {
 	t.Run("Dedicate Delegate", func(t *testing.T) {
 		w := &mockWire{
 			DoFn: func(cmd Completed) ValkeyResult {
-				return NewResult(strmsg('+', "Delegate"), nil)
+				return newResult(strmsg('+', "Delegate"), nil)
 			},
 			DoMultiFn: func(cmd ...Completed) *valkeyresults {
-				return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "Delegate"), nil)}}
+				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "Delegate"), nil)}}
 			},
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 				return ErrClosing
@@ -1409,15 +1409,15 @@ func TestSentinelClientDelegateRetry(t *testing.T) {
 					return ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "master")})}
 				}
 				atomic.AddUint32(&retry, 1)
-				return NewErrResult(ErrClosing)
+				return newErrResult(ErrClosing)
 			},
 			DoMultiFn: func(multi ...Completed) *valkeyresults {
 				atomic.AddUint32(&retry, 1)
-				return &valkeyresults{s: []ValkeyResult{NewErrResult(ErrClosing)}}
+				return &valkeyresults{s: []ValkeyResult{newErrResult(ErrClosing)}}
 			},
 			DoCacheFn: func(cmd Cacheable, ttl time.Duration) ValkeyResult {
 				atomic.AddUint32(&retry, 1)
-				return NewErrResult(ErrClosing)
+				return newErrResult(ErrClosing)
 			},
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 				atomic.AddUint32(&retry, 1)
@@ -1585,7 +1585,7 @@ func TestSentinelClientPubSub(t *testing.T) {
 	}
 	s3 := &mockConn{
 		DoMultiFn: func(cmd ...Completed) *valkeyresults {
-			return &valkeyresults{s: []ValkeyResult{NewErrResult(errClosing)}}
+			return &valkeyresults{s: []ValkeyResult{newErrResult(errClosing)}}
 		},
 	}
 	m4 := &mockConn{
@@ -1755,7 +1755,7 @@ func TestSentinelReplicaOnlyClientPubSub(t *testing.T) {
 	}
 	s3 := &mockConn{
 		DoMultiFn: func(cmd ...Completed) *valkeyresults {
-			return &valkeyresults{s: []ValkeyResult{NewErrResult(errClosing)}}
+			return &valkeyresults{s: []ValkeyResult{newErrResult(errClosing)}}
 		},
 	}
 	slave4 := &mockConn{
@@ -1967,9 +1967,9 @@ func TestSentinelClientLoadingRetry(t *testing.T) {
 			}
 			attempts++
 			if attempts == 1 {
-				return NewResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)
+				return newResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)
 			}
-			return NewResult(strmsg('+', "OK"), nil)
+			return newResult(strmsg('+', "OK"), nil)
 		}
 
 		if v, err := client.Do(context.Background(), client.B().Get().Key("test").Build()).ToString(); err != nil || v != "OK" {
@@ -1989,9 +1989,9 @@ func TestSentinelClientLoadingRetry(t *testing.T) {
 			}
 			attempts++
 			if attempts == 1 {
-				return NewResult(strmsg('-', "ERR some other error"), nil)
+				return newResult(strmsg('-', "ERR some other error"), nil)
 			}
-			return NewResult(strmsg('+', "OK"), nil)
+			return newResult(strmsg('+', "OK"), nil)
 		}
 
 		if err := client.Do(context.Background(), client.B().Get().Key("test").Build()).Error(); err == nil {
@@ -2008,9 +2008,9 @@ func TestSentinelClientLoadingRetry(t *testing.T) {
 		m1.DoMultiFn = func(multi ...Completed) *valkeyresults {
 			attempts++
 			if attempts == 1 {
-				return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)}}
+				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)}}
 			}
-			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
 		}
 
 		cmd := client.B().Get().Key("test").Build()
@@ -2029,9 +2029,9 @@ func TestSentinelClientLoadingRetry(t *testing.T) {
 		m1.DoCacheFn = func(cmd Cacheable, ttl time.Duration) ValkeyResult {
 			attempts++
 			if attempts == 1 {
-				return NewResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)
+				return newResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)
 			}
-			return NewResult(strmsg('+', "OK"), nil)
+			return newResult(strmsg('+', "OK"), nil)
 		}
 
 		cmd := client.B().Get().Key("test").Cache()
@@ -2046,9 +2046,9 @@ func TestSentinelClientLoadingRetry(t *testing.T) {
 		m1.DoMultiCacheFn = func(multi ...CacheableTTL) *valkeyresults {
 			attempts++
 			if attempts == 1 {
-				return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)}}
+				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)}}
 			}
-			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
 		}
 
 		cmd := client.B().Get().Key("test").Cache()
@@ -2070,9 +2070,9 @@ func TestSentinelClientLoadingRetry(t *testing.T) {
 			}
 			attempts++
 			if attempts == 1 {
-				return NewResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)
+				return newResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)
 			}
-			return NewResult(strmsg('+', "OK"), nil)
+			return newResult(strmsg('+', "OK"), nil)
 		}
 		m1.AcquireFn = func() wire { return &mockWire{DoFn: m1.DoFn} }
 
@@ -2093,9 +2093,9 @@ func TestSentinelClientLoadingRetry(t *testing.T) {
 		m1.DoMultiFn = func(multi ...Completed) *valkeyresults {
 			attempts++
 			if attempts == 1 {
-				return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)}}
+				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)}}
 			}
-			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
 		}
 		m1.AcquireFn = func() wire { return &mockWire{DoMultiFn: m1.DoMultiFn} }
 
@@ -2163,9 +2163,9 @@ func TestSentinelClientConnLifetime(t *testing.T) {
 		var attempts int64
 		m.DoFn = func(cmd Completed) ValkeyResult {
 			if atomic.AddInt64(&attempts, 1) == 1 {
-				return NewErrResult(errConnExpired)
+				return newErrResult(errConnExpired)
 			}
-			return NewResult(strmsg('+', "OK"), nil)
+			return newResult(strmsg('+', "OK"), nil)
 		}
 		if v, err := client.Do(context.Background(), client.B().Get().Key("Do").Build()).ToString(); err != nil || v != "OK" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -2177,9 +2177,9 @@ func TestSentinelClientConnLifetime(t *testing.T) {
 		var attempts int64
 		m.DoCacheFn = func(cmd Cacheable, ttl time.Duration) ValkeyResult {
 			if atomic.AddInt64(&attempts, 1) == 1 {
-				return NewErrResult(errConnExpired)
+				return newErrResult(errConnExpired)
 			}
-			return NewResult(strmsg('+', "OK"), nil)
+			return newResult(strmsg('+', "OK"), nil)
 		}
 		if v, err := client.DoCache(context.Background(), client.B().Get().Key("Do").Cache(), 0).ToString(); err != nil || v != "OK" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -2191,9 +2191,9 @@ func TestSentinelClientConnLifetime(t *testing.T) {
 		var attempts int64
 		m.DoMultiFn = func(multi ...Completed) *valkeyresults {
 			if atomic.AddInt64(&attempts, 1) == 1 {
-				return &valkeyresults{s: []ValkeyResult{NewErrResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{newErrResult(errConnExpired)}}
 			}
-			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
 		}
 		if v, err := client.DoMulti(context.Background(), client.B().Get().Key("Do").Build())[0].ToString(); err != nil || v != "OK" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -2205,9 +2205,9 @@ func TestSentinelClientConnLifetime(t *testing.T) {
 		var attempts int64
 		m.DoMultiFn = func(multi ...Completed) *valkeyresults {
 			if atomic.AddInt64(&attempts, 1) == 1 {
-				return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil), NewErrResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil), newErrResult(errConnExpired)}}
 			}
-			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
 		}
 		resps := client.DoMulti(context.Background(), client.B().Get().Key("Do").Build(), client.B().Get().Key("Do").Build())
 		if len(resps) != 2 {
@@ -2230,53 +2230,53 @@ func TestSentinelClientConnLifetime(t *testing.T) {
 			switch atomic.AddInt64(&attempts, 1) {
 			case 1: // errConnExpired at the head of processing
 				orgMulti = multi
-				return &valkeyresults{s: []ValkeyResult{NewErrResult(errConnExpired), NewErrResult(errConnExpired), NewErrResult(errConnExpired), NewErrResult(errConnExpired), NewErrResult(errConnExpired), NewErrResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired)}}
 			case 2: // errConnExpired at Multi Command
 				if len(multi) != 6 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[0].Commands()) {
 					t.Fatalf("unexpected multi when errConnExpired occurred at the head of processing, %v", multi)
 				}
 				return &valkeyresults{s: []ValkeyResult{
-					NewResult(strmsg('+', "1"), nil),
-					NewErrResult(errConnExpired), NewErrResult(errConnExpired), NewErrResult(errConnExpired), NewErrResult(errConnExpired), NewErrResult(errConnExpired),
+					newResult(strmsg('+', "1"), nil),
+					newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired),
 				}}
 			case 3: // errConnExpired in the middle of transaction block
 				if len(multi) != 5 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[1].Commands()) {
 					t.Fatalf("unexpected multi when errConnExpired occurred at Multi Command, %v", multi)
 				}
 				return &valkeyresults{s: []ValkeyResult{
-					NewResult(strmsg('+', "OK"), nil),
-					NewResult(strmsg('+', "QUEUE"), nil),
-					NewErrResult(errConnExpired), NewErrResult(errConnExpired), NewErrResult(errConnExpired),
+					newResult(strmsg('+', "OK"), nil),
+					newResult(strmsg('+', "QUEUE"), nil),
+					newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired),
 				}}
 			case 4: // errConnExpired at Exec Command
 				if len(multi) != 5 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[1].Commands()) {
 					t.Fatalf("unexpected multi when errConnExpired occurred in the middle of transaction block, %v", multi)
 				}
 				return &valkeyresults{s: []ValkeyResult{
-					NewResult(strmsg('+', "OK"), nil),
-					NewResult(strmsg('+', "QUEUE"), nil),
-					NewResult(strmsg('+', "QUEUE"), nil),
-					NewErrResult(errConnExpired), NewErrResult(errConnExpired)}}
+					newResult(strmsg('+', "OK"), nil),
+					newResult(strmsg('+', "QUEUE"), nil),
+					newResult(strmsg('+', "QUEUE"), nil),
+					newErrResult(errConnExpired), newErrResult(errConnExpired)}}
 			case 5: // errConnExpired at end of processing
 				if len(multi) != 5 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[1].Commands()) {
 					t.Fatalf("unexpected multi when errConnExpired occurred at at Exec Command, %v", multi)
 				}
 				return &valkeyresults{s: []ValkeyResult{
-					NewResult(strmsg('+', "OK"), nil),
-					NewResult(strmsg('+', "QUEUE"), nil),
-					NewResult(strmsg('+', "QUEUE"), nil),
-					NewResult(slicemsg('*', []ValkeyMessage{
+					newResult(strmsg('+', "OK"), nil),
+					newResult(strmsg('+', "QUEUE"), nil),
+					newResult(strmsg('+', "QUEUE"), nil),
+					newResult(slicemsg('*', []ValkeyMessage{
 						strmsg('+', "2"),
 						strmsg('+', "3"),
 					}), nil),
-					NewErrResult(errConnExpired),
+					newErrResult(errConnExpired),
 				}}
 			case 6:
 				if len(multi) != 1 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[5].Commands()) {
 					t.Fatalf("unexpected multi when errConnExpired occurred at end of processing, %v", multi)
 				}
 			}
-			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "4"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "4"), nil)}}
 		}
 		multi := []Completed{
 			client.B().Get().Key("1{t}").Build(),
@@ -2315,9 +2315,9 @@ func TestSentinelClientConnLifetime(t *testing.T) {
 		var attempts int64
 		m.DoMultiCacheFn = func(multi ...CacheableTTL) *valkeyresults {
 			if atomic.AddInt64(&attempts, 1) == 1 {
-				return &valkeyresults{s: []ValkeyResult{NewErrResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{newErrResult(errConnExpired)}}
 			}
-			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
 		}
 		if v, err := client.DoMultiCache(context.Background(), CT(client.B().Get().Key("Do").Cache(), 0))[0].ToString(); err != nil || v != "OK" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -2329,9 +2329,9 @@ func TestSentinelClientConnLifetime(t *testing.T) {
 		var attempts int64
 		m.DoMultiCacheFn = func(multi ...CacheableTTL) *valkeyresults {
 			if atomic.AddInt64(&attempts, 1) == 1 {
-				return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil), NewErrResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil), newErrResult(errConnExpired)}}
 			}
-			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
 		}
 		resps := client.DoMultiCache(context.Background(), CT(client.B().Get().Key("Do").Cache(), 0), CT(client.B().Get().Key("Do").Cache(), 0))
 		if len(resps) != 2 {
@@ -2574,7 +2574,7 @@ func TestSendToReplicasSentinelClientDelegate(t *testing.T) {
 			if !reflect.DeepEqual(cmd.Commands(), c.Commands()) {
 				t.Fatalf("unexpected command %v", cmd)
 			}
-			return NewResult(strmsg('+', "Do"), nil)
+			return newResult(strmsg('+', "Do"), nil)
 		}
 		if v, err := client.Do(context.Background(), c).ToString(); err != nil || v != "Do" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -2590,7 +2590,7 @@ func TestSendToReplicasSentinelClientDelegate(t *testing.T) {
 			if !reflect.DeepEqual(cmd.Commands(), c.Commands()) {
 				t.Fatalf("unexpected command %v", cmd)
 			}
-			return NewResult(strmsg('+', "Do"), nil)
+			return newResult(strmsg('+', "Do"), nil)
 		}
 		if v, err := client.Do(context.Background(), c).ToString(); err != nil || v != "Do" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -2619,7 +2619,7 @@ func TestSendToReplicasSentinelClientDelegate(t *testing.T) {
 								t.Fatalf("unexpected command %v", cmd)
 							}
 
-							return NewResult(strmsg('+', "DoCache"), nil)
+							return newResult(strmsg('+', "DoCache"), nil)
 						},
 					}
 				}
@@ -2654,7 +2654,7 @@ func TestSendToReplicasSentinelClientDelegate(t *testing.T) {
 			if !reflect.DeepEqual(cmd.Commands(), c.Commands()) || ttl != 100 {
 				t.Fatalf("unexpected command %v, %v", cmd, ttl)
 			}
-			return NewResult(strmsg('+', "DoCache"), nil)
+			return newResult(strmsg('+', "DoCache"), nil)
 		}
 		if v, err := client.DoCache(context.Background(), c, 100).ToString(); err != nil || v != "DoCache" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -2706,8 +2706,8 @@ func TestSendToReplicasSentinelClientDelegate(t *testing.T) {
 			}
 			return &valkeyresults{
 				s: []ValkeyResult{
-					NewResult(strmsg('+', "DoMulti"), nil),
-					NewResult(strmsg('+', "value2"), nil),
+					newResult(strmsg('+', "DoMulti"), nil),
+					newResult(strmsg('+', "value2"), nil),
 				},
 			}
 		}
@@ -2734,7 +2734,7 @@ func TestSendToReplicasSentinelClientDelegate(t *testing.T) {
 				t.Fatalf("unexpected command %v", cmd[1])
 			}
 			return &valkeyresults{
-				s: []ValkeyResult{NewResult(strmsg('+', "value1"), nil), NewResult(strmsg('+', "value2"), nil)},
+				s: []ValkeyResult{newResult(strmsg('+', "value1"), nil), newResult(strmsg('+', "value2"), nil)},
 			}
 		}
 		resps := client.DoMulti(context.Background(), c1, c2)
@@ -2803,7 +2803,7 @@ func TestSendToReplicasSentinelClientDelegate(t *testing.T) {
 								t.Fatalf("unexpected command %v, %v", multi[1].Cmd, multi[1].TTL)
 							}
 							return &valkeyresults{
-								s: []ValkeyResult{NewResult(strmsg('+', "value1"), nil), NewResult(strmsg('+', "value2"), nil)},
+								s: []ValkeyResult{newResult(strmsg('+', "value1"), nil), newResult(strmsg('+', "value2"), nil)},
 							}
 						},
 					}
@@ -2850,8 +2850,8 @@ func TestSendToReplicasSentinelClientDelegate(t *testing.T) {
 			}
 			return &valkeyresults{
 				s: []ValkeyResult{
-					NewResult(strmsg('+', "value1"), nil),
-					NewResult(strmsg('+', "value2"), nil),
+					newResult(strmsg('+', "value1"), nil),
+					newResult(strmsg('+', "value2"), nil),
 				},
 			}
 		}
@@ -2945,10 +2945,10 @@ func TestSendToReplicasSentinelClientDelegate(t *testing.T) {
 
 		w := &mockWire{
 			DoFn: func(cmd Completed) ValkeyResult {
-				return NewResult(strmsg('+', "Delegate"), nil)
+				return newResult(strmsg('+', "Delegate"), nil)
 			},
 			DoMultiFn: func(cmd ...Completed) *valkeyresults {
-				return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "Delegate"), nil)}}
+				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "Delegate"), nil)}}
 			},
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 				return ErrClosing
@@ -3132,7 +3132,7 @@ func TestReplicaOnlySentinelClientDelegate(t *testing.T) {
 			if !reflect.DeepEqual(cmd.Commands(), c.Commands()) {
 				t.Fatalf("unexpected command %v", cmd)
 			}
-			return NewResult(strmsg('+', "Do"), nil)
+			return newResult(strmsg('+', "Do"), nil)
 		}
 		if v, err := client.Do(context.Background(), c).ToString(); err != nil || v != "Do" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -3148,7 +3148,7 @@ func TestReplicaOnlySentinelClientDelegate(t *testing.T) {
 			if !reflect.DeepEqual(cmd.Commands(), c.Commands()) || ttl != 100 {
 				t.Fatalf("unexpected command %v, %v", cmd, ttl)
 			}
-			return NewResult(strmsg('+', "DoCache"), nil)
+			return newResult(strmsg('+', "DoCache"), nil)
 		}
 		if v, err := client.DoCache(context.Background(), c, 100).ToString(); err != nil || v != "DoCache" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -3184,7 +3184,7 @@ func TestReplicaOnlySentinelClientDelegate(t *testing.T) {
 				t.Fatalf("unexpected command %v", cmd[1])
 			}
 			return &valkeyresults{
-				s: []ValkeyResult{NewResult(strmsg('+', "value1"), nil), NewResult(strmsg('+', "value2"), nil)},
+				s: []ValkeyResult{newResult(strmsg('+', "value1"), nil), newResult(strmsg('+', "value2"), nil)},
 			}
 		}
 		resps := client.DoMulti(context.Background(), c1, c2)
@@ -3227,8 +3227,8 @@ func TestReplicaOnlySentinelClientDelegate(t *testing.T) {
 			}
 			return &valkeyresults{
 				s: []ValkeyResult{
-					NewResult(strmsg('+', "value1"), nil),
-					NewResult(strmsg('+', "value2"), nil),
+					newResult(strmsg('+', "value1"), nil),
+					newResult(strmsg('+', "value2"), nil),
 				},
 			}
 		}
@@ -3273,10 +3273,10 @@ func TestReplicaOnlySentinelClientDelegate(t *testing.T) {
 
 		w := &mockWire{
 			DoFn: func(cmd Completed) ValkeyResult {
-				return NewResult(strmsg('+', "Delegate"), nil)
+				return newResult(strmsg('+', "Delegate"), nil)
 			},
 			DoMultiFn: func(cmd ...Completed) *valkeyresults {
-				return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "Delegate"), nil)}}
+				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "Delegate"), nil)}}
 			},
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 				return ErrClosing
@@ -3325,10 +3325,10 @@ func TestReplicaOnlySentinelClientDelegate(t *testing.T) {
 
 		w := &mockWire{
 			DoFn: func(cmd Completed) ValkeyResult {
-				return NewResult(strmsg('+', "Delegate"), nil)
+				return newResult(strmsg('+', "Delegate"), nil)
 			},
 			DoMultiFn: func(cmd ...Completed) *valkeyresults {
-				return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "Delegate"), nil)}}
+				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "Delegate"), nil)}}
 			},
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 				return ErrClosing

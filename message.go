@@ -130,13 +130,11 @@ func (r *ValkeyError) IsBusyGroup() bool {
 	return strings.HasPrefix(r.string(), "BUSYGROUP")
 }
 
-// NewResult creates a new ValkeyResult with the provided ValkeyMessage and error.
-func NewResult(val ValkeyMessage, err error) ValkeyResult {
+func newResult(val ValkeyMessage, err error) ValkeyResult {
 	return ValkeyResult{val: val, err: err}
 }
 
-// NewErrResult creates a new ValkeyResult with the provided error.
-func NewErrResult(err error) ValkeyResult {
+func newErrResult(err error) ValkeyResult {
 	return ValkeyResult{err: err}
 }
 
