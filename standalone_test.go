@@ -64,16 +64,16 @@ func TestNewStandaloneClientDelegation(t *testing.T) {
 			return "p"
 		},
 		DoFn: func(cmd Completed) ValkeyResult {
-			return newErrResult(errors.New("primary"))
+			return NewErrorResult(errors.New("primary"))
 		},
 		DoMultiFn: func(multi ...Completed) *valkeyresults {
-			return &valkeyresults{s: []ValkeyResult{newErrResult(errors.New("primary"))}}
+			return &valkeyresults{s: []ValkeyResult{NewErrorResult(errors.New("primary"))}}
 		},
 		DoCacheFn: func(cmd Cacheable, ttl time.Duration) ValkeyResult {
-			return newErrResult(errors.New("primary"))
+			return NewErrorResult(errors.New("primary"))
 		},
 		DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
-			return &valkeyresults{s: []ValkeyResult{newErrResult(errors.New("primary"))}}
+			return &valkeyresults{s: []ValkeyResult{NewErrorResult(errors.New("primary"))}}
 		},
 		DoStreamFn: func(cmd Completed) ValkeyResultStream {
 			return ValkeyResultStream{e: errors.New("primary")}
@@ -93,10 +93,10 @@ func TestNewStandaloneClientDelegation(t *testing.T) {
 			return "r"
 		},
 		DoFn: func(cmd Completed) ValkeyResult {
-			return newErrResult(errors.New("replica"))
+			return NewErrorResult(errors.New("replica"))
 		},
 		DoMultiFn: func(multi ...Completed) *valkeyresults {
-			return &valkeyresults{s: []ValkeyResult{newErrResult(errors.New("replica"))}}
+			return &valkeyresults{s: []ValkeyResult{NewErrorResult(errors.New("replica"))}}
 		},
 		DoStreamFn: func(cmd Completed) ValkeyResultStream {
 			return ValkeyResultStream{e: errors.New("replica")}
@@ -220,7 +220,7 @@ func TestNewStandaloneClientMultiReplicasDelegation(t *testing.T) {
 			DoFn: func(cmd Completed) ValkeyResult {
 				i, _ := strconv.Atoi(dst)
 				atomic.AddInt32(&counts[i], 1)
-				return newErrResult(errors.New("replica"))
+				return NewErrorResult(errors.New("replica"))
 			},
 		}
 	}, newRetryer(defaultRetryDelayFn))
@@ -254,7 +254,7 @@ func TestStandaloneRedirectHandling(t *testing.T) {
 	// Mock primary connection that returns redirect
 	primaryConn := &mockConn{
 		DoFn: func(cmd Completed) ValkeyResult {
-			return newErrResult(&redirectErr)
+			return NewErrorResult(&redirectErr)
 		},
 	}
 
@@ -313,7 +313,7 @@ func TestStandaloneDoCacheRedirectHandling(t *testing.T) {
 	// Mock primary connection that returns redirect
 	primaryConn := &mockConn{
 		DoCacheFn: func(cmd Cacheable, ttl time.Duration) ValkeyResult {
-			return newErrResult(&redirectErr)
+			return NewErrorResult(&redirectErr)
 		},
 	}
 
@@ -372,7 +372,7 @@ func TestStandaloneRedirectDisabled(t *testing.T) {
 	// Mock primary connection that returns redirect
 	primaryConn := &mockConn{
 		DoFn: func(cmd Completed) ValkeyResult {
-			return newErrResult(&redirectErr)
+			return NewErrorResult(&redirectErr)
 		},
 	}
 
@@ -413,7 +413,7 @@ func TestStandaloneDoCacheRedirectDisabled(t *testing.T) {
 	// Mock primary connection that returns redirect
 	primaryConn := &mockConn{
 		DoCacheFn: func(cmd Cacheable, ttl time.Duration) ValkeyResult {
-			return newErrResult(&redirectErr)
+			return NewErrorResult(&redirectErr)
 		},
 	}
 
@@ -702,7 +702,7 @@ func TestStandaloneDoMultiWithRedirectRetry(t *testing.T) {
 			attempts++
 			// First attempt returns redirect error, second returns success
 			if attempts == 1 {
-				return &valkeyresults{s: []ValkeyResult{newErrResult(&redirectErr)}}
+				return &valkeyresults{s: []ValkeyResult{NewErrorResult(&redirectErr)}}
 			}
 			return &valkeyresults{s: []ValkeyResult{ValkeyResult{val: strmsg('+', "OK")}}}
 		},
@@ -782,7 +782,7 @@ func TestStandaloneDoMultiWithRedirectRetryFailure(t *testing.T) {
 	primaryConn := &mockConn{
 		DialFn: func() error { return nil },
 		DoMultiFn: func(multi ...Completed) *valkeyresults {
-			return &valkeyresults{s: []ValkeyResult{newErrResult(&redirectErr)}}
+			return &valkeyresults{s: []ValkeyResult{NewErrorResult(&redirectErr)}}
 		},
 	}
 
@@ -855,7 +855,7 @@ func TestStandaloneDoMultiCacheWithRedirectRetry(t *testing.T) {
 			attempts++
 			// First attempt returns redirect error, second returns success
 			if attempts == 1 {
-				return &valkeyresults{s: []ValkeyResult{newErrResult(&redirectErr)}}
+				return &valkeyresults{s: []ValkeyResult{NewErrorResult(&redirectErr)}}
 			}
 			return &valkeyresults{s: []ValkeyResult{ValkeyResult{val: strmsg('+', "OK")}}}
 		},
@@ -935,7 +935,7 @@ func TestStandaloneDoMultiCacheWithRedirectRetryFailure(t *testing.T) {
 	primaryConn := &mockConn{
 		DialFn: func() error { return nil },
 		DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
-			return &valkeyresults{s: []ValkeyResult{newErrResult(&redirectErr)}}
+			return &valkeyresults{s: []ValkeyResult{NewErrorResult(&redirectErr)}}
 		},
 	}
 
@@ -1104,7 +1104,7 @@ func TestStandaloneClientConnLifetime(t *testing.T) {
 		primary.DoFn = func(cmd Completed) ValkeyResult {
 			attempts++
 			if attempts == 1 {
-				return newErrResult(errConnExpired)
+				return NewErrorResult(errConnExpired)
 			}
 			return newResult(strmsg('+', "OK"), nil)
 		}
@@ -1121,8 +1121,8 @@ func TestStandaloneClientConnLifetime(t *testing.T) {
 			attempts++
 			if attempts == 1 {
 				return &valkeyresults{s: []ValkeyResult{
-					newErrResult(errConnExpired),
-					newErrResult(errConnExpired),
+					NewErrorResult(errConnExpired),
+					NewErrorResult(errConnExpired),
 				}}
 			}
 			return &valkeyresults{s: []ValkeyResult{
@@ -1153,7 +1153,7 @@ func TestStandaloneClientConnLifetime(t *testing.T) {
 			if attempts == 1 {
 				return &valkeyresults{s: []ValkeyResult{
 					newResult(strmsg('+', "OK"), nil),
-					newErrResult(errConnExpired),
+					NewErrorResult(errConnExpired),
 				}}
 			}
 			return &valkeyresults{s: []ValkeyResult{
@@ -1181,7 +1181,7 @@ func TestStandaloneClientConnLifetime(t *testing.T) {
 		replica.DoMultiFn = func(multi ...Completed) *valkeyresults {
 			attempts++
 			if attempts == 1 {
-				return &valkeyresults{s: []ValkeyResult{newErrResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{NewErrorResult(errConnExpired)}}
 			}
 			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
 		}
@@ -1202,7 +1202,7 @@ func TestStandaloneClientConnLifetime(t *testing.T) {
 		redirectConn.DoMultiFn = func(multi ...Completed) *valkeyresults {
 			attempts++
 			if attempts == 1 {
-				return &valkeyresults{s: []ValkeyResult{newErrResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{NewErrorResult(errConnExpired)}}
 			}
 			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
 		}

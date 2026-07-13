@@ -628,7 +628,7 @@ func TestMuxDelegation(t *testing.T) {
 		m, checkClean := setupMux([]*mockWire{
 			{
 				DoFn: func(cmd Completed) ValkeyResult {
-					return newErrResult(context.DeadlineExceeded)
+					return NewErrorResult(context.DeadlineExceeded)
 				},
 				ErrorFn: func() error {
 					return context.DeadlineExceeded
@@ -674,7 +674,7 @@ func TestMuxDelegation(t *testing.T) {
 		m, checkClean := setupMux([]*mockWire{
 			{
 				DoMultiFn: func(multi ...Completed) *valkeyresults {
-					return &valkeyresults{s: []ValkeyResult{newErrResult(context.DeadlineExceeded)}}
+					return &valkeyresults{s: []ValkeyResult{NewErrorResult(context.DeadlineExceeded)}}
 				},
 				ErrorFn: func() error {
 					return context.DeadlineExceeded
@@ -717,7 +717,7 @@ func TestMuxDelegation(t *testing.T) {
 		m, checkClean := setupMux([]*mockWire{
 			{
 				DoCacheFn: func(cmd Cacheable, ttl time.Duration) ValkeyResult {
-					return newErrResult(context.DeadlineExceeded)
+					return NewErrorResult(context.DeadlineExceeded)
 				},
 				ErrorFn: func() error {
 					return context.DeadlineExceeded
@@ -745,7 +745,7 @@ func TestMuxDelegation(t *testing.T) {
 		m, checkClean := setupMux([]*mockWire{
 			{
 				DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
-					return &valkeyresults{s: []ValkeyResult{newErrResult(context.DeadlineExceeded)}}
+					return &valkeyresults{s: []ValkeyResult{NewErrorResult(context.DeadlineExceeded)}}
 				},
 				ErrorFn: func() error {
 					return context.DeadlineExceeded
@@ -779,7 +779,7 @@ func TestMuxDelegation(t *testing.T) {
 					result := make([]ValkeyResult, len(multi))
 					for j, cmd := range multi {
 						if s := cmd.Cmd.Slot() & uint16(len(wires)-1); s != idx {
-							result[j] = newErrResult(fmt.Errorf("wrong slot %v %v", s, idx))
+							result[j] = NewErrorResult(fmt.Errorf("wrong slot %v %v", s, idx))
 						} else {
 							result[j] = newResult(strmsg('+', cmd.Cmd.Commands()[1]), nil)
 						}
@@ -820,10 +820,10 @@ func TestMuxDelegation(t *testing.T) {
 				DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
 					for _, cmd := range multi {
 						if s := cmd.Cmd.Slot() & uint16(len(wires)-1); s != idx {
-							return &valkeyresults{s: []ValkeyResult{newErrResult(fmt.Errorf("wrong slot %v %v", s, idx))}}
+							return &valkeyresults{s: []ValkeyResult{NewErrorResult(fmt.Errorf("wrong slot %v %v", s, idx))}}
 						}
 					}
-					return &valkeyresults{s: []ValkeyResult{newErrResult(context.DeadlineExceeded)}}
+					return &valkeyresults{s: []ValkeyResult{NewErrorResult(context.DeadlineExceeded)}}
 				},
 				ErrorFn: func() error {
 					return context.DeadlineExceeded
@@ -934,7 +934,7 @@ func TestMuxDelegation(t *testing.T) {
 			},
 			{
 				DoFn: func(cmd Completed) ValkeyResult {
-					return newErrResult(context.DeadlineExceeded)
+					return NewErrorResult(context.DeadlineExceeded)
 				},
 				ErrorFn: func() error {
 					return context.DeadlineExceeded
@@ -1079,7 +1079,7 @@ func TestMuxDelegation(t *testing.T) {
 			},
 			{
 				DoMultiFn: func(cmd ...Completed) *valkeyresults {
-					return &valkeyresults{s: []ValkeyResult{newErrResult(context.DeadlineExceeded)}}
+					return &valkeyresults{s: []ValkeyResult{NewErrorResult(context.DeadlineExceeded)}}
 				},
 				ErrorFn: func() error {
 					return context.DeadlineExceeded

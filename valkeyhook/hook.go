@@ -3,7 +3,6 @@ package valkeyhook
 import (
 	"context"
 	"time"
-	"unsafe"
 
 	"github.com/valkey-io/valkey-go"
 )
@@ -162,24 +161,10 @@ func (e *extended) Mode() valkey.ClientMode {
 	panic("Mode() is not allowed with valkey.DedicatedClient")
 }
 
-type result struct {
-	err error
-	val valkey.ValkeyMessage
-}
-
 func NewErrorResult(err error) valkey.ValkeyResult {
-	r := result{err: err}
-	return *(*valkey.ValkeyResult)(unsafe.Pointer(&r))
-}
-
-type stream struct {
-	p *int
-	w *int
-	e error
-	n int
+	return valkey.NewErrorResult(err)
 }
 
 func NewErrorResultStream(err error) valkey.ValkeyResultStream {
-	r := stream{e: err}
-	return *(*valkey.ValkeyResultStream)(unsafe.Pointer(&r))
+	return valkey.NewErrorResultStream(err)
 }

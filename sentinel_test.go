@@ -43,7 +43,7 @@ func TestSentinelClientInit(t *testing.T) {
 			&ClientOption{InitAddress: []string{":0"}},
 			func(dst string, opt *ClientOption) conn {
 				return &mockConn{
-					DoMultiFn: func(cmd ...Completed) *valkeyresults { return &valkeyresults{s: []ValkeyResult{newErrResult(v)}} },
+					DoMultiFn: func(cmd ...Completed) *valkeyresults { return &valkeyresults{s: []ValkeyResult{NewErrorResult(v)}} },
 				}
 			},
 			newRetryer(defaultRetryDelayFn),
@@ -58,8 +58,8 @@ func TestSentinelClientInit(t *testing.T) {
 			DoFn: func(cmd Completed) ValkeyResult { return ValkeyResult{} },
 			DoMultiFn: func(multi ...Completed) *valkeyresults {
 				return &valkeyresults{s: []ValkeyResult{
-					newErrResult(v),
-					newErrResult(v),
+					NewErrorResult(v),
+					NewErrorResult(v),
 				}}
 			},
 		}
@@ -73,7 +73,7 @@ func TestSentinelClientInit(t *testing.T) {
 							strmsg('+', "port"), strmsg('+', "0"),
 						}),
 					})},
-					newErrResult(v),
+					NewErrorResult(v),
 				}}
 			},
 		}
@@ -184,8 +184,8 @@ func TestSentinelClientInit(t *testing.T) {
 			DoFn: func(cmd Completed) ValkeyResult { return ValkeyResult{} },
 			DoMultiFn: func(multi ...Completed) *valkeyresults {
 				return &valkeyresults{s: []ValkeyResult{
-					newErrResult(v),
-					newErrResult(v),
+					NewErrorResult(v),
+					NewErrorResult(v),
 				}}
 			},
 		}
@@ -199,7 +199,7 @@ func TestSentinelClientInit(t *testing.T) {
 							strmsg('+', "port"), strmsg('+', "0"),
 						}),
 					})},
-					newErrResult(v),
+					NewErrorResult(v),
 				}}
 			},
 		}
@@ -446,7 +446,7 @@ func TestSentinelClientInit(t *testing.T) {
 				}
 				if dst == ":2" {
 					return &mockConn{
-						DoFn: func(cmd Completed) ValkeyResult { return newErrResult(v) },
+						DoFn: func(cmd Completed) ValkeyResult { return NewErrorResult(v) },
 					}
 				}
 				if dst == ":3" {
@@ -480,7 +480,7 @@ func TestSentinelClientInit(t *testing.T) {
 		s0 := &mockConn{
 			DoFn: func(cmd Completed) ValkeyResult {
 				if atomic.LoadInt32(&disconnect) == 1 {
-					return newErrResult(errors.New("die"))
+					return NewErrorResult(errors.New("die"))
 				}
 				return ValkeyResult{}
 			},
@@ -542,7 +542,7 @@ func TestSentinelClientInit(t *testing.T) {
 		r3 := &mockConn{
 			DoFn: func(cmd Completed) ValkeyResult {
 				if atomic.LoadInt32(&disconnect) == 1 {
-					return newErrResult(errors.New("die"))
+					return NewErrorResult(errors.New("die"))
 				}
 				return ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "master")})}
 			},
@@ -709,7 +709,7 @@ func TestSentinelClientInit(t *testing.T) {
 		s0 := &mockConn{
 			DoFn: func(cmd Completed) ValkeyResult {
 				if atomic.LoadInt32(&disconnect) == 1 {
-					return newErrResult(errors.New("die"))
+					return NewErrorResult(errors.New("die"))
 				}
 				return ValkeyResult{}
 			},
@@ -821,7 +821,7 @@ func TestSentinelClientInit(t *testing.T) {
 		r1 := &mockConn{
 			DoFn: func(cmd Completed) ValkeyResult {
 				if atomic.LoadInt32(&disconnect) == 1 {
-					return newErrResult(errors.New("die"))
+					return NewErrorResult(errors.New("die"))
 				}
 				return ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "slave")})}
 			},
@@ -980,7 +980,7 @@ func TestSentinelRefreshAfterClose(t *testing.T) {
 					})},
 				}}
 			}
-			return &valkeyresults{s: []ValkeyResult{newErrResult(ErrClosing), newErrResult(ErrClosing)}}
+			return &valkeyresults{s: []ValkeyResult{NewErrorResult(ErrClosing), NewErrorResult(ErrClosing)}}
 		},
 	}
 	m := &mockConn{
@@ -1030,7 +1030,7 @@ func TestSentinelSwitchAfterClose(t *testing.T) {
 				first = false
 				return ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "master")})}
 			}
-			return newErrResult(ErrClosing)
+			return NewErrorResult(ErrClosing)
 		},
 	}
 	client, err := newSentinelClient(
@@ -1409,15 +1409,15 @@ func TestSentinelClientDelegateRetry(t *testing.T) {
 					return ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "master")})}
 				}
 				atomic.AddUint32(&retry, 1)
-				return newErrResult(ErrClosing)
+				return NewErrorResult(ErrClosing)
 			},
 			DoMultiFn: func(multi ...Completed) *valkeyresults {
 				atomic.AddUint32(&retry, 1)
-				return &valkeyresults{s: []ValkeyResult{newErrResult(ErrClosing)}}
+				return &valkeyresults{s: []ValkeyResult{NewErrorResult(ErrClosing)}}
 			},
 			DoCacheFn: func(cmd Cacheable, ttl time.Duration) ValkeyResult {
 				atomic.AddUint32(&retry, 1)
-				return newErrResult(ErrClosing)
+				return NewErrorResult(ErrClosing)
 			},
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 				atomic.AddUint32(&retry, 1)
@@ -1585,7 +1585,7 @@ func TestSentinelClientPubSub(t *testing.T) {
 	}
 	s3 := &mockConn{
 		DoMultiFn: func(cmd ...Completed) *valkeyresults {
-			return &valkeyresults{s: []ValkeyResult{newErrResult(errClosing)}}
+			return &valkeyresults{s: []ValkeyResult{NewErrorResult(errClosing)}}
 		},
 	}
 	m4 := &mockConn{
@@ -1755,7 +1755,7 @@ func TestSentinelReplicaOnlyClientPubSub(t *testing.T) {
 	}
 	s3 := &mockConn{
 		DoMultiFn: func(cmd ...Completed) *valkeyresults {
-			return &valkeyresults{s: []ValkeyResult{newErrResult(errClosing)}}
+			return &valkeyresults{s: []ValkeyResult{NewErrorResult(errClosing)}}
 		},
 	}
 	slave4 := &mockConn{
@@ -2163,7 +2163,7 @@ func TestSentinelClientConnLifetime(t *testing.T) {
 		var attempts int64
 		m.DoFn = func(cmd Completed) ValkeyResult {
 			if atomic.AddInt64(&attempts, 1) == 1 {
-				return newErrResult(errConnExpired)
+				return NewErrorResult(errConnExpired)
 			}
 			return newResult(strmsg('+', "OK"), nil)
 		}
@@ -2177,7 +2177,7 @@ func TestSentinelClientConnLifetime(t *testing.T) {
 		var attempts int64
 		m.DoCacheFn = func(cmd Cacheable, ttl time.Duration) ValkeyResult {
 			if atomic.AddInt64(&attempts, 1) == 1 {
-				return newErrResult(errConnExpired)
+				return NewErrorResult(errConnExpired)
 			}
 			return newResult(strmsg('+', "OK"), nil)
 		}
@@ -2191,7 +2191,7 @@ func TestSentinelClientConnLifetime(t *testing.T) {
 		var attempts int64
 		m.DoMultiFn = func(multi ...Completed) *valkeyresults {
 			if atomic.AddInt64(&attempts, 1) == 1 {
-				return &valkeyresults{s: []ValkeyResult{newErrResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{NewErrorResult(errConnExpired)}}
 			}
 			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
 		}
@@ -2205,7 +2205,7 @@ func TestSentinelClientConnLifetime(t *testing.T) {
 		var attempts int64
 		m.DoMultiFn = func(multi ...Completed) *valkeyresults {
 			if atomic.AddInt64(&attempts, 1) == 1 {
-				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil), newErrResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil), NewErrorResult(errConnExpired)}}
 			}
 			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
 		}
@@ -2230,14 +2230,14 @@ func TestSentinelClientConnLifetime(t *testing.T) {
 			switch atomic.AddInt64(&attempts, 1) {
 			case 1: // errConnExpired at the head of processing
 				orgMulti = multi
-				return &valkeyresults{s: []ValkeyResult{newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired)}}
 			case 2: // errConnExpired at Multi Command
 				if len(multi) != 6 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[0].Commands()) {
 					t.Fatalf("unexpected multi when errConnExpired occurred at the head of processing, %v", multi)
 				}
 				return &valkeyresults{s: []ValkeyResult{
 					newResult(strmsg('+', "1"), nil),
-					newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired),
+					NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired),
 				}}
 			case 3: // errConnExpired in the middle of transaction block
 				if len(multi) != 5 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[1].Commands()) {
@@ -2246,7 +2246,7 @@ func TestSentinelClientConnLifetime(t *testing.T) {
 				return &valkeyresults{s: []ValkeyResult{
 					newResult(strmsg('+', "OK"), nil),
 					newResult(strmsg('+', "QUEUE"), nil),
-					newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired),
+					NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired),
 				}}
 			case 4: // errConnExpired at Exec Command
 				if len(multi) != 5 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[1].Commands()) {
@@ -2256,7 +2256,7 @@ func TestSentinelClientConnLifetime(t *testing.T) {
 					newResult(strmsg('+', "OK"), nil),
 					newResult(strmsg('+', "QUEUE"), nil),
 					newResult(strmsg('+', "QUEUE"), nil),
-					newErrResult(errConnExpired), newErrResult(errConnExpired)}}
+					NewErrorResult(errConnExpired), NewErrorResult(errConnExpired)}}
 			case 5: // errConnExpired at end of processing
 				if len(multi) != 5 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[1].Commands()) {
 					t.Fatalf("unexpected multi when errConnExpired occurred at at Exec Command, %v", multi)
@@ -2269,7 +2269,7 @@ func TestSentinelClientConnLifetime(t *testing.T) {
 						strmsg('+', "2"),
 						strmsg('+', "3"),
 					}), nil),
-					newErrResult(errConnExpired),
+					NewErrorResult(errConnExpired),
 				}}
 			case 6:
 				if len(multi) != 1 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[5].Commands()) {
@@ -2315,7 +2315,7 @@ func TestSentinelClientConnLifetime(t *testing.T) {
 		var attempts int64
 		m.DoMultiCacheFn = func(multi ...CacheableTTL) *valkeyresults {
 			if atomic.AddInt64(&attempts, 1) == 1 {
-				return &valkeyresults{s: []ValkeyResult{newErrResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{NewErrorResult(errConnExpired)}}
 			}
 			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
 		}
@@ -2329,7 +2329,7 @@ func TestSentinelClientConnLifetime(t *testing.T) {
 		var attempts int64
 		m.DoMultiCacheFn = func(multi ...CacheableTTL) *valkeyresults {
 			if atomic.AddInt64(&attempts, 1) == 1 {
-				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil), newErrResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil), NewErrorResult(errConnExpired)}}
 			}
 			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
 		}

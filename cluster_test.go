@@ -751,7 +751,7 @@ func TestClusterClientInit(t *testing.T) {
 		if _, err := newClusterClient(
 			&ClientOption{InitAddress: []string{":0"}},
 			func(dst string, opt *ClientOption) conn {
-				return &mockConn{DoFn: func(cmd Completed) ValkeyResult { return newErrResult(v) }}
+				return &mockConn{DoFn: func(cmd Completed) ValkeyResult { return NewErrorResult(v) }}
 			},
 			newRetryer(defaultRetryDelayFn),
 		); err != v {
@@ -4042,7 +4042,7 @@ func TestClusterClientErr(t *testing.T) {
 					atomic.AddInt64(&count, 1)
 					return slotsResp
 				}
-				return newErrResult(v)
+				return NewErrorResult(v)
 			},
 			DoStreamFn: func(cmd Completed) ValkeyResultStream {
 				return ValkeyResultStream{e: v}
@@ -4050,7 +4050,7 @@ func TestClusterClientErr(t *testing.T) {
 			DoMultiFn: func(multi ...Completed) *valkeyresults {
 				res := make([]ValkeyResult, len(multi))
 				for i := range res {
-					res[i] = newErrResult(v)
+					res[i] = NewErrorResult(v)
 				}
 				return &valkeyresults{s: res}
 			},
@@ -4058,12 +4058,12 @@ func TestClusterClientErr(t *testing.T) {
 				return MultiValkeyResultStream{e: v}
 			},
 			DoCacheFn: func(cmd Cacheable, ttl time.Duration) ValkeyResult {
-				return newErrResult(v)
+				return NewErrorResult(v)
 			},
 			DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
 				res := make([]ValkeyResult, len(multi))
 				for i := range res {
-					res[i] = newErrResult(v)
+					res[i] = NewErrorResult(v)
 				}
 				return &valkeyresults{s: res}
 			},
@@ -4113,7 +4113,7 @@ func TestClusterClientErr(t *testing.T) {
 				if atomic.AddInt64(&first, 1) == 1 {
 					return singleSlotResp
 				}
-				return newErrResult(v)
+				return NewErrorResult(v)
 			},
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 				return v
@@ -7628,7 +7628,7 @@ func TestClusterClientCacheASKRetry(t *testing.T) {
 				errInjected = true
 				return &valkeyresults{s: []ValkeyResult{
 					{}, {},
-					newErrResult(errors.New("transport: connection closed")),
+					NewErrorResult(errors.New("transport: connection closed")),
 				}}
 			}
 			// shouldRefreshRetry treats non-ValkeyError as RedirectRetry, so
@@ -8851,7 +8851,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 				return slotsMultiResp
 			}
 			if atomic.AddInt64(&attempts, 1) == 1 {
-				return newErrResult(errConnExpired)
+				return NewErrorResult(errConnExpired)
 			}
 			return newResult(strmsg('+', "OK"), nil)
 		}
@@ -8872,7 +8872,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 			case 1:
 				return newResult(strmsg('-', "MOVED 0 :1"), nil)
 			case 2:
-				return newErrResult(errConnExpired)
+				return NewErrorResult(errConnExpired)
 			}
 			return newResult(strmsg('+', "OK"), nil)
 		}
@@ -8893,7 +8893,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 		}
 		m.DoMultiFn = func(multi ...Completed) *valkeyresults {
 			if atomic.AddInt64(&attempts, 1) == 1 {
-				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil), newErrResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil), NewErrorResult(errConnExpired)}}
 			}
 			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil), newResult(strmsg('+', "OK"), nil)}}
 		}
@@ -8912,7 +8912,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 				return slotsMultiResp
 			}
 			if atomic.AddInt64(&attempts, 1) == 1 {
-				return newErrResult(errConnExpired)
+				return NewErrorResult(errConnExpired)
 			}
 			return newResult(strmsg('+', "OK"), nil)
 		}
@@ -8933,7 +8933,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 			case 1:
 				return newResult(strmsg('-', "MOVED 0 :1"), nil)
 			case 2:
-				return newErrResult(errConnExpired)
+				return NewErrorResult(errConnExpired)
 			}
 			return newResult(strmsg('+', "OK"), nil)
 		}
@@ -8951,7 +8951,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 		}
 		m.DoMultiFn = func(multi ...Completed) *valkeyresults {
 			if atomic.AddInt64(&attempts, 1) == 1 {
-				return &valkeyresults{s: []ValkeyResult{{}, newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{{}, NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired)}}
 			}
 			return &valkeyresults{s: []ValkeyResult{{}, {}, {}, {}, {}, newResult(slicemsg('*', []ValkeyMessage{{}, strmsg('+', "OK")}), nil)}}
 		}
@@ -8966,7 +8966,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 		m.DoFn = func(cmd Completed) ValkeyResult { return slotsMultiResp }
 		m.DoMultiFn = func(multi ...Completed) *valkeyresults {
 			if atomic.AddInt64(&attempts, 1) == 1 {
-				return &valkeyresults{s: []ValkeyResult{newErrResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{NewErrorResult(errConnExpired)}}
 			}
 			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
 		}
@@ -8981,7 +8981,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 		m.DoFn = func(cmd Completed) ValkeyResult { return slotsMultiResp }
 		m.DoMultiFn = func(multi ...Completed) *valkeyresults {
 			if atomic.AddInt64(&attempts, 1) == 1 {
-				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil), newErrResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil), NewErrorResult(errConnExpired)}}
 			}
 			// recover the failure of the first call
 			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
@@ -9008,14 +9008,14 @@ func TestClusterClientConnLifetime(t *testing.T) {
 			switch atomic.AddInt64(&attempts, 1) {
 			case 1: // errConnExpired at the head of processing
 				orgMulti = multi
-				return &valkeyresults{s: []ValkeyResult{newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired)}}
 			case 2: // errConnExpired at Multi command
 				if len(multi) != 6 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[0].Commands()) {
 					t.Fatalf("unexpected multi when errConnExpired occurred at the head of processing, %v", multi)
 				}
 				return &valkeyresults{s: []ValkeyResult{
 					newResult(strmsg('+', "1"), nil),
-					newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired),
+					NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired),
 				}}
 			case 3: // errConnExpired in the middle of transaction block
 				if len(multi) != 5 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[1].Commands()) {
@@ -9024,7 +9024,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 				return &valkeyresults{s: []ValkeyResult{
 					newResult(strmsg('+', "OK"), nil),
 					newResult(strmsg('+', "QUEUE"), nil),
-					newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired),
+					NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired),
 				}}
 			case 4: // errConnExpired at Exec Command
 				if len(multi) != 5 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[1].Commands()) {
@@ -9034,7 +9034,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 					newResult(strmsg('+', "OK"), nil),
 					newResult(strmsg('+', "QUEUE"), nil),
 					newResult(strmsg('+', "QUEUE"), nil),
-					newErrResult(errConnExpired), newErrResult(errConnExpired),
+					NewErrorResult(errConnExpired), NewErrorResult(errConnExpired),
 				}}
 			case 5: // errConnExpired at end of processing
 				if len(multi) != 5 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[1].Commands()) {
@@ -9048,7 +9048,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 						strmsg('+', "2"),
 						strmsg('+', "3"),
 					}), nil),
-					newErrResult(errConnExpired),
+					NewErrorResult(errConnExpired),
 				}}
 			case 6:
 				if len(multi) != 1 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[5].Commands()) {
@@ -9102,7 +9102,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 				}
 				return &valkeyresults{s: ret}
 			case 2:
-				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired)}}
 			}
 			for i := 0; i < len(multi); i += 2 {
 				ret[i] = newResult(strmsg('+', "OK"), nil)
@@ -9146,7 +9146,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 				return &valkeyresults{s: ret}
 			case 2: // errConnExpired at the head of processing
 				orgMulti = multi
-				return &valkeyresults{s: []ValkeyResult{newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired)}}
 			case 3: // errConnExpired at Asking command before Multi command
 				if len(multi) != 9 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[0].Commands()) {
 					t.Fatalf("unexpected multi when errConnExpired occurred at the head of processing, %v", multi)
@@ -9154,7 +9154,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 				return &valkeyresults{s: []ValkeyResult{
 					newResult(strmsg('+', "OK"), nil),
 					newResult(strmsg('+', "1"), nil),
-					newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired),
+					NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired),
 				}}
 			case 4: // errConnExpired at Multi command
 				if len(multi) != 7 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[2].Commands()) {
@@ -9162,7 +9162,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 				}
 				return &valkeyresults{s: []ValkeyResult{
 					newResult(strmsg('+', "OK"), nil),
-					newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired),
+					NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired),
 				}}
 			case 5: // errConnExpired in the middle of transaction block
 				if len(multi) != 7 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[2].Commands()) {
@@ -9172,7 +9172,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 					newResult(strmsg('+', "OK"), nil),
 					newResult(strmsg('+', "OK"), nil),
 					newResult(strmsg('+', "QUEUE"), nil),
-					newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired),
+					NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired),
 				}}
 			case 6: // errConnExpired at Exec Command
 				if len(multi) != 7 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[2].Commands()) {
@@ -9182,7 +9182,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 					newResult(strmsg('+', "OK"), nil),
 					newResult(strmsg('+', "QUEUE"), nil),
 					newResult(strmsg('+', "QUEUE"), nil),
-					newErrResult(errConnExpired), newErrResult(errConnExpired), newErrResult(errConnExpired),
+					NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired),
 				}}
 			case 7: // errConnExpired at end of processing
 				if len(multi) != 7 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[2].Commands()) {
@@ -9197,7 +9197,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 						strmsg('+', "3"),
 					}), nil),
 					newResult(strmsg('+', "OK"), nil),
-					newErrResult(errConnExpired),
+					NewErrorResult(errConnExpired),
 				}}
 			case 8:
 				if len(multi) != 2 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[7].Commands()) {
@@ -9243,7 +9243,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 		var attempts int64
 		m.DoMultiCacheFn = func(multi ...CacheableTTL) *valkeyresults {
 			if atomic.AddInt64(&attempts, 1) == 1 {
-				return &valkeyresults{s: []ValkeyResult{newErrResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{NewErrorResult(errConnExpired)}}
 			}
 			// recover the failure of the first call
 			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
@@ -9258,7 +9258,7 @@ func TestClusterClientConnLifetime(t *testing.T) {
 		var attempts int64
 		m.DoMultiCacheFn = func(multi ...CacheableTTL) *valkeyresults {
 			if atomic.AddInt64(&attempts, 1) == 1 {
-				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil), newErrResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil), NewErrorResult(errConnExpired)}}
 			}
 			// recover the failure of the first call
 			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}

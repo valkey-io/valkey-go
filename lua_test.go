@@ -544,7 +544,7 @@ func TestNewLuaScriptWithLoadSha1Error(t *testing.T) {
 		DoFn: func(ctx context.Context, cmd Completed) (resp ValkeyResult) {
 			commands := cmd.Commands()
 			if reflect.DeepEqual(commands, []string{"SCRIPT", "LOAD", body}) {
-				return newErrResult(expectedErr)
+				return NewErrorResult(expectedErr)
 			}
 			t.Fatal("unexpected command")
 			return newResult(strmsg('+', "unexpected"), nil)
@@ -813,7 +813,7 @@ func TestNewLuaScript_MayRetryable(t *testing.T) {
 			for _, e := range expects {
 				if reflect.DeepEqual(commands, e.commands) {
 					if cmd.IsReadOnly() != e.attr.ReadOnly || cmd.IsRetryable() != e.attr.Retryable {
-						return newErrResult(fmt.Errorf("cmd attr not match, %v %v %v %v", cmd.IsReadOnly(), e.attr.ReadOnly, cmd.IsRetryable(), e.attr.Retryable))
+						return NewErrorResult(fmt.Errorf("cmd attr not match, %v %v %v %v", cmd.IsReadOnly(), e.attr.ReadOnly, cmd.IsRetryable(), e.attr.Retryable))
 					}
 					return e.reply
 				}
@@ -827,7 +827,7 @@ func TestNewLuaScript_MayRetryable(t *testing.T) {
 				for _, e := range expects {
 					if reflect.DeepEqual(commands, e.commands) {
 						if cmd.IsReadOnly() != e.attr.ReadOnly || cmd.IsRetryable() != e.attr.Retryable {
-							resp = append(resp, newErrResult(fmt.Errorf("cmd attr not match, %v %v %v %v", cmd.IsReadOnly(), e.attr.ReadOnly, cmd.IsRetryable(), e.attr.Retryable)))
+							resp = append(resp, NewErrorResult(fmt.Errorf("cmd attr not match, %v %v %v %v", cmd.IsReadOnly(), e.attr.ReadOnly, cmd.IsRetryable(), e.attr.Retryable)))
 						} else {
 							resp = append(resp, e.reply)
 						}

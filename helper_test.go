@@ -247,7 +247,7 @@ func TestMGetCache(t *testing.T) {
 			m.DoMultiCacheFn = func(multi ...CacheableTTL) *valkeyresults {
 				result := make([]ValkeyResult, len(multi))
 				for i := range result {
-					result[i] = newErrResult(context.Canceled)
+					result[i] = NewErrorResult(context.Canceled)
 				}
 				return &valkeyresults{s: result}
 			}
@@ -401,7 +401,7 @@ func TestMGet(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 			m.DoMultiFn = func(cmd ...Completed) *valkeyresults {
-				return &valkeyresults{s: []ValkeyResult{newErrResult(context.Canceled), newErrResult(context.Canceled)}}
+				return &valkeyresults{s: []ValkeyResult{NewErrorResult(context.Canceled), NewErrorResult(context.Canceled)}}
 			}
 			if v, err := MGet(client, ctx, []string{"1", "2"}); err != context.Canceled {
 				t.Fatalf("unexpected response %v %v", v, err)
@@ -542,7 +542,7 @@ func TestMDel(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 			m.DoMultiFn = func(cmd ...Completed) *valkeyresults {
-				return &valkeyresults{s: []ValkeyResult{newErrResult(context.Canceled), newErrResult(context.Canceled)}}
+				return &valkeyresults{s: []ValkeyResult{NewErrorResult(context.Canceled), NewErrorResult(context.Canceled)}}
 			}
 			if v := MDel(client, ctx, []string{"1", "2"}); v["1"] != context.Canceled || v["2"] != context.Canceled {
 				t.Fatalf("unexpected response %v %v", v, err)
@@ -693,7 +693,7 @@ func TestMSet(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 			m.DoMultiFn = func(cmd ...Completed) *valkeyresults {
-				return &valkeyresults{s: []ValkeyResult{newErrResult(context.Canceled), newErrResult(context.Canceled)}}
+				return &valkeyresults{s: []ValkeyResult{NewErrorResult(context.Canceled), NewErrorResult(context.Canceled)}}
 			}
 			if err := MSet(client, ctx, map[string]string{"1": "1", "2": "2"}); err["1"] != context.Canceled || err["2"] != context.Canceled {
 				t.Fatalf("unexpected response %v", err)
@@ -844,7 +844,7 @@ func TestMSetNX(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 			m.DoMultiFn = func(cmd ...Completed) *valkeyresults {
-				return &valkeyresults{s: []ValkeyResult{newErrResult(context.Canceled), newErrResult(context.Canceled)}}
+				return &valkeyresults{s: []ValkeyResult{NewErrorResult(context.Canceled), NewErrorResult(context.Canceled)}}
 			}
 			if err := MSetNX(client, ctx, map[string]string{"1": "1", "2": "2"}); err["1"] != context.Canceled || err["2"] != context.Canceled {
 				t.Fatalf("unexpected response %v", err)
@@ -1055,7 +1055,7 @@ func TestJsonMGetCache(t *testing.T) {
 			m.DoMultiCacheFn = func(multi ...CacheableTTL) *valkeyresults {
 				result := make([]ValkeyResult, len(multi))
 				for i := range result {
-					result[i] = newErrResult(context.Canceled)
+					result[i] = NewErrorResult(context.Canceled)
 				}
 				return &valkeyresults{s: result}
 			}
@@ -1213,7 +1213,7 @@ func TestJsonMGet(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 			m.DoMultiFn = func(cmd ...Completed) *valkeyresults {
-				return &valkeyresults{s: []ValkeyResult{newErrResult(context.Canceled), newErrResult(context.Canceled)}}
+				return &valkeyresults{s: []ValkeyResult{NewErrorResult(context.Canceled), NewErrorResult(context.Canceled)}}
 			}
 			if v, err := JsonMGet(client, ctx, []string{"1", "2"}, "$"); err != context.Canceled {
 				t.Fatalf("unexpected response %v %v", v, err)
@@ -1364,7 +1364,7 @@ func TestJsonMSet(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 			m.DoMultiFn = func(cmd ...Completed) *valkeyresults {
-				return &valkeyresults{s: []ValkeyResult{newErrResult(context.Canceled), newErrResult(context.Canceled)}}
+				return &valkeyresults{s: []ValkeyResult{NewErrorResult(context.Canceled), NewErrorResult(context.Canceled)}}
 			}
 			if err := JsonMSet(client, ctx, map[string]string{"1": "1", "2": "2"}, "$"); err["1"] != context.Canceled || err["2"] != context.Canceled {
 				t.Fatalf("unexpected response %v", err)
@@ -1987,7 +1987,7 @@ func TestClusterHelpersMgetcmdspRecycle(t *testing.T) {
 			out := make([]ValkeyResult, len(cmd))
 			for i, c := range cmd {
 				if c.Commands()[1] == "{x}dead" {
-					out[i] = newErrResult(context.DeadlineExceeded)
+					out[i] = NewErrorResult(context.DeadlineExceeded)
 				} else {
 					out[i] = newResult(strmsg('+', "OK"), nil)
 				}
@@ -2099,7 +2099,7 @@ func TestClusterHelpersMgetcmdspRecycle(t *testing.T) {
 					}
 					out[i] = newResult(slicemsg('*', vals), nil)
 				} else {
-					out[i] = newErrResult(context.Canceled)
+					out[i] = NewErrorResult(context.Canceled)
 				}
 			}
 			return &valkeyresults{s: out}
@@ -2117,7 +2117,7 @@ func TestClusterHelpersMgetcmdspRecycle(t *testing.T) {
 		m.DoMultiFn = func(cmd ...Completed) *valkeyresults {
 			s := make([]ValkeyResult, len(cmd))
 			for i := range s {
-				s[i] = newErrResult(context.Canceled)
+				s[i] = NewErrorResult(context.Canceled)
 			}
 			return &valkeyresults{s: s}
 		}
@@ -2201,7 +2201,7 @@ func TestClusterHelpersMgetcmdspRecycle(t *testing.T) {
 					}
 					out[i] = newResult(slicemsg('*', vals), nil)
 				} else {
-					out[i] = newErrResult(context.Canceled)
+					out[i] = NewErrorResult(context.Canceled)
 				}
 			}
 			return &valkeyresults{s: out}
@@ -2219,7 +2219,7 @@ func TestClusterHelpersMgetcmdspRecycle(t *testing.T) {
 		m.DoMultiFn = func(cmd ...Completed) *valkeyresults {
 			s := make([]ValkeyResult, len(cmd))
 			for i := range s {
-				s[i] = newErrResult(context.Canceled)
+				s[i] = NewErrorResult(context.Canceled)
 			}
 			return &valkeyresults{s: s}
 		}
