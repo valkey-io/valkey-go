@@ -1268,7 +1268,7 @@ func (p *pipe) DoStream(ctx context.Context, pool *pool, cmd Completed) ValkeyRe
 	cmds.CompletedCS(cmd).Verify()
 
 	if err := ctx.Err(); err != nil {
-		return ValkeyResultStream{e: err}
+		return NewErrorResultStream(err)
 	}
 
 	state := atomic.LoadInt32(&p.state)
@@ -1309,7 +1309,7 @@ func (p *pipe) DoStream(ctx context.Context, pool *pool, cmd Completed) ValkeyRe
 	atomic.AddInt32(&p.blcksig, -1)
 	p.decrWaits()
 	pool.Store(p)
-	return ValkeyResultStream{e: p.Error()}
+	return NewErrorResultStream(p.Error())
 }
 
 func (p *pipe) DoMultiStream(ctx context.Context, pool *pool, multi ...Completed) MultiValkeyResultStream {
@@ -1318,7 +1318,7 @@ func (p *pipe) DoMultiStream(ctx context.Context, pool *pool, multi ...Completed
 	}
 
 	if err := ctx.Err(); err != nil {
-		return ValkeyResultStream{e: err}
+		return NewErrorResultStream(err)
 	}
 
 	state := atomic.LoadInt32(&p.state)
@@ -1374,7 +1374,7 @@ func (p *pipe) DoMultiStream(ctx context.Context, pool *pool, multi ...Completed
 	atomic.AddInt32(&p.blcksig, -1)
 	p.decrWaits()
 	pool.Store(p)
-	return ValkeyResultStream{e: p.Error()}
+	return NewErrorResultStream(p.Error())
 }
 
 func (p *pipe) syncDo(dl time.Time, dlOk bool, cmd Completed) (resp ValkeyResult) {

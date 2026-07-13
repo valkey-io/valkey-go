@@ -1444,7 +1444,7 @@ ret:
 func (c *clusterClient) DoStream(ctx context.Context, cmd Completed) ValkeyResultStream {
 	cc, err := c.pick(ctx, cmd.Slot(), c.toReplica(cmd))
 	if err != nil {
-		return ValkeyResultStream{e: err}
+		return NewErrorResultStream(err)
 	}
 	ret := cc.DoStream(ctx, cmd)
 	cmds.PutCompleted(cmd)
@@ -1453,7 +1453,7 @@ func (c *clusterClient) DoStream(ctx context.Context, cmd Completed) ValkeyResul
 
 func (c *clusterClient) DoMultiStream(ctx context.Context, multi ...Completed) MultiValkeyResultStream {
 	if len(multi) == 0 {
-		return ValkeyResultStream{e: io.EOF}
+		return NewErrorResultStream(io.EOF)
 	}
 	slot := multi[0].Slot()
 	repl := c.toReplica(multi[0])
@@ -1469,7 +1469,7 @@ func (c *clusterClient) DoMultiStream(ctx context.Context, multi ...Completed) M
 	}
 	cc, err := c.pick(ctx, slot, repl)
 	if err != nil {
-		return ValkeyResultStream{e: err}
+		return NewErrorResultStream(err)
 	}
 	ret := cc.DoMultiStream(ctx, multi...)
 	for _, cmd := range multi {

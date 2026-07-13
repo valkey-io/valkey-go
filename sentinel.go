@@ -263,6 +263,7 @@ func (c *sentinelClient) DoStream(ctx context.Context, cmd Completed) ValkeyResu
 func (c *sentinelClient) DoMultiStream(ctx context.Context, multi ...Completed) MultiValkeyResultStream {
 	if len(multi) == 0 {
 		return ValkeyResultStream{e: io.EOF}
+		return NewErrorResultStream(io.EOF)
 	}
 
 	cc := c.pickMulti(c.sendAllToReplica(multi))

@@ -1729,7 +1729,7 @@ func TestClusterClient(t *testing.T) {
 			return ValkeyResult{}
 		},
 		DoStreamFn: func(cmd Completed) ValkeyResultStream {
-			return ValkeyResultStream{e: errors.New(cmd.Commands()[1])}
+			return NewErrorResultStream(errors.New(cmd.Commands()[1]))
 		},
 		DoMultiFn: func(multi ...Completed) *valkeyresults {
 			resps := make([]ValkeyResult, len(multi))
@@ -4045,7 +4045,7 @@ func TestClusterClientErr(t *testing.T) {
 				return NewErrorResult(v)
 			},
 			DoStreamFn: func(cmd Completed) ValkeyResultStream {
-				return ValkeyResultStream{e: v}
+				return NewErrorResultStream(v)
 			},
 			DoMultiFn: func(multi ...Completed) *valkeyresults {
 				res := make([]ValkeyResult, len(multi))

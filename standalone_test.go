@@ -76,7 +76,7 @@ func TestNewStandaloneClientDelegation(t *testing.T) {
 			return &valkeyresults{s: []ValkeyResult{NewErrorResult(errors.New("primary"))}}
 		},
 		DoStreamFn: func(cmd Completed) ValkeyResultStream {
-			return ValkeyResultStream{e: errors.New("primary")}
+			return NewErrorResultStream(errors.New("primary"))
 		},
 		DoMultiStreamFn: func(cmd ...Completed) MultiValkeyResultStream {
 			return MultiValkeyResultStream{e: errors.New("primary")}
@@ -99,7 +99,7 @@ func TestNewStandaloneClientDelegation(t *testing.T) {
 			return &valkeyresults{s: []ValkeyResult{NewErrorResult(errors.New("replica"))}}
 		},
 		DoStreamFn: func(cmd Completed) ValkeyResultStream {
-			return ValkeyResultStream{e: errors.New("replica")}
+			return NewErrorResultStream(errors.New("replica"))
 		},
 		DoMultiStreamFn: func(cmd ...Completed) MultiValkeyResultStream {
 			return MultiValkeyResultStream{e: errors.New("replica")}
@@ -483,7 +483,7 @@ func TestStandaloneDoStreamToReplica(t *testing.T) {
 	primaryConn := &mockConn{
 		DialFn: func() error { return nil },
 		DoStreamFn: func(cmd Completed) ValkeyResultStream {
-			return ValkeyResultStream{e: errors.New("primary")}
+			return NewErrorResultStream(errors.New("primary"))
 		},
 	}
 
@@ -491,7 +491,7 @@ func TestStandaloneDoStreamToReplica(t *testing.T) {
 		DialFn: func() error { return nil },
 		DoStreamFn: func(cmd Completed) ValkeyResultStream {
 			replicaUsed = true
-			return ValkeyResultStream{e: errors.New("replica")}
+			return NewErrorResultStream(errors.New("replica"))
 		},
 	}
 

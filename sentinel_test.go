@@ -1165,7 +1165,7 @@ func TestSentinelClientDelegate(t *testing.T) {
 	t.Run("Delegate DoStream", func(t *testing.T) {
 		c := client.B().Get().Key("Do").Build()
 		m.DoStreamFn = func(cmd Completed) ValkeyResultStream {
-			return ValkeyResultStream{e: errors.New(cmd.Commands()[1])}
+			return NewErrorResultStream(errors.New(cmd.Commands()[1]))
 		}
 		if s := client.DoStream(context.Background(), c); s.Error().Error() != "Do" {
 			t.Fatalf("unexpected response %v", s.Error())
@@ -2667,9 +2667,7 @@ func TestSendToReplicasSentinelClientDelegate(t *testing.T) {
 
 		c := client.B().Set().Key("key").Value("value").Build()
 		m.DoStreamFn = func(cmd Completed) ValkeyResultStream {
-			return ValkeyResultStream{
-				e: errors.New("DoStream"),
-			}
+			return NewErrorResultStream(errors.New("DoStream"))
 		}
 		if s := client.DoStream(context.Background(), c); s.Error().Error() != "DoStream" {
 			t.Fatalf("unexpected response %v", s.Error())
@@ -2682,9 +2680,7 @@ func TestSendToReplicasSentinelClientDelegate(t *testing.T) {
 
 		c := client.B().Get().Key("Do").Build()
 		r.DoStreamFn = func(cmd Completed) ValkeyResultStream {
-			return ValkeyResultStream{
-				e: errors.New("DoStream"),
-			}
+			return NewErrorResultStream(errors.New("DoStream"))
 		}
 		if s := client.DoStream(context.Background(), c); s.Error().Error() != "DoStream" {
 			t.Fatalf("unexpected response %v", s.Error())
@@ -3161,9 +3157,7 @@ func TestReplicaOnlySentinelClientDelegate(t *testing.T) {
 
 		c := client.B().Get().Key("Do").Build()
 		r.DoStreamFn = func(cmd Completed) ValkeyResultStream {
-			return ValkeyResultStream{
-				e: errors.New("DoStream"),
-			}
+			return NewErrorResultStream(errors.New("DoStream"))
 		}
 		if s := client.DoStream(context.Background(), c); s.Error().Error() != "DoStream" {
 			t.Fatalf("unexpected response %v", s.Error())

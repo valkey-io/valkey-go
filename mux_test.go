@@ -659,7 +659,7 @@ func TestMuxDelegation(t *testing.T) {
 		m, checkClean := setupMux([]*mockWire{
 			{
 				DoStreamFn: func(pool *pool, cmd Completed) ValkeyResultStream {
-					return ValkeyResultStream{e: errors.New(cmd.Commands()[0])}
+					return NewErrorResultStream(errors.New(cmd.Commands()[0]))
 				},
 			},
 		})

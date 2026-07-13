@@ -294,7 +294,7 @@ func TestSingleClient(t *testing.T) {
 	t.Run("Delegate DoStream", func(t *testing.T) {
 		c := client.B().Get().Key("Do").Build()
 		m.DoStreamFn = func(cmd Completed) ValkeyResultStream {
-			return ValkeyResultStream{e: errors.New(cmd.Commands()[1])}
+			return NewErrorResultStream(errors.New(cmd.Commands()[1]))
 		}
 		if s := client.DoStream(context.Background(), c); s.Error().Error() != "Do" {
 			t.Fatalf("unexpected response %v", s.Error())
