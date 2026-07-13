@@ -15,13 +15,11 @@ import (
 )
 
 func Result(val valkey.ValkeyMessage) valkey.ValkeyResult {
-	r := result{val: val}
-	return *(*valkey.ValkeyResult)(unsafe.Pointer(&r))
+	return valkey.NewResult(val, nil)
 }
 
 func ErrorResult(err error) valkey.ValkeyResult {
-	r := result{err: err}
-	return *(*valkey.ValkeyResult)(unsafe.Pointer(&r))
+	return valkey.NewErrorResult(err)
 }
 
 func ValkeyString(v string) valkey.ValkeyMessage {
@@ -162,11 +160,6 @@ func strmsg(typ byte, value string) message {
 		bytes:   unsafe.StringData(value),
 		integer: int64(len(value)),
 	}
-}
-
-type result struct {
-	err error
-	val valkey.ValkeyMessage
 }
 
 type pool struct {
