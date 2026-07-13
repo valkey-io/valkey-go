@@ -1002,7 +1002,7 @@ func TestStandaloneReadNodeSelector(t *testing.T) {
 	t.Run("ReadNodeSelector", func(t *testing.T) {
 		primaryNodeConn := &mockConn{
 			DoFn: func(cmd Completed) ValkeyResult {
-				return newResult(strmsg('+', "primary"), nil)
+				return NewResult(strmsg('+', "primary"), nil)
 			},
 			AZFn: func() string {
 				return "us-east-1a"
@@ -1010,7 +1010,7 @@ func TestStandaloneReadNodeSelector(t *testing.T) {
 		}
 		replica1NodeConn := &mockConn{
 			DoFn: func(cmd Completed) ValkeyResult {
-				return newResult(strmsg('+', "replica1"), nil)
+				return NewResult(strmsg('+', "replica1"), nil)
 			},
 			AZFn: func() string {
 				return "us-east-1a" // Same AZ as client
@@ -1018,7 +1018,7 @@ func TestStandaloneReadNodeSelector(t *testing.T) {
 		}
 		replica2NodeConn := &mockConn{
 			DoFn: func(cmd Completed) ValkeyResult {
-				return newResult(strmsg('+', "replica2"), nil)
+				return NewResult(strmsg('+', "replica2"), nil)
 			},
 			AZFn: func() string {
 				return "us-east-1b" // Different AZ
@@ -1106,7 +1106,7 @@ func TestStandaloneClientConnLifetime(t *testing.T) {
 			if attempts == 1 {
 				return NewErrorResult(errConnExpired)
 			}
-			return newResult(strmsg('+', "OK"), nil)
+			return NewResult(strmsg('+', "OK"), nil)
 		}
 		if v, err := client.Do(context.Background(), client.B().Set().Key("k").Value("v").Build()).ToString(); err != nil || v != "OK" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -1126,8 +1126,8 @@ func TestStandaloneClientConnLifetime(t *testing.T) {
 				}}
 			}
 			return &valkeyresults{s: []ValkeyResult{
-				newResult(strmsg('+', "1"), nil),
-				newResult(strmsg('+', "2"), nil),
+				NewResult(strmsg('+', "1"), nil),
+				NewResult(strmsg('+', "2"), nil),
 			}}
 		}
 		resps := client.DoMulti(context.Background(),
@@ -1152,12 +1152,12 @@ func TestStandaloneClientConnLifetime(t *testing.T) {
 			attempts++
 			if attempts == 1 {
 				return &valkeyresults{s: []ValkeyResult{
-					newResult(strmsg('+', "OK"), nil),
+					NewResult(strmsg('+', "OK"), nil),
 					NewErrorResult(errConnExpired),
 				}}
 			}
 			return &valkeyresults{s: []ValkeyResult{
-				newResult(strmsg('+', "OK"), nil),
+				NewResult(strmsg('+', "OK"), nil),
 			}}
 		}
 		resps := client.DoMulti(context.Background(),
@@ -1183,7 +1183,7 @@ func TestStandaloneClientConnLifetime(t *testing.T) {
 			if attempts == 1 {
 				return &valkeyresults{s: []ValkeyResult{NewErrorResult(errConnExpired)}}
 			}
-			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil)}}
 		}
 		resps := client.DoMulti(context.Background(),
 			client.B().Get().Key("k").Build(),
@@ -1204,7 +1204,7 @@ func TestStandaloneClientConnLifetime(t *testing.T) {
 			if attempts == 1 {
 				return &valkeyresults{s: []ValkeyResult{NewErrorResult(errConnExpired)}}
 			}
-			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil)}}
 		}
 
 		client, err := newStandaloneClient(

@@ -284,7 +284,7 @@ func TestSingleClient(t *testing.T) {
 			if !reflect.DeepEqual(cmd.Commands(), c.Commands()) {
 				t.Fatalf("unexpected command %v", cmd)
 			}
-			return newResult(strmsg('+', "Do"), nil)
+			return NewResult(strmsg('+', "Do"), nil)
 		}
 		if v, err := client.Do(context.Background(), c).ToString(); err != nil || v != "Do" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -307,7 +307,7 @@ func TestSingleClient(t *testing.T) {
 			if !reflect.DeepEqual(cmd[0].Commands(), c.Commands()) {
 				t.Fatalf("unexpected command %v", cmd)
 			}
-			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "Do"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "Do"), nil)}}
 		}
 		if len(client.DoMulti(context.Background())) != 0 {
 			t.Fatalf("unexpected response length")
@@ -336,7 +336,7 @@ func TestSingleClient(t *testing.T) {
 			if !reflect.DeepEqual(cmd.Commands(), c.Commands()) || ttl != 100 {
 				t.Fatalf("unexpected command %v, %v", cmd, ttl)
 			}
-			return newResult(strmsg('+', "DoCache"), nil)
+			return NewResult(strmsg('+', "DoCache"), nil)
 		}
 		if v, err := client.DoCache(context.Background(), c, 100).ToString(); err != nil || v != "DoCache" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -349,7 +349,7 @@ func TestSingleClient(t *testing.T) {
 			if !reflect.DeepEqual(multi[0].Cmd.Commands(), c.Commands()) || multi[0].TTL != 100 {
 				t.Fatalf("unexpected command %v, %v", multi[0].Cmd, multi[0].TTL)
 			}
-			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "DoCache"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "DoCache"), nil)}}
 		}
 		if len(client.DoMultiCache(context.Background())) != 0 {
 			t.Fatalf("unexpected response length")
@@ -423,10 +423,10 @@ func TestSingleClient(t *testing.T) {
 		closed := false
 		w := &mockWire{
 			DoFn: func(cmd Completed) ValkeyResult {
-				return newResult(strmsg('+', "Delegate"), nil)
+				return NewResult(strmsg('+', "Delegate"), nil)
 			},
 			DoMultiFn: func(cmd ...Completed) *valkeyresults {
-				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "Delegate"), nil)}}
+				return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "Delegate"), nil)}}
 			},
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 				return ErrClosing
@@ -489,10 +489,10 @@ func TestSingleClient(t *testing.T) {
 		closed := false
 		w := &mockWire{
 			DoFn: func(cmd Completed) ValkeyResult {
-				return newResult(strmsg('+', "Delegate"), nil)
+				return NewResult(strmsg('+', "Delegate"), nil)
 			},
 			DoMultiFn: func(cmd ...Completed) *valkeyresults {
-				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "Delegate"), nil)}}
+				return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "Delegate"), nil)}}
 			},
 			ReceiveFn: func(ctx context.Context, subscribe Completed, fn func(message PubSubMessage)) error {
 				return ErrClosing
@@ -692,7 +692,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 		c, m := setup()
 		m.DoFn = makeDoFn(
 			NewErrorResult(ErrClosing),
-			newResult(strmsg('+', "Do"), nil),
+			NewResult(strmsg('+', "Do"), nil),
 		)
 		if v, err := c.Do(context.Background(), c.B().Get().Key("Do").Build()).ToString(); err != nil || v != "Do" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -743,7 +743,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 		}
 		m.DoFn = makeDoFn(
 			NewErrorResult(ErrClosing),
-			newResult(strmsg('+', "Do"), nil),
+			NewResult(strmsg('+', "Do"), nil),
 		)
 		if v, err := c.Do(context.Background(), c.B().Get().Key("Do").Build()).ToString(); !errors.Is(err, ErrClosing) {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -762,7 +762,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 		c, m := setup()
 		m.DoFn = makeDoFn(
 			NewErrorResult(ErrClosing),
-			newResult(strmsg('+', "Do"), nil),
+			NewResult(strmsg('+', "Do"), nil),
 		)
 		if v, err := c.Do(context.Background(), c.B().Set().Key("Do").Value("V").Build().ToRetryable()).ToString(); err != nil || v != "Do" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -773,7 +773,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 		c, m := setup()
 		m.DoMultiFn = makeDoMultiFn(
 			[]ValkeyResult{NewErrorResult(ErrClosing)},
-			[]ValkeyResult{newResult(strmsg('+', "Do"), nil)},
+			[]ValkeyResult{NewResult(strmsg('+', "Do"), nil)},
 		)
 		if v, err := c.DoMulti(context.Background(), c.B().Get().Key("Do").Build())[0].ToString(); err != nil || v != "Do" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -832,7 +832,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 		}
 		m.DoMultiFn = makeDoMultiFn(
 			[]ValkeyResult{NewErrorResult(ErrClosing)},
-			[]ValkeyResult{newResult(strmsg('+', "Do"), nil)},
+			[]ValkeyResult{NewResult(strmsg('+', "Do"), nil)},
 		)
 		if v, err := c.DoMulti(context.Background(), c.B().Get().Key("Do").Build())[0].ToString(); !errors.Is(err, ErrClosing) {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -851,7 +851,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 		c, m := setup()
 		m.DoMultiFn = makeDoMultiFn(
 			[]ValkeyResult{NewErrorResult(ErrClosing)},
-			[]ValkeyResult{newResult(strmsg('+', "Do"), nil)},
+			[]ValkeyResult{NewResult(strmsg('+', "Do"), nil)},
 		)
 		if v, err := c.DoMulti(context.Background(), c.B().Set().Key("Do").Value("V").Build().ToRetryable())[0].ToString(); err != nil || v != "Do" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -862,7 +862,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 		c, m := setup()
 		m.DoCacheFn = makeDoCacheFn(
 			NewErrorResult(ErrClosing),
-			newResult(strmsg('+', "Do"), nil),
+			NewResult(strmsg('+', "Do"), nil),
 		)
 		if v, err := c.DoCache(context.Background(), c.B().Get().Key("Do").Cache(), 0).ToString(); err != nil || v != "Do" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -913,7 +913,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 		}
 		m.DoCacheFn = makeDoCacheFn(
 			NewErrorResult(ErrClosing),
-			newResult(strmsg('+', "Do"), nil),
+			NewResult(strmsg('+', "Do"), nil),
 		)
 		if v, err := c.DoCache(context.Background(), c.B().Get().Key("Do").Cache(), 0).ToString(); !errors.Is(err, ErrClosing) {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -924,7 +924,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 		c, m := setup()
 		m.DoMultiCacheFn = makeDoMultiCacheFn(
 			[]ValkeyResult{NewErrorResult(ErrClosing)},
-			[]ValkeyResult{newResult(strmsg('+', "Do"), nil)},
+			[]ValkeyResult{NewResult(strmsg('+', "Do"), nil)},
 		)
 		if v, err := c.DoMultiCache(context.Background(), CT(c.B().Get().Key("Do").Cache(), 0))[0].ToString(); err != nil || v != "Do" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -983,7 +983,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 		}
 		m.DoMultiCacheFn = makeDoMultiCacheFn(
 			[]ValkeyResult{NewErrorResult(ErrClosing)},
-			[]ValkeyResult{newResult(strmsg('+', "Do"), nil)},
+			[]ValkeyResult{NewResult(strmsg('+', "Do"), nil)},
 		)
 		if v, err := c.DoMultiCache(context.Background(), CT(c.B().Get().Key("Do").Cache(), 0))[0].ToString(); !errors.Is(err, ErrClosing) {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -1050,7 +1050,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 		c, m := setup()
 		m.DoFn = makeDoFn(
 			NewErrorResult(ErrClosing),
-			newResult(strmsg('+', "Do"), nil),
+			NewResult(strmsg('+', "Do"), nil),
 		)
 		m.AcquireFn = func() wire { return &mockWire{DoFn: m.DoFn} }
 		if ret := c.Dedicated(func(cc DedicatedClient) error {
@@ -1092,7 +1092,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 		c, m := setup()
 		m.DoFn = makeDoFn(
 			NewErrorResult(ErrClosing),
-			newResult(strmsg('+', "Do"), nil),
+			NewResult(strmsg('+', "Do"), nil),
 		)
 		m.AcquireFn = func() wire { return &mockWire{DoFn: m.DoFn} }
 		if ret := c.Dedicated(func(cc DedicatedClient) error {
@@ -1135,7 +1135,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 		c, m := setup()
 		m.DoFn = makeDoFn(
 			NewErrorResult(ErrClosing),
-			newResult(strmsg('+', "Do"), nil),
+			NewResult(strmsg('+', "Do"), nil),
 		)
 		m.AcquireFn = func() wire { return &mockWire{DoFn: m.DoFn} }
 		if ret := c.Dedicated(func(cc DedicatedClient) error {
@@ -1152,7 +1152,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 		c, m := setup()
 		m.DoMultiFn = makeDoMultiFn(
 			[]ValkeyResult{NewErrorResult(ErrClosing)},
-			[]ValkeyResult{newResult(strmsg('+', "Do"), nil)},
+			[]ValkeyResult{NewResult(strmsg('+', "Do"), nil)},
 		)
 		m.AcquireFn = func() wire { return &mockWire{DoMultiFn: m.DoMultiFn} }
 		if ret := c.Dedicated(func(cc DedicatedClient) error {
@@ -1194,7 +1194,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 		c, m := setup()
 		m.DoMultiFn = makeDoMultiFn(
 			[]ValkeyResult{NewErrorResult(ErrClosing)},
-			[]ValkeyResult{newResult(strmsg('+', "Do"), nil)},
+			[]ValkeyResult{NewResult(strmsg('+', "Do"), nil)},
 		)
 		m.AcquireFn = func() wire { return &mockWire{DoMultiFn: m.DoMultiFn} }
 		if ret := c.Dedicated(func(cc DedicatedClient) error {
@@ -1237,7 +1237,7 @@ func SetupClientRetry(t *testing.T, fn func(mock *mockConn) Client) {
 		c, m := setup()
 		m.DoMultiFn = makeDoMultiFn(
 			[]ValkeyResult{NewErrorResult(ErrClosing)},
-			[]ValkeyResult{newResult(strmsg('+', "Do"), nil)},
+			[]ValkeyResult{NewResult(strmsg('+', "Do"), nil)},
 		)
 		m.AcquireFn = func() wire { return &mockWire{DoMultiFn: m.DoMultiFn} }
 		if ret := c.Dedicated(func(cc DedicatedClient) error {
@@ -1342,9 +1342,9 @@ func TestSingleClientLoadingRetry(t *testing.T) {
 		m.DoFn = func(cmd Completed) ValkeyResult {
 			attempts++
 			if attempts == 1 {
-				return newResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)
+				return NewResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)
 			}
-			return newResult(strmsg('+', "OK"), nil)
+			return NewResult(strmsg('+', "OK"), nil)
 		}
 
 		if v, err := client.Do(context.Background(), client.B().Get().Key("test").Build()).ToString(); err != nil || v != "OK" {
@@ -1361,9 +1361,9 @@ func TestSingleClientLoadingRetry(t *testing.T) {
 		m.DoFn = func(cmd Completed) ValkeyResult {
 			attempts++
 			if attempts == 1 {
-				return newResult(strmsg('-', "ERR some other error"), nil)
+				return NewResult(strmsg('-', "ERR some other error"), nil)
 			}
-			return newResult(strmsg('+', "OK"), nil)
+			return NewResult(strmsg('+', "OK"), nil)
 		}
 
 		if err := client.Do(context.Background(), client.B().Get().Key("test").Build()).Error(); err == nil {
@@ -1380,9 +1380,9 @@ func TestSingleClientLoadingRetry(t *testing.T) {
 		m.DoMultiFn = func(multi ...Completed) *valkeyresults {
 			attempts++
 			if attempts == 1 {
-				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)}}
+				return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)}}
 			}
-			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil)}}
 		}
 
 		cmd := client.B().Get().Key("test").Build()
@@ -1401,9 +1401,9 @@ func TestSingleClientLoadingRetry(t *testing.T) {
 		m.DoCacheFn = func(cmd Cacheable, ttl time.Duration) ValkeyResult {
 			attempts++
 			if attempts == 1 {
-				return newResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)
+				return NewResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)
 			}
-			return newResult(strmsg('+', "OK"), nil)
+			return NewResult(strmsg('+', "OK"), nil)
 		}
 
 		cmd := client.B().Get().Key("test").Cache()
@@ -1418,9 +1418,9 @@ func TestSingleClientLoadingRetry(t *testing.T) {
 		m.DoMultiCacheFn = func(multi ...CacheableTTL) *valkeyresults {
 			attempts++
 			if attempts == 1 {
-				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)}}
+				return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)}}
 			}
-			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil)}}
 		}
 
 		cmd := client.B().Get().Key("test").Cache()
@@ -1439,9 +1439,9 @@ func TestSingleClientLoadingRetry(t *testing.T) {
 		m.DoFn = func(cmd Completed) ValkeyResult {
 			attempts++
 			if attempts == 1 {
-				return newResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)
+				return NewResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)
 			}
-			return newResult(strmsg('+', "OK"), nil)
+			return NewResult(strmsg('+', "OK"), nil)
 		}
 		m.AcquireFn = func() wire { return &mockWire{DoFn: m.DoFn} }
 
@@ -1462,9 +1462,9 @@ func TestSingleClientLoadingRetry(t *testing.T) {
 		m.DoMultiFn = func(multi ...Completed) *valkeyresults {
 			attempts++
 			if attempts == 1 {
-				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)}}
+				return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('-', "LOADING Valkey is loading the dataset in memory"), nil)}}
 			}
-			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil)}}
 		}
 		m.AcquireFn = func() wire { return &mockWire{DoMultiFn: m.DoMultiFn} }
 
@@ -1504,7 +1504,7 @@ func TestSingleClientConnLifetime(t *testing.T) {
 	t.Run("Do", func(t *testing.T) {
 		client, m := setup()
 		m.DoFn = func(cmd Completed) ValkeyResult {
-			return newResult(strmsg('+', "OK"), nil)
+			return NewResult(strmsg('+', "OK"), nil)
 		}
 		if v, err := client.Do(context.Background(), client.B().Get().Key("Do").Build()).ToString(); err != nil || v != "OK" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -1514,7 +1514,7 @@ func TestSingleClientConnLifetime(t *testing.T) {
 	t.Run("DoMulti", func(t *testing.T) {
 		client, m := setup()
 		m.DoMultiFn = func(multi ...Completed) *valkeyresults {
-			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil)}}
 		}
 		if v, err := client.DoMulti(context.Background(), client.B().Get().Key("Do").Build())[0].ToString(); err != nil || v != "OK" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -1529,7 +1529,7 @@ func TestSingleClientConnLifetime(t *testing.T) {
 			if attempts == 1 {
 				return &valkeyresults{s: []ValkeyResult{NewErrorResult(errConnExpired)}}
 			}
-			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil)}}
 		}
 		if v, err := client.DoMulti(context.Background(), client.B().Get().Key("Do").Build())[0].ToString(); err != nil || v != "OK" {
 			t.Fatalf("unexpected response %v %v", v, err)
@@ -1542,10 +1542,10 @@ func TestSingleClientConnLifetime(t *testing.T) {
 		m.DoMultiFn = func(multi ...Completed) *valkeyresults {
 			attempts++
 			if attempts == 1 {
-				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil), NewErrorResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil), NewErrorResult(errConnExpired)}}
 			}
 			// recover the failure of the first call
-			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil)}}
 		}
 		resps := client.DoMulti(context.Background(), client.B().Get().Key("Do").Build(), client.B().Get().Key("Do").Build())
 		if len(resps) != 2 {
@@ -1573,7 +1573,7 @@ func TestSingleClientConnLifetime(t *testing.T) {
 					t.Fatalf("unexpected multi when errConnExpired occurred at the head of processing, %v", multi)
 				}
 				return &valkeyresults{s: []ValkeyResult{
-					newResult(strmsg('+', "1"), nil),
+					NewResult(strmsg('+', "1"), nil),
 					NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired),
 				}}
 			case 3: // errConnExpired in the middle of transaction block
@@ -1581,8 +1581,8 @@ func TestSingleClientConnLifetime(t *testing.T) {
 					t.Fatalf("unexpected multi when errConnExpired occurred at Multi Command, %v", multi)
 				}
 				return &valkeyresults{s: []ValkeyResult{
-					newResult(strmsg('+', "OK"), nil),
-					newResult(strmsg('+', "QUEUE"), nil),
+					NewResult(strmsg('+', "OK"), nil),
+					NewResult(strmsg('+', "QUEUE"), nil),
 					NewErrorResult(errConnExpired), NewErrorResult(errConnExpired), NewErrorResult(errConnExpired),
 				}}
 			case 4: // errConnExpired at Exec Command
@@ -1590,19 +1590,19 @@ func TestSingleClientConnLifetime(t *testing.T) {
 					t.Fatalf("unexpected multi when errConnExpired occurred in the middle of transaction block, %v", multi)
 				}
 				return &valkeyresults{s: []ValkeyResult{
-					newResult(strmsg('+', "OK"), nil),
-					newResult(strmsg('+', "QUEUE"), nil),
-					newResult(strmsg('+', "QUEUE"), nil),
+					NewResult(strmsg('+', "OK"), nil),
+					NewResult(strmsg('+', "QUEUE"), nil),
+					NewResult(strmsg('+', "QUEUE"), nil),
 					NewErrorResult(errConnExpired), NewErrorResult(errConnExpired)}}
 			case 5: // errConnExpired at end of processing
 				if len(multi) != 5 || !reflect.DeepEqual(multi[0].Commands(), orgMulti[1].Commands()) {
 					t.Fatalf("unexpected multi when errConnExpired occurred at at Exec Command, %v", multi)
 				}
 				return &valkeyresults{s: []ValkeyResult{
-					newResult(strmsg('+', "OK"), nil),
-					newResult(strmsg('+', "QUEUE"), nil),
-					newResult(strmsg('+', "QUEUE"), nil),
-					newResult(slicemsg('*', []ValkeyMessage{
+					NewResult(strmsg('+', "OK"), nil),
+					NewResult(strmsg('+', "QUEUE"), nil),
+					NewResult(strmsg('+', "QUEUE"), nil),
+					NewResult(slicemsg('*', []ValkeyMessage{
 						strmsg('+', "2"),
 						strmsg('+', "3"),
 					}), nil),
@@ -1613,7 +1613,7 @@ func TestSingleClientConnLifetime(t *testing.T) {
 					t.Fatalf("unexpected multi when errConnExpired occurred at end of processing, %v", multi)
 				}
 			}
-			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "4"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "4"), nil)}}
 		}
 		multi := []Completed{
 			client.B().Get().Key("1{t}").Build(),
@@ -1650,7 +1650,7 @@ func TestSingleClientConnLifetime(t *testing.T) {
 	t.Run("DoMultiCache", func(t *testing.T) {
 		client, m := setup()
 		m.DoMultiCacheFn = func(multi ...CacheableTTL) *valkeyresults {
-			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil)}}
 		}
 		cmd := client.B().Get().Key("Do").Cache()
 		if v, err := client.DoMultiCache(context.Background(), CT(cmd, 0))[0].ToString(); err != nil || v != "OK" {
@@ -1666,7 +1666,7 @@ func TestSingleClientConnLifetime(t *testing.T) {
 			if attempts == 1 {
 				return &valkeyresults{s: []ValkeyResult{NewErrorResult(errConnExpired)}}
 			}
-			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil)}}
 		}
 		cmd := client.B().Get().Key("Do").Cache()
 		if v, err := client.DoMultiCache(context.Background(), CT(cmd, 0))[0].ToString(); err != nil || v != "OK" {
@@ -1680,10 +1680,10 @@ func TestSingleClientConnLifetime(t *testing.T) {
 		m.DoMultiCacheFn = func(multi ...CacheableTTL) *valkeyresults {
 			attempts++
 			if attempts == 1 {
-				return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil), NewErrorResult(errConnExpired)}}
+				return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil), NewErrorResult(errConnExpired)}}
 			}
 			// recover the failure of the first call
-			return &valkeyresults{s: []ValkeyResult{newResult(strmsg('+', "OK"), nil)}}
+			return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil)}}
 		}
 		resps := client.DoMultiCache(context.Background(), CT(client.B().Get().Key("Do").Cache(), 0), CT(client.B().Get().Key("Do").Cache(), 0))
 		if len(resps) != 2 {

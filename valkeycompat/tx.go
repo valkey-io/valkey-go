@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"time"
-	"unsafe"
 
 	"github.com/valkey-io/valkey-go"
 )
@@ -47,11 +46,7 @@ func (c *TxPipeline) Exec(ctx context.Context) ([]Cmder, error) {
 	}
 	for i, r := range results {
 		rets[i].SetErr(nil)
-		rets[i].from(*(*valkey.ValkeyResult)(unsafe.Pointer(&proxyresult{
-			err: resp[i+1].NonValkeyError(),
-			val: r,
-		})))
-
+		rets[i].from(valkey.NewResult(r, resp[i+1].NonValkeyError()))
 		if err == nil {
 			err = rets[i].Err()
 		}

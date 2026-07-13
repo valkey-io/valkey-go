@@ -1172,7 +1172,7 @@ func (c *clusterClient) askingMultiCache(cc conn, ctx context.Context, multi []C
 				}
 				results.s = append(results.s, NewErrorResult(err))
 			} else {
-				results.s = append(results.s, newResult(arr[len(arr)-1], nil))
+				results.s = append(results.s, NewResult(arr[len(arr)-1], nil))
 			}
 		}
 	}

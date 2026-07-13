@@ -693,7 +693,7 @@ func (p *pipe) _backgroundRead() (err error) {
 			skipUnsubReply = false
 			continue
 		}
-		resp := newResult(msg, err)
+		resp := NewResult(msg, err)
 		if resps != nil {
 			resps[ff] = resp
 		}
@@ -1406,7 +1406,7 @@ func (p *pipe) syncDo(dl time.Time, dlOk bool, cmd Completed) (resp ValkeyResult
 		p.conn.Close()
 		p.background() // start the background worker to clean up goroutines
 	}
-	return newResult(msg, err)
+	return NewResult(msg, err)
 }
 
 func (p *pipe) syncDoMulti(dl time.Time, dlOk bool, resp []ValkeyResult, multi []Completed) {
@@ -1449,7 +1449,7 @@ process:
 		if msg, err = syncRead(p.r); err != nil {
 			goto abort
 		}
-		resp[i] = newResult(msg, err)
+		resp[i] = NewResult(msg, err)
 	}
 	return
 abort:
@@ -1495,9 +1495,9 @@ func (p *pipe) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) Va
 	ck, cc := cmds.CacheKey(cmd)
 	now := time.Now()
 	if v, entry := p.cache.Flight(ck, cc, ttl, now); v.typ != 0 {
-		return newResult(v, nil)
+		return NewResult(v, nil)
 	} else if entry != nil {
-		return newResult(entry.Wait(ctx))
+		return NewResult(entry.Wait(ctx))
 	}
 	if cmds.IsStaticTTL(Completed(cmd)) {
 		// Wire: [OPT_IN, cmd]. The read goroutine resolves the Flight
@@ -1533,7 +1533,7 @@ func (p *pipe) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) Va
 		p.cache.Cancel(ck, cc, err)
 		return NewErrorResult(err)
 	}
-	return newResult(exec[1], nil)
+	return NewResult(exec[1], nil)
 }
 
 func (p *pipe) doCacheMGet(ctx context.Context, cmd Cacheable, ttl time.Duration) ValkeyResult {
@@ -1612,7 +1612,7 @@ func (p *pipe) doCacheMGet(ctx context.Context, cmd Cacheable, ttl time.Duration
 		}()
 		last := len(exec) - 1
 		if len(rewritten.Commands()) == len(commands) { // all cache misses
-			return newResult(exec[last], nil)
+			return NewResult(exec[last], nil)
 		}
 		partial = exec[last].values()
 	} else { // all cache hit
@@ -1691,7 +1691,7 @@ func (p *pipe) DoMultiCache(ctx context.Context, multi ...CacheableTTL) *valkeyr
 			ck, cc := cmds.CacheKey(ct.Cmd)
 			v, entry := p.cache.Flight(ck, cc, ct.TTL, now)
 			if v.typ != 0 { // cache hit for one key
-				results.s[i] = newResult(v, nil)
+				results.s[i] = NewResult(v, nil)
 				continue
 			}
 			if entry != nil {
@@ -1742,7 +1742,7 @@ func (p *pipe) DoMultiCache(ctx context.Context, multi ...CacheableTTL) *valkeyr
 	}
 
 	for i, entry := range entries.e {
-		results.s[i] = newResult(entry.Wait(ctx))
+		results.s[i] = NewResult(entry.Wait(ctx))
 	}
 
 	if len(missing) == 0 {
@@ -1781,7 +1781,7 @@ func (p *pipe) DoMultiCache(ctx context.Context, multi ...CacheableTTL) *valkeyr
 					}
 					results.s[j] = NewErrorResult(err)
 				} else {
-					results.s[j] = newResult(exec[len(exec)-1], nil)
+					results.s[j] = NewResult(exec[len(exec)-1], nil)
 				}
 				break
 			}

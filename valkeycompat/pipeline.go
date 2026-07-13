@@ -31,7 +31,6 @@ import (
 	"errors"
 	"runtime"
 	"time"
-	"unsafe"
 
 	"github.com/valkey-io/valkey-go"
 )
@@ -69,12 +68,7 @@ type Pipeliner interface {
 var _ Pipeliner = (*Pipeline)(nil)
 var _ Cmdable = (*Pipeline)(nil)
 
-type proxyresult struct {
-	err error
-	val valkey.ValkeyMessage
-}
-
-var placeholder = proxyresult{err: errors.New("the pipeline has not been executed")}
+var errPipelineNotExecuted = errors.New("the pipeline has not been executed")
 
 type proxy struct {
 	valkey.Client
@@ -83,7 +77,7 @@ type proxy struct {
 
 func (p *proxy) Do(_ context.Context, cmd valkey.Completed) valkey.ValkeyResult {
 	p.cmds = append(p.cmds, cmd)
-	return *(*valkey.ValkeyResult)(unsafe.Pointer(&placeholder))
+	return valkey.NewErrorResult(pipelineNotExeerrPipelineNotExecutedcutedErr)
 }
 
 func newPipeline(real valkey.Client) *Pipeline {
