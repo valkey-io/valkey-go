@@ -272,7 +272,7 @@ func (c *dedicatedSingleClient) Do(ctx context.Context, cmd Completed) (resp Val
 	attempts := 1
 retry:
 	if err := c.check(); err != nil {
-		return newErrResult(err)
+		return NewErrResult(err)
 	}
 	resp = c.wire.Do(ctx, cmd)
 	if c.retry && cmd.IsRetryable() && isRetryable(resp.Error(), c.wire, ctx) {
