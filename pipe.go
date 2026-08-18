@@ -1551,6 +1551,7 @@ func (p *pipe) optInCmd() cmds.Completed {
 
 func (p *pipe) DoCache(ctx context.Context, cmd Cacheable, ttl time.Duration) ValkeyResult {
 	if p.cache == nil {
+		cmds.ClearStaticTTL(&cmd)
 		return p.Do(ctx, Completed(cmd))
 	}
 
