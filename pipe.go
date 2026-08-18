@@ -1713,7 +1713,9 @@ func (p *pipe) DoMultiCache(ctx context.Context, multi ...CacheableTTL) *valkeyr
 	if p.cache == nil {
 		commands := make([]Completed, len(multi))
 		for i, ct := range multi {
-			commands[i] = Completed(ct.Cmd)
+			cmd := ct.Cmd
+			cmds.ClearStaticTTL(&cmd)
+			commands[i] = Completed(cmd)
 		}
 		return p.DoMulti(ctx, commands...)
 	}
