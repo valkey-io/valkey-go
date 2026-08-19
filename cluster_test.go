@@ -11410,3 +11410,428 @@ func clusterClientWithConnCount(n int) *clusterClient {
 	}
 	return &clusterClient{conns: conns}
 }
+
+// Tests below cover the fix for valkey-io/valkey-go#59: DoMulti / DoMultiCache
+// must re-pick unfinished commands against the current slot map between retry
+// iterations. Before the fix, a network error on a removed replica caused an
+// unbounded retry loop because retries.m re-buckets under the same dead conn.
+
+func TestClusterDoMultiRepicksAfterReplicaRemoval(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	var primaryCalls, replicaCalls, initCalls int64
+
+	initConn := &mockConn{
+		DoFn: func(cmd Completed) ValkeyResult {
+			atomic.AddInt64(&initCalls, 1)
+			if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
+				return slotsResp
+			}
+			return ValkeyResult{}
+		},
+	}
+	primaryConn := &mockConn{
+		DoFn: func(cmd Completed) ValkeyResult {
+			if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
+				return slotsResp
+			}
+			return ValkeyResult{}
+		},
+		DoMultiFn: func(multi ...Completed) *valkeyresults {
+			atomic.AddInt64(&primaryCalls, 1)
+			out := make([]ValkeyResult, len(multi))
+			for i := range multi {
+				out[i] = NewResult(strmsg('+', "OK"), nil)
+			}
+			return &valkeyresults{s: out}
+		},
+	}
+	replicaConn := &mockConn{
+		DoFn: func(cmd Completed) ValkeyResult {
+			if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
+				return slotsResp
+			}
+			return ValkeyResult{}
+		},
+		DoMultiFn: func(multi ...Completed) *valkeyresults {
+			atomic.AddInt64(&replicaCalls, 1)
+			out := make([]ValkeyResult, len(multi))
+			for i := range multi {
+				out[i] = NewErrorResult(errors.New("read: connection reset by peer"))
+			}
+			return &valkeyresults{s: out}
+		},
+	}
+
+	client, err := newClusterClient(
+		&ClientOption{
+			InitAddress:    []string{":0"},
+			SendToReplicas: func(cmd Completed) bool { return cmd.IsReadOnly() },
+		},
+		func(dst string, opt *ClientOption) conn {
+			switch dst {
+			case "127.0.0.1:0":
+				return primaryConn
+			case "127.0.1.1:1":
+				return replicaConn
+			}
+			return initConn
+		},
+		newRetryer(defaultRetryDelayFn),
+	)
+	if err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	defer client.Close()
+
+	var handlerCalls int64
+	client.retryHandler = &mockRetryHandler{
+		RetryDelayFn: func(int, Completed, error) time.Duration { return time.Microsecond },
+		WaitForRetryFn: func(ctx context.Context, d time.Duration) {
+			atomic.AddInt64(&handlerCalls, 1)
+			// Simulate lazyRefresh convergence: replica is now unreachable in
+			// topology, so rslots for its slots now point at the primary.
+			client.mu.Lock()
+			for i := range client.rslots {
+				if client.rslots[i] != nil {
+					client.rslots[i] = []NodeInfo{{conn: primaryConn, Addr: "127.0.0.1:0"}}
+				}
+			}
+			client.mu.Unlock()
+		},
+	}
+
+	cmd := client.B().Get().Key("test").Build()
+	resps := client.DoMulti(context.Background(), cmd)
+	if len(resps) != 1 {
+		t.Fatalf("unexpected response length %v", len(resps))
+	}
+	if v, err := resps[0].ToString(); err != nil || v != "OK" {
+		t.Fatalf("unexpected response %v %v", v, err)
+	}
+	if got := atomic.LoadInt64(&replicaCalls); got != 1 {
+		t.Fatalf("replica DoMulti calls = %d; want 1", got)
+	}
+	if got := atomic.LoadInt64(&primaryCalls); got != 1 {
+		t.Fatalf("primary DoMulti calls = %d; want 1", got)
+	}
+	if got := atomic.LoadInt64(&handlerCalls); got != 1 {
+		t.Fatalf("retry handler calls = %d; want 1", got)
+	}
+}
+
+func TestClusterDoMultiPreservesAskingBucketing(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	var replicaCalls, primaryCalls, targetCalls int64
+	var targetBatch []string
+	var targetMu sync.Mutex
+
+	primaryConn := &mockConn{
+		DoFn: func(cmd Completed) ValkeyResult {
+			if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
+				return slotsResp
+			}
+			return ValkeyResult{}
+		},
+		DoMultiFn: func(multi ...Completed) *valkeyresults {
+			atomic.AddInt64(&primaryCalls, 1)
+			out := make([]ValkeyResult, len(multi))
+			for i := range multi {
+				out[i] = NewResult(strmsg('+', "primary-ok"), nil)
+			}
+			return &valkeyresults{s: out}
+		},
+	}
+	replicaConn := &mockConn{
+		DoFn: func(cmd Completed) ValkeyResult {
+			if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
+				return slotsResp
+			}
+			return ValkeyResult{}
+		},
+		DoMultiFn: func(multi ...Completed) *valkeyresults {
+			atomic.AddInt64(&replicaCalls, 1)
+			out := make([]ValkeyResult, len(multi))
+			for i, cm := range multi {
+				if cm.Commands()[0] == "GET" && cm.Commands()[1] == "{t}k1" {
+					out[i] = NewResult(strmsg('-', "ASK 0 127.0.0.99:0"), nil)
+				} else {
+					out[i] = NewErrorResult(errors.New("read: connection reset by peer"))
+				}
+			}
+			return &valkeyresults{s: out}
+		},
+	}
+	targetConn := &mockConn{
+		DoFn: func(cmd Completed) ValkeyResult { return ValkeyResult{} },
+		DoMultiFn: func(multi ...Completed) *valkeyresults {
+			atomic.AddInt64(&targetCalls, 1)
+			targetMu.Lock()
+			for _, cm := range multi {
+				targetBatch = append(targetBatch, strings.Join(cm.Commands(), " "))
+			}
+			targetMu.Unlock()
+			out := make([]ValkeyResult, len(multi))
+			for i := range multi {
+				out[i] = NewResult(strmsg('+', "target-ok"), nil)
+			}
+			return &valkeyresults{s: out}
+		},
+	}
+
+	client, err := newClusterClient(
+		&ClientOption{
+			InitAddress:    []string{":0"},
+			SendToReplicas: func(cmd Completed) bool { return cmd.IsReadOnly() },
+		},
+		func(dst string, opt *ClientOption) conn {
+			switch dst {
+			case "127.0.0.1:0":
+				return primaryConn
+			case "127.0.1.1:1":
+				return replicaConn
+			case "127.0.0.99:0":
+				return targetConn
+			}
+			return &mockConn{
+				DoFn: func(cmd Completed) ValkeyResult {
+					if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
+						return slotsResp
+					}
+					return ValkeyResult{}
+				},
+			}
+		},
+		newRetryer(defaultRetryDelayFn),
+	)
+	if err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	defer client.Close()
+
+	client.retryHandler = &mockRetryHandler{
+		RetryDelayFn: func(int, Completed, error) time.Duration { return time.Microsecond },
+		WaitForRetryFn: func(ctx context.Context, d time.Duration) {
+			client.mu.Lock()
+			for i := range client.rslots {
+				if client.rslots[i] != nil {
+					client.rslots[i] = []NodeInfo{{conn: primaryConn, Addr: "127.0.0.1:0"}}
+				}
+			}
+			client.mu.Unlock()
+		},
+	}
+
+	// Same hash tag keeps both keys in the same slot so they initially bucket
+	// under the same replica conn.
+	cmd1 := client.B().Get().Key("{t}k1").Build()
+	cmd2 := client.B().Get().Key("{t}k2").Build()
+	resps := client.DoMulti(context.Background(), cmd1, cmd2)
+	if len(resps) != 2 {
+		t.Fatalf("unexpected response length %v", len(resps))
+	}
+	if v, err := resps[0].ToString(); err != nil || v != "target-ok" {
+		t.Fatalf("cmd1 unexpected response %v %v", v, err)
+	}
+	if v, err := resps[1].ToString(); err != nil || v != "primary-ok" {
+		t.Fatalf("cmd2 unexpected response %v %v", v, err)
+	}
+	// The ASK bucket must reach the target conn correctly (its routing is not
+	// touched by rebucketRetries). The net-error cmd must eventually reach
+	// the fresh primary via _pick after rebucketRetries.
+	if got := atomic.LoadInt64(&targetCalls); got != 1 {
+		t.Fatalf("target DoMulti calls = %d; want 1 (ASK bucket must reach target once)", got)
+	}
+	if got := atomic.LoadInt64(&primaryCalls); got == 0 {
+		t.Fatalf("primary DoMulti calls = 0; want > 0 (cmd2 must rebucket to fresh conn)")
+	}
+	if got := atomic.LoadInt64(&replicaCalls); got == 0 {
+		t.Fatalf("replica DoMulti calls = 0; want > 0 (initial batch must reach replica)")
+	}
+	targetMu.Lock()
+	defer targetMu.Unlock()
+	if len(targetBatch) < 2 || targetBatch[0] != "ASKING" || targetBatch[1] != "GET {t}k1" {
+		t.Fatalf("target batch = %v; want [ASKING GET {t}k1 ...]", targetBatch)
+	}
+}
+
+func TestClusterDoMultiCacheRepicksAfterReplicaRemoval(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	var primaryCalls, replicaCalls int64
+
+	primaryConn := &mockConn{
+		DoFn: func(cmd Completed) ValkeyResult {
+			if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
+				return slotsResp
+			}
+			return ValkeyResult{}
+		},
+		DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
+			atomic.AddInt64(&primaryCalls, 1)
+			out := make([]ValkeyResult, len(multi))
+			for i := range multi {
+				out[i] = NewResult(strmsg('+', "OK"), nil)
+			}
+			return &valkeyresults{s: out}
+		},
+	}
+	replicaConn := &mockConn{
+		DoFn: func(cmd Completed) ValkeyResult {
+			if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
+				return slotsResp
+			}
+			return ValkeyResult{}
+		},
+		DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
+			atomic.AddInt64(&replicaCalls, 1)
+			out := make([]ValkeyResult, len(multi))
+			for i := range multi {
+				out[i] = NewErrorResult(errors.New("read: connection reset by peer"))
+			}
+			return &valkeyresults{s: out}
+		},
+	}
+
+	client, err := newClusterClient(
+		&ClientOption{
+			InitAddress:    []string{":0"},
+			SendToReplicas: func(cmd Completed) bool { return cmd.IsReadOnly() },
+		},
+		func(dst string, opt *ClientOption) conn {
+			switch dst {
+			case "127.0.0.1:0":
+				return primaryConn
+			case "127.0.1.1:1":
+				return replicaConn
+			}
+			return &mockConn{
+				DoFn: func(cmd Completed) ValkeyResult {
+					if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
+						return slotsResp
+					}
+					return ValkeyResult{}
+				},
+			}
+		},
+		newRetryer(defaultRetryDelayFn),
+	)
+	if err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	defer client.Close()
+
+	client.retryHandler = &mockRetryHandler{
+		RetryDelayFn: func(int, Completed, error) time.Duration { return time.Microsecond },
+		WaitForRetryFn: func(ctx context.Context, d time.Duration) {
+			client.mu.Lock()
+			for i := range client.rslots {
+				if client.rslots[i] != nil {
+					client.rslots[i] = []NodeInfo{{conn: primaryConn, Addr: "127.0.0.1:0"}}
+				}
+			}
+			client.mu.Unlock()
+		},
+	}
+
+	cmd := client.B().Get().Key("test").Cache()
+	resps := client.DoMultiCache(context.Background(), CT(cmd, time.Second))
+	if len(resps) != 1 {
+		t.Fatalf("unexpected response length %v", len(resps))
+	}
+	if v, err := resps[0].ToString(); err != nil || v != "OK" {
+		t.Fatalf("unexpected response %v %v", v, err)
+	}
+	if got := atomic.LoadInt64(&replicaCalls); got != 1 {
+		t.Fatalf("replica DoMultiCache calls = %d; want 1", got)
+	}
+	if got := atomic.LoadInt64(&primaryCalls); got != 1 {
+		t.Fatalf("primary DoMultiCache calls = %d; want 1", got)
+	}
+}
+
+// TestClusterDoMultiTransactionStaysCoherent unit-tests rebucketRetries
+// directly. The DoMulti retry envelope's Redirects branch pre-empts the
+// RetryDelay branch whenever a transaction is detected in retries.m (see the
+// retries.Redirects++ inside doresultfn's transaction insertion), so a
+// natural DoMulti call with a transaction can never reach rebucketRetries.
+// The guard we care about is: if rebucketRetries were ever handed a bucket
+// containing a MULTI..EXEC span, the span moves as a single unit and never
+// splits across two conns.
+func TestClusterDoMultiTransactionStaysCoherent(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	oldConn := &mockConn{DoFn: func(cmd Completed) ValkeyResult { return ValkeyResult{} }}
+	newConn := &mockConn{DoFn: func(cmd Completed) ValkeyResult { return ValkeyResult{} }}
+
+	client, err := newClusterClient(
+		&ClientOption{InitAddress: []string{":0"}},
+		func(dst string, opt *ClientOption) conn {
+			return &mockConn{
+				DoFn: func(cmd Completed) ValkeyResult {
+					if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
+						return slotsResp
+					}
+					return ValkeyResult{}
+				},
+			}
+		},
+		newRetryer(defaultRetryDelayFn),
+	)
+	if err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	defer client.Close()
+
+	// Simulate lazyRefresh convergence: every slot now routes to newConn.
+	client.mu.Lock()
+	for i := range client.wslots {
+		client.wslots[i] = newConn
+	}
+	client.mu.Unlock()
+
+	multiCmd := client.B().Multi().Build()
+	setCmd := client.B().Set().Key("{t}k").Value("v").Build()
+	execCmd := client.B().Exec().Build()
+	hgetCmd := client.B().Hget().Key("{t}k").Field("f").Build()
+
+	retries := connretryp.Get(1, 1)
+	defer connretryp.Put(retries)
+	nr := retryp.Get(0, 4)
+	nr.cIndexes = append(nr.cIndexes, 0, 1, 2, 3)
+	nr.commands = append(nr.commands, multiCmd, setCmd, execCmd, hgetCmd)
+	retries.m[oldConn] = nr
+
+	client.rebucketRetries(retries)
+
+	if _, still := retries.m[oldConn]; still {
+		t.Fatalf("oldConn bucket must be drained/removed after rebucket, got %+v", retries.m[oldConn])
+	}
+	moved := retries.m[newConn]
+	if moved == nil {
+		t.Fatalf("newConn bucket missing after rebucket")
+	}
+	if len(moved.commands) != 4 {
+		t.Fatalf("expected 4 cmds on newConn bucket, got %d: %+v", len(moved.commands), moved.commands)
+	}
+	// MULTI, SET, EXEC must be present and contiguous in the moved bucket.
+	mi, si, ei := -1, -1, -1
+	for i, cm := range moved.commands {
+		switch strings.Join(cm.Commands(), " ") {
+		case "MULTI":
+			mi = i
+		case "SET {t}k v":
+			si = i
+		case "EXEC":
+			ei = i
+		}
+	}
+	if !(mi >= 0 && si == mi+1 && ei == si+1) {
+		t.Fatalf("transaction span not contiguous MULTI/SET/EXEC in moved bucket: %+v", moved.commands)
+	}
+	// cIndexes must be preserved: MULTI kept its original batch index 0, SET 1, EXEC 2.
+	if moved.cIndexes[mi] != 0 || moved.cIndexes[si] != 1 || moved.cIndexes[ei] != 2 {
+		t.Fatalf("cIndexes not preserved for transaction span: %+v", moved.cIndexes)
+	}
+}
