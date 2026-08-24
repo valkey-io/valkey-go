@@ -370,6 +370,7 @@ func TestPipeliner(t *testing.T) {
 		p.ZRangeArgsWithScores(ctx, ZRangeArgs{Key: "zset", Start: 4, Stop: 1, ByScore: true, Rev: true, Offset: 1, Count: 2})
 		p.ZRangeStore(ctx, "1", ZRangeArgs{Key: "zset", Start: 4, Stop: 1, ByScore: true, Rev: true, Offset: 1, Count: 2})
 		p.ZRank(ctx, "1", "2")
+		p.InfoMap(ctx)
 		p.ZRankWithScore(ctx, "1", "2")
 		p.ZRem(ctx, "1", "1", "2")
 		p.ZRemRangeByRank(ctx, "1", 1, 2)

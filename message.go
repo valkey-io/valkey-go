@@ -498,6 +498,14 @@ func (r ValkeyResult) AsIntMap() (v map[string]int64, err error) {
 	return
 }
 
+// AsStrStrMap delegates to ValkeyMessage.AsStrStrMap
+func (r ValkeyResult) AsStrStrMap() (map[string]map[string]string, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	return r.val.AsStrStrMap()
+}
+
 // AsScanEntry delegates to ValkeyMessage.AsScanEntry.
 func (r ValkeyResult) AsScanEntry() (v ScanEntry, err error) {
 	if r.err != nil {
@@ -1271,6 +1279,116 @@ func (m *ValkeyMessage) AsIntMap() (map[string]int64, error) {
 	}
 	typ := m.typ
 	return nil, fmt.Errorf("%w: valkey message type %s is not a map/array/set or its length is not even", errParse, typeNames[typ])
+}
+
+// AsStrStrMap parses INFO-like text into map[section]map[key]value.
+// Lines starting with '#' define sections; top-of-file keys go to "default".
+func (m *ValkeyMessage) AsStrStrMap() (map[string]map[string]string, error) {
+	if m == nil {
+		return nil, errors.New("nil message")
+	}
+	if err := m.Error(); err != nil {
+		return nil, err
+	}
+
+	parseInfoText := func(txt string) map[string]map[string]string {
+		out := make(map[string]map[string]string)
+		section := "default"
+		for _, l := range strings.Split(txt, "\n") {
+			line := strings.TrimSpace(l)
+			if line == "" {
+				continue
+			}
+			if strings.HasPrefix(strings.ToLower(line), "txt:") {
+				line = strings.TrimSpace(line[len("txt:"):])
+			}
+			if strings.HasPrefix(line, "#") {
+				sec := strings.TrimSpace(strings.TrimLeft(line, "#"))
+				if sec == "" {
+					section = "default"
+				} else {
+					section = sec
+				}
+				continue
+			}
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			k := strings.TrimSpace(parts[0])
+			v := strings.TrimSpace(parts[1])
+			if k == "" {
+				continue
+			}
+			if _, ok := out[section]; !ok {
+				out[section] = make(map[string]string)
+			}
+			out[section][k] = v
+		}
+		return out
+	}
+
+	// If the message is already a map/array of pairs, follow the AsStrMap pattern
+	// and build a map[string]map[string]string where the value side can be a
+	// nested map or a blob string representing section content.
+	if (m.IsMap() || m.IsArray()) && len(m.values())%2 == 0 {
+		out := make(map[string]map[string]string, len(m.values())/2)
+		for i := 0; i < len(m.values()); i += 2 {
+			key := m.values()[i].string()
+			valMsg := m.values()[i+1]
+
+			// If the value is itself a map/array, reuse AsStrMap to get map[string]string
+			if valMsg.IsMap() || valMsg.IsArray() {
+				vm, err := valMsg.AsStrMap()
+				if err != nil {
+					return nil, err
+				}
+				out[key] = vm
+				continue
+			}
+
+			// If the value is a string/blob, parse it as INFO-like section content
+			if valMsg.IsString() {
+				txt, err := valMsg.ToString()
+				if err != nil {
+					return nil, err
+				}
+				secMap := make(map[string]string)
+				for _, line := range strings.Split(txt, "\n") {
+					line = strings.TrimSpace(line)
+					if strings.HasPrefix(strings.ToLower(line), "txt:") {
+						line = strings.TrimSpace(line[len("txt:"):])
+					}
+					if line == "" || strings.HasPrefix(line, "#") {
+						continue
+					}
+					parts := strings.SplitN(line, ":", 2)
+					if len(parts) != 2 {
+						continue
+					}
+					k := strings.TrimSpace(parts[0])
+					v := strings.TrimSpace(parts[1])
+					if k == "" {
+						continue
+					}
+					secMap[k] = v
+				}
+				out[key] = secMap
+				continue
+			}
+
+			// Otherwise set empty map for this key
+			out[key] = make(map[string]string)
+		}
+		return out, nil
+	}
+
+	// Fallback: treat message as an INFO-like blob string and parse sections
+	txt, err := m.ToString()
+	if err != nil {
+		return nil, err
+	}
+	return parseInfoText(txt), nil
 }
 
 type KeyValues struct {

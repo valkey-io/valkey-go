@@ -922,6 +922,26 @@ func newStringStringMapCmd(res valkey.ValkeyResult) *StringStringMapCmd {
 	return cmd
 }
 
+type StringStringStringMapCmd struct {
+	baseCmd[map[string]map[string]string]
+}
+
+func (cmd *StringStringStringMapCmd) from(res valkey.ValkeyResult) {
+	val, err := res.AsStrStrMap()
+	cmd.SetErr(err)
+	if err != nil {
+		return
+	}
+	cmd.SetVal(val)
+	cmd.setIsCacheHit(res.IsCacheHit())
+}
+
+func newStringStringStringMapCmd(res valkey.ValkeyResult) *StringStringStringMapCmd {
+	cmd := &StringStringStringMapCmd{}
+	cmd.from(res)
+	return cmd
+}
+
 // Scan scans the results from the map into a destination struct. The map keys
 // are matched in the Valkey struct fields by the `valkey:"field"` tag.
 func (cmd *StringStringMapCmd) Scan(dest interface{}) error {

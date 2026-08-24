@@ -401,6 +401,13 @@ var _ = Describe("Commands", func() {
 			Expect(cmd.Err()).To(Equal(err))
 		}
 		{
+			cmd := &StringStringStringMapCmd{}
+			cmd.SetVal(map[string]map[string]string{"a": {"k": "v"}})
+			Expect(cmd.Val()).To(Equal(map[string]map[string]string{"a": {"k": "v"}}))
+			cmd.SetErr(err)
+			Expect(cmd.Err()).To(Equal(err))
+		}
+		{
 			cmd := &StringIntMapCmd{}
 			cmd.SetVal(map[string]int64{"a": 1})
 			Expect(cmd.Val()).To(Equal(map[string]int64{"a": 1}))
@@ -682,6 +689,11 @@ func testCmd(resp3 bool) {
 		tm2, err := adapter.Get(ctx, "time_key").Time()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(tm2).To(BeTemporally("==", tm))
+	})
+
+	It("InfoMap", func() {
+		cmd := adapter.InfoMap(ctx)
+		Expect(cmd.Err()).NotTo(HaveOccurred())
 	})
 }
 

@@ -422,6 +422,38 @@ func TestValkeyResult(t *testing.T) {
 		}
 	})
 
+	t.Run("AsStrStrMap", func(t *testing.T) {
+		if _, err := (ValkeyResult{err: errors.New("other")}).AsStrStrMap(); err == nil {
+			t.Fatal("AsStrStrMap not failed as expected")
+		}
+		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsStrStrMap(); err == nil {
+			t.Fatal("AsStrStrMap not failed as expected")
+		}
+		txt := `#server
+redis_version:6.2.5
+used_memory:1024
+#clients
+connected_clients:10
+`
+		res := ValkeyResult{val: strmsg(typeBlobString, txt)}
+		got, err := res.AsStrStrMap()
+		if err != nil {
+			t.Fatalf("AsStrStrMap error: %v", err)
+		}
+		want := map[string]map[string]string{
+			"server": {
+				"redis_version": "6.2.5",
+				"used_memory":   "1024",
+			},
+			"clients": {
+				"connected_clients": "10",
+			},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("unexpected parse result\n got: %#v\nwant: %#v", got, want)
+		}
+	})
+
 	t.Run("AsIntMap", func(t *testing.T) {
 		if _, err := (ValkeyResult{err: errors.New("other")}).AsIntMap(); err == nil {
 			t.Fatal("AsIntMap not failed as expected")
