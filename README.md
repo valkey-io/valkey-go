@@ -510,9 +510,9 @@ client, err := valkey.NewClient(valkey.ClientOption{
 })
 ```
 
-Note that when you opt into reading from replicas on a cluster, scaling the number of replicas on an existing shard
-(e.g. via ElastiCache modify-replication-group) neither moves slots nor closes existing connections,
-so without `ShardsRefreshInterval` the client never discovers the new replicas.
+Note that scaling the number of replicas on an existing shard (e.g. via ElastiCache modify-replication-group)
+neither moves slots nor closes existing connections, so without `ShardsRefreshInterval`
+the client never discovers the new replicas and continues reading the old shard.
 
 ```golang
 // Connect to sentinels
