@@ -444,6 +444,10 @@ type CoreCmdable interface {
 	JSONCmdable
 	SearchCmdable
 }
+type GetToBufferCmdable interface {
+	Cmdable
+	GetToBuffer(ctx context.Context, key string, buf []byte) *ZeroCopyStringCmd
+}
 
 type SearchCmdable interface {
 	FT_List(ctx context.Context) *StringSliceCmd
@@ -661,7 +665,7 @@ func WithNodeScaleoutLimit(limit int) AdapterOption {
 	}
 }
 
-func NewAdapter(client valkey.Client, options ...AdapterOption) Cmdable {
+func NewAdapter(client valkey.Client, options ...AdapterOption) GetToBufferCmdable {
 	c := &Compat{client: client, maxp: runtime.GOMAXPROCS(0)}
 	for _, opt := range options {
 		opt(c)
@@ -1002,6 +1006,27 @@ func (c *Compat) Get(ctx context.Context, key string) *StringCmd {
 	cmd := c.client.B().Get().Key(key).Build()
 	resp := c.client.Do(ctx, cmd)
 	return newStringCmd(resp)
+}
+func (c *Compat) GetToBuffer(ctx context.Context, key string, buf []byte) *ZeroCopyStringCmd {
+	cmd := &ZeroCopyStringCmd{
+		buf: buf,
+	}
+
+	stream := c.client.DoStream(
+		ctx,
+		c.client.B().Get().Key(key).Build(),
+	)
+
+	writer := &bufferWriter{
+		buf: buf,
+	}
+
+	n, err := stream.WriteTo(writer)
+
+	cmd.SetVal(int(n))
+	cmd.SetErr(err)
+
+	return cmd
 }
 
 func (c *Compat) GetRange(ctx context.Context, key string, start, end int64) *StringCmd {
