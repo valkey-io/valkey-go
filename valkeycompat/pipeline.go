@@ -367,6 +367,11 @@ func (c *Pipeline) Get(ctx context.Context, key string) *StringCmd {
 	c.rets = append(c.rets, ret)
 	return ret
 }
+func (c *Pipeline) GetToBuffer(ctx context.Context, key string, buf []byte) *ZeroCopyStringCmd {
+	ret := c.comp.GetToBuffer(ctx, key, buf)
+	c.rets = append(c.rets, ret)
+	return ret
+}
 
 func (c *Pipeline) GetRange(ctx context.Context, key string, start, end int64) *StringCmd {
 	ret := c.comp.GetRange(ctx, key, start, end)

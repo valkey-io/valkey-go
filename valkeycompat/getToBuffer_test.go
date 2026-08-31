@@ -29,7 +29,6 @@ func TestGetToBuffer(t *testing.T) {
 		}
 
 		buf := make([]byte, 32)
-
 		cmd := adapter.GetToBuffer(ctx, "gtb-basic", buf)
 
 		n, err := cmd.Result()
@@ -52,7 +51,6 @@ func TestGetToBuffer(t *testing.T) {
 		}
 
 		buf := make([]byte, 5)
-
 		cmd := adapter.GetToBuffer(ctx, "gtb-exact", buf)
 
 		n, err := cmd.Result()
@@ -75,7 +73,6 @@ func TestGetToBuffer(t *testing.T) {
 		}
 
 		buf := make([]byte, 100)
-
 		cmd := adapter.GetToBuffer(ctx, "gtb-large-buffer", buf)
 
 		n, err := cmd.Result()
@@ -98,7 +95,6 @@ func TestGetToBuffer(t *testing.T) {
 		}
 
 		buf := make([]byte, 5)
-
 		cmd := adapter.GetToBuffer(ctx, "gtb-small", buf)
 
 		_, err := cmd.Result()
@@ -108,7 +104,7 @@ func TestGetToBuffer(t *testing.T) {
 		}
 
 		if got := string(cmd.Bytes()); got != "hello" {
-			t.Fatalf("expected partial buffer %q, got %q", "hello", got)
+			t.Fatalf("expected partial value %q, got %q", "hello", got)
 		}
 	})
 
@@ -122,7 +118,6 @@ func TestGetToBuffer(t *testing.T) {
 		}
 
 		buf := make([]byte, 5)
-
 		cmd := adapter.GetToBuffer(ctx, "gtb-large", buf)
 
 		if _, err := cmd.Result(); !errors.Is(err, io.ErrShortBuffer) {
@@ -145,12 +140,13 @@ func TestGetToBuffer(t *testing.T) {
 		cmd := adapter.GetToBuffer(ctx, "gtb-missing", buf)
 
 		n, err := cmd.Result()
-		if err != nil {
-			t.Fatal(err)
-		}
 
 		if n != 0 {
 			t.Fatalf("expected n=0, got %d", n)
+		}
+
+		if !valkey.IsValkeyNil(err) {
+			t.Fatalf("expected Valkey Nil error, got %v", err)
 		}
 
 		if len(cmd.Bytes()) != 0 {
@@ -164,7 +160,6 @@ func TestGetToBuffer(t *testing.T) {
 		}
 
 		buf := make([]byte, 32)
-
 		cmd := adapter.GetToBuffer(ctx, "gtb-empty", buf)
 
 		n, err := cmd.Result()
@@ -175,17 +170,20 @@ func TestGetToBuffer(t *testing.T) {
 		if n != 0 {
 			t.Fatalf("expected n=0, got %d", n)
 		}
+
+		if len(cmd.Bytes()) != 0 {
+			t.Fatalf("expected empty bytes, got %d", len(cmd.Bytes()))
+		}
 	})
 
 	t.Run("binary payload", func(t *testing.T) {
-		value := string([]byte{0x00, 0x01, 0xff, 0x7f, 0x80})
+		value := []byte{0x00, 0x01, 0xff, 0x7f, 0x80}
 
-		if err := adapter.Set(ctx, "gtb-binary", value, 0).Err(); err != nil {
+		if err := adapter.Set(ctx, "gtb-binary", string(value), 0).Err(); err != nil {
 			t.Fatal(err)
 		}
 
 		buf := make([]byte, len(value))
-
 		cmd := adapter.GetToBuffer(ctx, "gtb-binary", buf)
 
 		_, err := cmd.Result()
@@ -193,8 +191,8 @@ func TestGetToBuffer(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if string(cmd.Bytes()) != value {
-			t.Fatalf("binary payload mismatch")
+		if string(cmd.Bytes()) != string(value) {
+			t.Fatal("binary payload mismatch")
 		}
 	})
 
@@ -206,7 +204,6 @@ func TestGetToBuffer(t *testing.T) {
 		}
 
 		buf := make([]byte, len(value))
-
 		cmd := adapter.GetToBuffer(ctx, "gtb-large-payload", buf)
 
 		n, err := cmd.Result()
@@ -219,7 +216,7 @@ func TestGetToBuffer(t *testing.T) {
 		}
 
 		if string(cmd.Bytes()) != value {
-			t.Fatalf("large payload mismatch")
+			t.Fatal("large payload mismatch")
 		}
 	})
 

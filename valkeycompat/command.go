@@ -30,6 +30,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strconv"
 	"strings"
@@ -359,6 +360,40 @@ func (cmd *Cmd) BoolSlice() ([]bool, error) {
 
 type StringCmd struct {
 	baseCmd[string]
+}
+type ZeroCopyStringCmd struct {
+	baseCmd[int]
+	buf []byte
+}
+
+func (cmd *ZeroCopyStringCmd) from(res valkey.ValkeyResult) {
+	data, err := res.AsBytes()
+	if err != nil {
+		cmd.SetErr(err)
+		cmd.SetVal(0)
+		return
+	}
+
+	n := copy(cmd.buf, data)
+	cmd.SetVal(n)
+
+	if n < len(data) {
+		cmd.SetErr(io.ErrShortBuffer)
+	}
+}
+
+func (cmd *ZeroCopyStringCmd) Bytes() []byte {
+	n := cmd.Val()
+
+	if n <= 0 {
+		return cmd.buf[:0]
+	}
+
+	if n > len(cmd.buf) {
+		n = len(cmd.buf)
+	}
+
+	return cmd.buf[:n]
 }
 
 func (cmd *StringCmd) from(res valkey.ValkeyResult) {

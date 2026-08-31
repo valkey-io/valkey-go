@@ -147,3 +147,6 @@ func (t *tx) Close(_ context.Context) error {
 	t.cancel()
 	return nil
 }
+func (c *TxPipeline) GetToBuffer(ctx context.Context, key string, buf []byte) *ZeroCopyStringCmd {
+	return c.Pipeline().GetToBuffer(ctx, key, buf)
+}
