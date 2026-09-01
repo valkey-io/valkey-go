@@ -358,7 +358,7 @@ func testAdapter(resp3 bool) {
 			m, err := info.Result()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(m).NotTo(BeEmpty())
-			Expect(m).To(HaveKey("server"))
+			Expect(m).To(HaveKey("CPU"))
 		})
 
 		It("should Info cpu", func() {
