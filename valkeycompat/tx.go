@@ -148,6 +148,12 @@ func (t *tx) Close(_ context.Context) error {
 	return nil
 }
 
+func (c *TxPipeline) SetFromBuffer(ctx context.Context, key string, buf []byte) *StatusCmd {
+	return c.rePipeline.SetFromBuffer(ctx, key, buf)
+}
+
 func (c *TxPipeline) GetToBuffer(ctx context.Context, key string, buf []byte) *ZeroCopyStringCmd {
 	panic("GetToBuffer is not supported in TxPipeline")
 }
+
+

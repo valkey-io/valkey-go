@@ -129,6 +129,8 @@ type CoreCmdable interface {
 	MSetNX(ctx context.Context, values ...any) *BoolCmd
 	Set(ctx context.Context, key string, value any, expiration time.Duration) *StatusCmd
 	SetArgs(ctx context.Context, key string, value any, a SetArgs) *StatusCmd
+	// SetFromBuffer sets the value of a key using a []byte buffer.
+	SetFromBuffer(ctx context.Context, key string, buf []byte) *StatusCmd
 	SetEX(ctx context.Context, key string, value any, expiration time.Duration) *StatusCmd
 	SetNX(ctx context.Context, key string, value any, expiration time.Duration) *BoolCmd
 	SetXX(ctx context.Context, key string, value any, expiration time.Duration) *BoolCmd
@@ -1205,6 +1207,15 @@ func (c *Compat) SetNX(ctx context.Context, key string, value any, expiration ti
 	}
 
 	return newBoolCmd(resp)
+}
+
+// SetFromBuffer sets the value of a key using the provided byte buffer.
+// This uses valkey.BinaryString to avoid an extra allocation when possible.
+func (c *Compat) SetFromBuffer(ctx context.Context, key string, buf []byte) *StatusCmd {
+	value := valkey.BinaryString(buf)
+	cmd := c.client.B().Set().Key(key).Value(value).Build()
+	resp := c.client.Do(ctx, cmd)
+	return newStatusCmd(resp)
 }
 
 func (c *Compat) SetXX(ctx context.Context, key string, value any, expiration time.Duration) *BoolCmd {
