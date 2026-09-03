@@ -191,6 +191,7 @@ type ClientMock interface {
 	ExpectShutdownNoSave() *ExpectedStatus
 	ExpectShutdownSave() *ExpectedStatus
 	ExpectSlaveOf(host, port string) *ExpectedStatus
+	ExpectReplicaOf(host, port string) *ExpectedStatus
 	ExpectSlowLogGet(num int64) *ExpectedSlowLog
 	ExpectQuit() *ExpectedStatus
 	ExpectCommand() *ExpectedCommandsInfo
@@ -2068,6 +2069,12 @@ func (m *clientMock) ExpectShutdownSave() *ExpectedStatus {
 
 func (m *clientMock) ExpectSlaveOf(host, port string) *ExpectedStatus {
 	cmd := m.raw.B().Arbitrary("SLAVEOF").Args(host, port).Build()
+	e := m.push(match(cmd.Commands()...), defaultStatusResult())
+	return &ExpectedStatus{exp: e}
+}
+
+func (m *clientMock) ExpectReplicaOf(host, port string) *ExpectedStatus {
+	cmd := m.raw.B().Arbitrary("REPLICAOF").Args(host, port).Build()
 	e := m.push(match(cmd.Commands()...), defaultStatusResult())
 	return &ExpectedStatus{exp: e}
 }

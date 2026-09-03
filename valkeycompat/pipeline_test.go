@@ -633,6 +633,7 @@ func TestPipeliner(t *testing.T) {
 		p.JSONToggle(ctx, "1", "1")
 		p.JSONType(ctx, "1", "1")
 		p.SlaveOf(ctx, "NO", "ONE")
+		p.ReplicaOf(ctx, "NO", "ONE")
 		p.SlowLogGet(ctx, 1)
 		p.SlowLogLen(ctx)
 		p.SlowLogReset(ctx)
@@ -1172,6 +1173,7 @@ var golden = `[
     ["JSON.TOGGLE","1","1"],
     ["JSON.TYPE","1","1"],
     ["SLAVEOF","NO","ONE"],
+	["REPLICAOF","NO","ONE"],
     ["SLOWLOG","GET","1"],
 	["SLOWLOG","LEN"],
     ["SLOWLOG","RESET"],

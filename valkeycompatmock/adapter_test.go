@@ -1761,6 +1761,10 @@ func TestServerAdminCommands(t *testing.T) {
 			return rdb.SlaveOf(ctx, "127.0.0.1", "6379").Err()
 		},
 		func() error {
+			cm.ExpectReplicaOf("127.0.0.1", "6379").SetVal("OK")
+			return rdb.ReplicaOf(ctx, "127.0.0.1", "6379").Err()
+		},
+		func() error {
 			cm.ExpectSlowLogGet(10).SetVal([]valkeycompat.SlowLog{{
 				ID:       1,
 				Time:     time.Unix(1, 0),
