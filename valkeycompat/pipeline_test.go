@@ -638,6 +638,8 @@ func TestPipeliner(t *testing.T) {
 		p.SlowLogGet(ctx, 1)
 		p.SlowLogLen(ctx)
 		p.SlowLogReset(ctx)
+		p.Latency(ctx)
+		p.LatencyReset(ctx)
 		p.ClusterMyShardID(ctx)
 		p.ModuleLoadex(ctx, &ModuleLoadexConfig{
 			Path: "/",
@@ -645,7 +647,7 @@ func TestPipeliner(t *testing.T) {
 			Args: []any{"1", "2"},
 		})
 
-		if n := len(p.rets); n != 496 {
+		if n := len(p.rets); n != 498 {
 			t.Fatalf("unexpected pipeline calls: %v", n)
 		}
 		for i, cmd := range p.rets {
@@ -653,7 +655,7 @@ func TestPipeliner(t *testing.T) {
 				t.Fatalf("unexpected pipeline placeholder err(%d): %v", i, err)
 			}
 		}
-		if n := len(p.comp.client.(*proxy).cmds); n != 496 {
+		if n := len(p.comp.client.(*proxy).cmds); n != 498 {
 			t.Fatalf("unexpected pipeline commands: %v", n)
 		}
 		var pipeline [][]string
@@ -1179,6 +1181,8 @@ var golden = `[
     ["SLOWLOG","GET","1"],
 	["SLOWLOG","LEN"],
     ["SLOWLOG","RESET"],
+    ["LATENCY","LATEST"],
+    ["LATENCY","RESET"],
     ["CLUSTER","MYSHARDID"],
     ["MODULE","LOADEX","/","CONFIG","k","v","ARGS","1","2"]
 ]`
