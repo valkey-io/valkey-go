@@ -17,8 +17,8 @@ type TypedCacheAsideClient[T any] interface {
 // It provides a typed cache-aside client that allows caching and retrieving values of a specific type T.
 type typedCacheAsideClient[T any] struct {
 	client       CacheAsideClient
-	serializer   func(*T) (string, error)
-	deserializer func(string) (*T, error)
+	serializer   func(context.Context, string, *T) (string, error)
+	deserializer func(context.Context, string, string) (*T, error)
 }
 
 // NewTypedCacheAsideClient creates a new TypedCacheAsideClient instance that provides a typed cache-aside client.
@@ -29,6 +29,26 @@ func NewTypedCacheAsideClient[T any](
 	client CacheAsideClient,
 	serializer func(*T) (string, error),
 	deserializer func(string) (*T, error),
+) TypedCacheAsideClient[T] {
+	return &typedCacheAsideClient[T]{
+		client: client,
+		serializer: func(ctx context.Context, key string, val *T) (string, error) {
+			return serializer(val)
+		},
+		deserializer: func(ctx context.Context, key string, str string) (*T, error) {
+			return deserializer(str)
+		},
+	}
+}
+
+// NewTypedCacheAsideClientWithContext creates a new TypedCacheAsideClient instance that provides a typed cache-aside client.
+// The client, serializer, and deserializer functions are used to interact with the underlying cache.
+// The serializer function is used to convert the provided value of type T to a string, and the deserializer function
+// is used to convert the cached string value back to the original type T.
+func NewTypedCacheAsideClientWithContext[T any](
+	client CacheAsideClient,
+	serializer func(context.Context, string, *T) (string, error),
+	deserializer func(context.Context, string, string) (*T, error),
 ) TypedCacheAsideClient[T] {
 	return &typedCacheAsideClient[T]{
 		client:       client,
@@ -46,12 +66,12 @@ func (c typedCacheAsideClient[T]) Get(ctx context.Context, ttl time.Duration, ke
 		if err != nil {
 			return "", err
 		}
-		return c.serializer(result)
+		return c.serializer(ctx, key, result)
 	})
 	if err != nil {
 		return nil, err
 	}
-	return c.deserializer(strVal)
+	return c.deserializer(ctx, key, strVal)
 }
 
 // Del deletes the value associated with the given key from the cache.

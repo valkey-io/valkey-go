@@ -43,7 +43,6 @@ func TestTypedCacheAsideClient_Get(t *testing.T) {
 		val, err := client.Get(context.Background(), time.Second, key, func(ctx context.Context, key string) (*testStruct, error) {
 			return expected, nil
 		})
-
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -98,7 +97,6 @@ func TestTypedCacheAsideClient_Get(t *testing.T) {
 		val, err := client.Get(context.Background(), time.Second, key, func(ctx context.Context, key string) (*testStruct, error) {
 			return nil, nil
 		})
-
 		if err != nil {
 			t.Fatalf("nil value should not return error: %v", err)
 		}
@@ -112,18 +110,18 @@ func TestTypedCacheAsideClient_Del(t *testing.T) {
 	baseClient := makeClient(t, addr)
 	t.Cleanup(baseClient.Close)
 
-	serializer := func(v *testStruct) (string, error) {
+	serializer := func(_ context.Context, _ string, v *testStruct) (string, error) {
 		b, err := json.Marshal(v)
 		return string(b), err
 	}
 
-	deserializer := func(s string) (*testStruct, error) {
+	deserializer := func(_ context.Context, _ string, s string) (*testStruct, error) {
 		var v testStruct
 		err := json.Unmarshal([]byte(s), &v)
 		return &v, err
 	}
 
-	client := NewTypedCacheAsideClient[testStruct](baseClient, serializer, deserializer)
+	client := NewTypedCacheAsideClientWithContext[testStruct](baseClient, serializer, deserializer)
 
 	// Set a value first
 	key := randStr()
