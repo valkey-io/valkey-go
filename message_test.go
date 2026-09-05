@@ -432,10 +432,12 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "key"), strmsg('+', "value")})}).AsIntMap(); err == nil {
 			t.Fatal("AsIntMap not failed as expected")
 		}
-		values := []ValkeyMessage{strmsg('+', "k1"), strmsg('+', "1"), strmsg('+', "k2"), {intlen: 2, typ: ':'}}
+		values := []ValkeyMessage{strmsg('+', "k1"), strmsg('+', "1"), strmsg('+', "k2"), {intlen: 2, typ: ':'}, strmsg('+', "k3"), strmsg('+', "010"), strmsg('+', "k4"), strmsg('+', "08")}
 		if ret, _ := (ValkeyResult{val: slicemsg('*', values)}).AsIntMap(); !reflect.DeepEqual(map[string]int64{
 			"k1": 1,
 			"k2": 2,
+			"k3": 10,
+			"k4": 8,
 		}, ret) {
 			t.Fatal("AsIntMap not get value as expected")
 		}
