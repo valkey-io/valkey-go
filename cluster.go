@@ -659,12 +659,8 @@ func (c *clusterClient) Do(ctx context.Context, cmd Completed) (resp ValkeyResul
 func (c *clusterClient) do(ctx context.Context, cmd Completed) (resp ValkeyResult) {
 	attempts := 1
 	redirects := 0
-	slot := cmd.Slot()
-	if s, ok := clusterScanSlot(cmd); ok {
-		slot = s
-	}
 retry:
-	cc, err := c.pick(ctx, slot, c.toReplica(cmd))
+	cc, err := c.pick(ctx, cmd.Slot(), c.toReplica(cmd))
 	if err != nil {
 		return NewErrorResult(err)
 	}
@@ -679,7 +675,7 @@ process:
 		if c.opt.ClusterOption.MaxMovedRedirections > 0 && redirects > c.opt.ClusterOption.MaxMovedRedirections {
 			return resp
 		}
-		ncc := c.redirectOrNew(addr, cc, slot, mode)
+		ncc := c.redirectOrNew(addr, cc, cmd.Slot(), mode)
 	recover1:
 		resp = ncc.Do(ctx, cmd)
 		if resp.NonValkeyError() == errConnExpired {
@@ -691,7 +687,7 @@ process:
 		if c.opt.ClusterOption.MaxMovedRedirections > 0 && redirects > c.opt.ClusterOption.MaxMovedRedirections {
 			return resp
 		}
-		ncc := c.redirectOrNew(addr, cc, slot, mode)
+		ncc := c.redirectOrNew(addr, cc, cmd.Slot(), mode)
 	recover2:
 		results := ncc.DoMulti(ctx, cmds.AskingCmd, cmd)
 		resp = results.s[1]

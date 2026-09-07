@@ -53,7 +53,6 @@ var Nil = valkey.Nil
 
 type Cmdable interface {
 	CoreCmdable
-	ClusterScanCmdable
 	Cache(ttl time.Duration) CacheCompat
 
 	Subscribe(ctx context.Context, channels ...string) PubSub
@@ -446,6 +445,8 @@ type CoreCmdable interface {
 	SearchCmdable
 }
 
+// ClusterScanCmdable provides Valkey-specific cluster scan operations.
+// It is not embedded in Cmdable to preserve 1:1 interface compatibility with go-redis.
 type ClusterScanCmdable interface {
 	ClusterScan(
 		ctx context.Context,

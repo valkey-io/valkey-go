@@ -240,7 +240,7 @@ func testCluster(resp3 bool) {
 		})
 
 		It("should ClusterScan", func() {
-			cmd := adapter.ClusterScan(ctx, "0", "", 0, "", -1)
+			cmd := adapter.(ClusterScanCmdable).ClusterScan(ctx, "0", "", 0, "", -1)
 
 			keys, cursor, err := cmd.Result()
 
@@ -250,7 +250,7 @@ func testCluster(resp3 bool) {
 		})
 
 		It("should ClusterScan with MATCH", func() {
-			cmd := adapter.ClusterScan(ctx, "0", "user:*", 0, "", -1)
+			cmd := adapter.(ClusterScanCmdable).ClusterScan(ctx, "0", "user:*", 0, "", -1)
 
 			keys, cursor, err := cmd.Result()
 
@@ -260,7 +260,7 @@ func testCluster(resp3 bool) {
 		})
 
 		It("should ClusterScan with COUNT", func() {
-			cmd := adapter.ClusterScan(ctx, "0", "", 100, "", -1)
+			cmd := adapter.(ClusterScanCmdable).ClusterScan(ctx, "0", "", 100, "", -1)
 
 			keys, cursor, err := cmd.Result()
 
@@ -270,7 +270,7 @@ func testCluster(resp3 bool) {
 		})
 
 		It("should ClusterScan with TYPE", func() {
-			cmd := adapter.ClusterScan(ctx, "0", "", 0, "string", -1)
+			cmd := adapter.(ClusterScanCmdable).ClusterScan(ctx, "0", "", 0, "string", -1)
 
 			keys, cursor, err := cmd.Result()
 
@@ -280,7 +280,7 @@ func testCluster(resp3 bool) {
 		})
 
 		It("should ClusterScan with SLOT", func() {
-			cmd := adapter.ClusterScan(ctx, "0", "", 0, "", 5000)
+			cmd := adapter.(ClusterScanCmdable).ClusterScan(ctx, "0", "", 0, "", 5000)
 
 			keys, cursor, err := cmd.Result()
 
@@ -290,7 +290,7 @@ func testCluster(resp3 bool) {
 		})
 
 		It("should not add SLOT for continuation cursor", func() {
-			cmd := adapter.ClusterScan(
+			cmd := adapter.(ClusterScanCmdable).ClusterScan(
 				ctx,
 				"0-{06S}-0",
 				"",
@@ -306,7 +306,7 @@ func testCluster(resp3 bool) {
 			Expect(cursor).NotTo(BeEmpty())
 		})
 		It("should ClusterScanIterator", func() {
-			iter := adapter.ClusterScanIterator(ctx, ClusterScanOptions{
+			iter := adapter.(ClusterScanCmdable).ClusterScanIterator(ctx, ClusterScanOptions{
 				Count: 100,
 			})
 
@@ -323,7 +323,7 @@ func testCluster(resp3 bool) {
 		})
 
 		It("should ClusterScanIterator with MATCH", func() {
-			iter := adapter.ClusterScanIterator(ctx, ClusterScanOptions{
+			iter := adapter.(ClusterScanCmdable).ClusterScanIterator(ctx, ClusterScanOptions{
 				Match: "user:*",
 				Count: 100,
 			})
@@ -337,7 +337,7 @@ func testCluster(resp3 bool) {
 
 		It("should ClusterScanIterator with SLOT", func() {
 			s0 := int64(0)
-			iter := adapter.ClusterScanIterator(ctx, ClusterScanOptions{
+			iter := adapter.(ClusterScanCmdable).ClusterScanIterator(ctx, ClusterScanOptions{
 				Count: 100,
 				Slot:  &s0,
 			})
@@ -353,7 +353,7 @@ func testCluster(resp3 bool) {
 			cancelCtx, cancel := context.WithCancel(ctx)
 			cancel()
 
-			iter := adapter.ClusterScanIterator(cancelCtx, ClusterScanOptions{
+			iter := adapter.(ClusterScanCmdable).ClusterScanIterator(cancelCtx, ClusterScanOptions{
 				Count: 100,
 			})
 
@@ -362,7 +362,7 @@ func testCluster(resp3 bool) {
 		})
 
 		It("should panic when ClusterScanIterator is called on Pipeline", func() {
-			pipe := adapter.Pipeline()
+			pipe := adapter.Pipeline().(ClusterScanCmdable)
 			Expect(func() {
 				pipe.ClusterScanIterator(ctx, ClusterScanOptions{})
 			}).To(Panic())

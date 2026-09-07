@@ -784,7 +784,7 @@ type ClusterScanOptions struct {
 }
 
 type ClusterScanIterator struct {
-	client  Cmdable
+	client  ClusterScanCmdable
 	ctx     context.Context
 	options ClusterScanOptions
 
@@ -799,7 +799,7 @@ type ClusterScanIterator struct {
 
 func newClusterScanIterator(
 	ctx context.Context,
-	client Cmdable,
+	client ClusterScanCmdable,
 	opts ClusterScanOptions,
 ) *ClusterScanIterator {
 	return &ClusterScanIterator{
