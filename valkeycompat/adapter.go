@@ -1012,12 +1012,6 @@ type bufferWriter struct {
 }
 
 func (w *bufferWriter) Write(p []byte) (int, error) {
-	remaining := len(w.buf) - w.pos
-
-	if remaining == 0 {
-		return 0, io.ErrShortBuffer
-	}
-
 	n := copy(w.buf[w.pos:], p)
 	w.pos += n
 

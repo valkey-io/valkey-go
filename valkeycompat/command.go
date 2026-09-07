@@ -367,17 +367,7 @@ type ZeroCopyStringCmd struct {
 }
 
 func (cmd *ZeroCopyStringCmd) Bytes() []byte {
-	n := cmd.Val()
-
-	if n <= 0 {
-		return cmd.buf[:0]
-	}
-
-	if n > len(cmd.buf) {
-		n = len(cmd.buf)
-	}
-
-	return cmd.buf[:n]
+	return cmd.buf[:cmd.Val()]
 }
 
 func (cmd *StringCmd) from(res valkey.ValkeyResult) {
