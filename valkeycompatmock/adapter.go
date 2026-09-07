@@ -369,16 +369,17 @@ type clientMock struct {
 }
 
 type expectation struct {
-	matcher     gomock.Matcher
-	expected    []string
-	result      valkey.ValkeyResult
-	rawResult   any
-	err         error
-	resultSet   bool
-	rawSet      bool
-	redisNil    bool
-	regexpMatch bool
-	customMatch CustomMatch
+	matcher      gomock.Matcher
+	expected     []string
+	result       valkey.ValkeyResult
+	rawResult    any
+	err          error
+	resultSet    bool
+	rawSet       bool
+	redisNil     bool
+	regexpMatch  bool
+	customMatch  CustomMatch
+	requireCache bool
 }
 
 type resolvedExpectation struct {
@@ -553,25 +554,38 @@ func (m *clientMock) wire() {
 	m.raw.EXPECT().
 		Do(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, cmd valkey.Completed) valkey.ValkeyResult {
-			return m.consume(1, []valkey.Completed{cmd})[0]
+			return m.consume(1, []valkey.Completed{cmd}, false)[0]
 		}).
 		AnyTimes()
 	m.raw.EXPECT().
 		DoMulti(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, cmds ...valkey.Completed) []valkey.ValkeyResult {
-			return m.consume(len(cmds), cmds)
+			return m.consume(len(cmds), cmds, false)
+		}).
+		AnyTimes()
+	m.raw.EXPECT().
+		DoCache(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, cmd valkey.Cacheable, _ time.Duration) valkey.ValkeyResult {
+			return m.consume(1, []valkey.Completed{valkey.Completed(cmd)}, true)[0]
 		}).
 		AnyTimes()
 }
 
-func (m *clientMock) consume(n int, cmds []valkey.Completed) []valkey.ValkeyResult {
+func unmatchedErr(cmd valkey.Completed, viaCache bool) error {
+	if viaCache {
+		return fmt.Errorf("valkeycompatmock: no expectation for command %v via cache", cmd.Commands())
+	}
+	return fmt.Errorf("valkeycompatmock: no expectation for command %v", cmd.Commands())
+}
+
+func (m *clientMock) consume(n int, cmds []valkey.Completed, viaCache bool) []valkey.ValkeyResult {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]valkey.ValkeyResult, n)
 	for i, cmd := range cmds {
-		idx, ok := m.matchLocked(cmd)
+		idx, ok := m.matchLocked(cmd, viaCache)
 		if !ok {
-			err := fmt.Errorf("valkeycompatmock: no expectation for command %v", cmd.Commands())
+			err := unmatchedErr(cmd, viaCache)
 			m.unmatched = append(m.unmatched, err)
 			out[i] = mock.ErrorResult(err)
 			for j := i + 1; j < n; j++ {
@@ -588,9 +602,9 @@ func (m *clientMock) consume(n int, cmds []valkey.Completed) []valkey.ValkeyResu
 func (m *clientMock) consumeWithRaw(cmd valkey.Completed) resolvedExpectation {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	idx, ok := m.matchLocked(cmd)
+	idx, ok := m.matchLocked(cmd, false)
 	if !ok {
-		err := fmt.Errorf("valkeycompatmock: no expectation for command %v", cmd.Commands())
+		err := unmatchedErr(cmd, false)
 		m.unmatched = append(m.unmatched, err)
 		return resolvedExpectation{result: mock.ErrorResult(err)}
 	}
@@ -604,25 +618,28 @@ func (m *clientMock) consumeWithRaw(cmd valkey.Completed) resolvedExpectation {
 	return resolved
 }
 
-func (m *clientMock) matchLocked(cmd valkey.Completed) (int, bool) {
+func (m *clientMock) matchLocked(cmd valkey.Completed, viaCache bool) (int, bool) {
 	if m.ordered {
 		if len(m.queue) == 0 {
 			return 0, false
 		}
-		if !m.queue[0].matches(cmd) {
+		if !m.queue[0].matches(cmd, viaCache) {
 			return 0, false
 		}
 		return 0, true
 	}
 	for i, e := range m.queue {
-		if e.matches(cmd) {
+		if e.matches(cmd, viaCache) {
 			return i, true
 		}
 	}
 	return 0, false
 }
 
-func (e *expectation) matches(cmd valkey.Completed) bool {
+func (e *expectation) matches(cmd valkey.Completed, viaCache bool) bool {
+	if e.requireCache != viaCache {
+		return false
+	}
 	if e.customMatch == nil && !e.regexpMatch {
 		return e.matcher.Matches(cmd)
 	}

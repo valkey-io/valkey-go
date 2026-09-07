@@ -110,8 +110,8 @@ func main() {
 
 ## Limitation
 
-Currently, requires Valkey >= 7.0.
-However, the `UseLuaLock` option is available and allows you to use the `valkeyaside` with older Valkey versions < 7.0 as well.
+By default, lock acquisition uses the Valkey 7.0 `SET NX GET` behavior.
+The `UseLuaLock` option switches the acquisition step to a Lua implementation that is compatible with older Valkey versions < 7.0.
 
 To configure the Lua fallback option:
 
@@ -120,7 +120,7 @@ client, err := valkeyaside.NewClient(valkeyaside.ClientOption{
     ClientOption: valkey.ClientOption{
         InitAddress: []string{"127.0.0.1:6379"},
     },
-    UseLuaLock: true, // Enable Lua script for older Valkey versions
+    UseLuaLock: true, // Enable the Valkey < 7 compatible lock implementation
 })
 if err != nil {
     panic(err)
