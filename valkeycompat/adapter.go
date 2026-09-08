@@ -30,6 +30,7 @@ import (
 	"context"
 	"encoding"
 	"fmt"
+	"io"
 	"reflect"
 	"runtime"
 	"strconv"
@@ -115,6 +116,7 @@ type CoreCmdable interface {
 	Decr(ctx context.Context, key string) *IntCmd
 	DecrBy(ctx context.Context, key string, decrement int64) *IntCmd
 	Get(ctx context.Context, key string) *StringCmd
+	GetToBuffer(ctx context.Context, key string, buf []byte) *ZeroCopyStringCmd
 	GetRange(ctx context.Context, key string, start, end int64) *StringCmd
 	GetSet(ctx context.Context, key string, value any) *StringCmd
 	GetEx(ctx context.Context, key string, expiration time.Duration) *StringCmd
@@ -350,6 +352,7 @@ type CoreCmdable interface {
 	FlushDB(ctx context.Context) *StatusCmd
 	FlushDBAsync(ctx context.Context) *StatusCmd
 	Info(ctx context.Context, section ...string) *StringCmd
+	InfoMap(ctx context.Context, section ...string) *StringStringStringMapCmd
 	LastSave(ctx context.Context) *IntCmd
 	Save(ctx context.Context) *StatusCmd
 	Shutdown(ctx context.Context) *StatusCmd
@@ -1003,6 +1006,45 @@ func (c *Compat) Get(ctx context.Context, key string) *StringCmd {
 	cmd := c.client.B().Get().Key(key).Build()
 	resp := c.client.Do(ctx, cmd)
 	return newStringCmd(resp)
+}
+
+type bufferWriter struct {
+	buf []byte
+	pos int
+}
+
+func (w *bufferWriter) Write(p []byte) (int, error) {
+	n := copy(w.buf[w.pos:], p)
+	w.pos += n
+
+	if n < len(p) {
+		return n, io.ErrShortBuffer
+	}
+
+	return n, nil
+}
+
+func (c *Compat) GetToBuffer(ctx context.Context, key string, buf []byte) *ZeroCopyStringCmd {
+	cmd := &ZeroCopyStringCmd{
+		baseCmd: baseCmd[int]{},
+		buf:     buf,
+	}
+
+	stream := c.client.DoStream(
+		ctx,
+		c.client.B().Get().Key(key).Build(),
+	)
+
+	writer := &bufferWriter{
+		buf: buf,
+	}
+
+	n, err := stream.WriteTo(writer)
+
+	cmd.SetVal(int(n))
+	cmd.SetErr(err)
+
+	return cmd
 }
 
 func (c *Compat) GetRange(ctx context.Context, key string, start, end int64) *StringCmd {
@@ -2989,6 +3031,13 @@ func (c *Compat) Info(ctx context.Context, section ...string) *StringCmd {
 	cmd := c.client.B().Info().Section(section...).Build()
 	resp := c.client.Do(ctx, cmd)
 	return newStringCmd(resp)
+}
+
+// InfoMap returns INFO parsed into sections as map[string]map[string]string
+func (c *Compat) InfoMap(ctx context.Context, section ...string) *StringStringStringMapCmd {
+	cmd := c.client.B().Info().Section(section...).Build()
+	resp := c.client.Do(ctx, cmd)
+	return newStringStringStringMapCmd(resp)
 }
 
 func (c *Compat) LastSave(ctx context.Context) *IntCmd {

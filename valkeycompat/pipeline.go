@@ -368,6 +368,10 @@ func (c *Pipeline) Get(ctx context.Context, key string) *StringCmd {
 	return ret
 }
 
+func (c *Pipeline) GetToBuffer(ctx context.Context, key string, buf []byte) *ZeroCopyStringCmd {
+	panic("GetToBuffer is not supported in Pipeline")
+}
+
 func (c *Pipeline) GetRange(ctx context.Context, key string, start, end int64) *StringCmd {
 	ret := c.comp.GetRange(ctx, key, start, end)
 	c.rets = append(c.rets, ret)
@@ -1714,6 +1718,12 @@ func (c *Pipeline) FlushDBAsync(ctx context.Context) *StatusCmd {
 
 func (c *Pipeline) Info(ctx context.Context, section ...string) *StringCmd {
 	ret := c.comp.Info(ctx, section...)
+	c.rets = append(c.rets, ret)
+	return ret
+}
+
+func (c *Pipeline) InfoMap(ctx context.Context, section ...string) *StringStringStringMapCmd {
+	ret := c.comp.InfoMap(ctx, section...)
 	c.rets = append(c.rets, ret)
 	return ret
 }

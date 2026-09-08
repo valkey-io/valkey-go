@@ -364,6 +364,15 @@ type StringCmd struct {
 	baseCmd[string]
 }
 
+type ZeroCopyStringCmd struct {
+	baseCmd[int]
+	buf []byte
+}
+
+func (cmd *ZeroCopyStringCmd) Bytes() []byte {
+	return cmd.buf[:cmd.Val()]
+}
+
 func (cmd *StringCmd) from(res valkey.ValkeyResult) {
 	val, err := res.ToString()
 	cmd.SetErr(err)
@@ -923,6 +932,63 @@ func newStringStringMapCmd(res valkey.ValkeyResult) *StringStringMapCmd {
 	cmd := &StringStringMapCmd{}
 	cmd.from(res)
 	return cmd
+}
+
+type StringStringStringMapCmd struct {
+	baseCmd[map[string]map[string]string]
+}
+
+func (cmd *StringStringStringMapCmd) from(res valkey.ValkeyResult) {
+	val, err := res.ToString()
+	cmd.SetErr(err)
+	if err != nil {
+		return
+	}
+	cmd.SetVal(parseInfoString(val))
+	cmd.setIsCacheHit(res.IsCacheHit())
+}
+
+func newStringStringStringMapCmd(res valkey.ValkeyResult) *StringStringStringMapCmd {
+	cmd := &StringStringStringMapCmd{}
+	cmd.from(res)
+	return cmd
+}
+
+func parseInfoString(txt string) map[string]map[string]string {
+	out := make(map[string]map[string]string)
+	section := "default"
+	for _, l := range strings.Split(txt, "\n") {
+		line := strings.TrimSpace(l)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(line), "txt:") {
+			line = strings.TrimSpace(line[len("txt:"):])
+		}
+		if strings.HasPrefix(line, "#") {
+			sec := strings.TrimSpace(strings.TrimLeft(line, "#"))
+			if sec == "" {
+				section = "default"
+			} else {
+				section = sec
+			}
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		k := strings.TrimSpace(parts[0])
+		v := strings.TrimSpace(parts[1])
+		if k == "" {
+			continue
+		}
+		if _, ok := out[section]; !ok {
+			out[section] = make(map[string]string)
+		}
+		out[section][k] = v
+	}
+	return out
 }
 
 // Scan scans the results from the map into a destination struct. The map keys
