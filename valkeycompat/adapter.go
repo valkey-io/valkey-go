@@ -1134,9 +1134,7 @@ func (c *Compat) MSetEX(ctx context.Context, args MSetEXArgs, values ...any) *In
 	// Add all key-value pairs and register keys for proper routing in cluster mode.
 	// Use Keys(...) to mark key positions and Args(...) for the corresponding values.
 	for i := 0; i < len(expandedArgs); i += 2 {
-		keyArg := str(expandedArgs[i])
-		valArg := str(expandedArgs[i+1])
-		cmd = cmd.Keys(keyArg).Args(valArg)
+		cmd = cmd.Keys(expandedArgs[i]).Args(expandedArgs[i+1])
 	}
 
 	// Add condition (NX or XX)
