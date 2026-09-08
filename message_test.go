@@ -1935,6 +1935,27 @@ func TestValkeyMessage(t *testing.T) {
 		}
 	})
 
+	t.Run("AsClusterScanEntry", func(t *testing.T) {
+		if _, err := (ValkeyResult{err: errors.New("other")}).AsClusterScanEntry(); err == nil {
+			t.Fatal("AsClusterScanEntry not failed as expected")
+		}
+		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsClusterScanEntry(); err == nil {
+			t.Fatal("AsClusterScanEntry not failed as expected")
+		}
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "0-{06S}-0"), slicemsg('*', []ValkeyMessage{strmsg('+', "a"), strmsg('+', "b")})})}).AsClusterScanEntry(); !reflect.DeepEqual(ClusterScanEntry{
+			Cursor:   "0-{06S}-0",
+			Elements: []string{"a", "b"},
+		}, ret) {
+			t.Fatal("AsClusterScanEntry not get value as expected")
+		}
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "0"), {typ: '_'}})}).AsClusterScanEntry(); !reflect.DeepEqual(ClusterScanEntry{}, ret) {
+			t.Fatal("AsClusterScanEntry not get value as expected")
+		}
+		if _, err := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "0")})}).AsClusterScanEntry(); err == nil || !strings.Contains(err.Error(), "a cluster scan response or its length is not at least 2") {
+			t.Fatal("AsClusterScanEntry not get value as expected")
+		}
+	})
+
 	t.Run("ToMap with non-string key", func(t *testing.T) {
 		valkeyMessageSet := slicemsg('~', []ValkeyMessage{{typ: ':'}, {typ: ':'}})
 		_, err := (&valkeyMessageSet).ToMap()
