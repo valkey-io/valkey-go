@@ -1704,7 +1704,7 @@
   },
   "CLUSTERSCAN": {
     "summary": "Incrementally iterate the keys space in a cluster",
-    "complexity": "O(1) for every call. O(N) for a complete iteration, including enough command calls for the cursor to return back to 0. N is the number of elements inside the collection.",
+    "complexity": "O(N)",
     "arguments": [
       {
         "name": "cursor",
@@ -1735,7 +1735,7 @@
         "optional": true
       }
     ],
-    "since": "8.0.0",
+    "since": "9.1.0",
     "group": "cluster"
   },
   "COMMAND COUNT": {
