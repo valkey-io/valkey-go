@@ -41,19 +41,25 @@ func NewTypedCacheAsideClient[T any](
 	}
 }
 
+// TypedCodec converts values of type T to and from their cached string form.
+// Both functions receive the context and cache key of the in-flight Get.
+type TypedCodec[T any] struct {
+	Marshal   func(ctx context.Context, key string, val *T) (string, error)
+	Unmarshal func(ctx context.Context, key string, str string) (*T, error)
+}
+
 // NewTypedCacheAsideClientWithContext creates a new TypedCacheAsideClient instance that provides a typed cache-aside client.
 // The client, serializer, and deserializer functions are used to interact with the underlying cache.
 // The serializer function is used to convert the provided value of type T to a string, and the deserializer function
 // is used to convert the cached string value back to the original type T.
-func NewTypedCacheAsideClientWithContext[T any](
+func NewTypedCacheAsideClientWithCodec[T any](
 	client CacheAsideClient,
-	serializer func(context.Context, string, *T) (string, error),
-	deserializer func(context.Context, string, string) (*T, error),
+	codec TypedCodec[T],
 ) TypedCacheAsideClient[T] {
 	return &typedCacheAsideClient[T]{
 		client:       client,
-		serializer:   serializer,
-		deserializer: deserializer,
+		serializer:   codec.Marshal,
+		deserializer: codec.Unmarshal,
 	}
 }
 

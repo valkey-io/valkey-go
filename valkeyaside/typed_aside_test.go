@@ -216,7 +216,7 @@ func TestTypedCacheAsideClient_OverrideTTL(t *testing.T) {
 	})
 }
 
-func TestTypedCacheAsideClientWithContext_Get(t *testing.T) {
+func TestTypedCacheAsideClientWithCodec_Get(t *testing.T) {
 	baseClient := makeClient(t, addr)
 	t.Cleanup(baseClient.Close)
 
@@ -257,7 +257,7 @@ func TestTypedCacheAsideClientWithContext_Get(t *testing.T) {
 		return &val, nil
 	}
 
-	client := NewTypedCacheAsideClientWithContext[testStruct](baseClient, serializer, deserializer)
+	client := NewTypedCacheAsideClientWithCodec[testStruct](baseClient, TypedCodec[testStruct]{Marshal: serializer, Unmarshal: deserializer})
 
 	val, err := client.Get(context.WithValue(context.Background(), requestContextKey, "populate"), time.Second, key, func(ctx context.Context, gotKey string) (*testStruct, error) {
 		if got := ctx.Value(requestContextKey); got != "populate" {
