@@ -48,9 +48,11 @@ type TypedCodec[T any] struct {
 	Unmarshal func(ctx context.Context, key string, str string) (*T, error)
 }
 
-// NewTypedCacheAsideClientWithContext creates a new TypedCacheAsideClient instance that provides a typed cache-aside client.
-// The client, serializer, and deserializer functions are used to interact with the underlying cache.
-// The serializer function is used to convert the provided value of type T to a string, and the deserializer function
+// NewTypedCacheAsideClientWithCodec creates a new TypedCacheAsideClient
+// instance that provides a typed cache-aside client.
+// The client and codec are used to interact with the underlying cache.
+// The codec's Marshal function is used to convert the provided value of type T
+// to a string, and the codec's Unmarshal function
 // is used to convert the cached string value back to the original type T.
 func NewTypedCacheAsideClientWithCodec[T any](
 	client CacheAsideClient,

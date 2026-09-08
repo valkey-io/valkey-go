@@ -227,37 +227,39 @@ func TestTypedCacheAsideClientWithCodec_Get(t *testing.T) {
 	serializerCalls := 0
 	deserializerCalls := 0
 
-	serializer := func(ctx context.Context, gotKey string, val *testStruct) (string, error) {
-		serializerCalls++
-		if got, want := ctx.Value(requestContextKey), "populate"; got != want {
-			t.Errorf("serializer context value = %v, want %v", got, want)
-		}
-		if gotKey != key {
-			t.Errorf("serializer key = %q, want %q", gotKey, key)
-		}
-		bytes, err := json.Marshal(val)
-		return string(bytes), err
-	}
-	deserializer := func(ctx context.Context, gotKey, str string) (*testStruct, error) {
-		deserializerCalls++
-		wantContext := "populate"
-		if deserializerCalls == 2 {
-			wantContext = "cached"
-		}
-		if got := ctx.Value(requestContextKey); got != wantContext {
-			t.Errorf("deserializer context value = %v, want %v", got, wantContext)
-		}
-		if gotKey != key {
-			t.Errorf("deserializer key = %q, want %q", gotKey, key)
-		}
-		var val testStruct
-		if err := json.Unmarshal([]byte(str), &val); err != nil {
-			return nil, err
-		}
-		return &val, nil
+	codec := TypedCodec[testStruct]{
+		Marshal: func(ctx context.Context, gotKey string, val *testStruct) (string, error) {
+			serializerCalls++
+			if got, want := ctx.Value(requestContextKey), "populate"; got != want {
+				t.Errorf("serializer context value = %v, want %v", got, want)
+			}
+			if gotKey != key {
+				t.Errorf("serializer key = %q, want %q", gotKey, key)
+			}
+			bytes, err := json.Marshal(val)
+			return string(bytes), err
+		},
+		Unmarshal: func(ctx context.Context, gotKey, str string) (*testStruct, error) {
+			deserializerCalls++
+			wantContext := "populate"
+			if deserializerCalls == 2 {
+				wantContext = "cached"
+			}
+			if got := ctx.Value(requestContextKey); got != wantContext {
+				t.Errorf("deserializer context value = %v, want %v", got, wantContext)
+			}
+			if gotKey != key {
+				t.Errorf("deserializer key = %q, want %q", gotKey, key)
+			}
+			var val testStruct
+			if err := json.Unmarshal([]byte(str), &val); err != nil {
+				return nil, err
+			}
+			return &val, nil
+		},
 	}
 
-	client := NewTypedCacheAsideClientWithCodec[testStruct](baseClient, TypedCodec[testStruct]{Marshal: serializer, Unmarshal: deserializer})
+	client := NewTypedCacheAsideClientWithCodec[testStruct](baseClient, codec)
 
 	val, err := client.Get(context.WithValue(context.Background(), requestContextKey, "populate"), time.Second, key, func(ctx context.Context, gotKey string) (*testStruct, error) {
 		if got := ctx.Value(requestContextKey); got != "populate" {
