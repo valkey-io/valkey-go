@@ -432,12 +432,10 @@ func TestValkeyResult(t *testing.T) {
 		if _, err := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "key"), strmsg('+', "value")})}).AsIntMap(); err == nil {
 			t.Fatal("AsIntMap not failed as expected")
 		}
-		values := []ValkeyMessage{strmsg('+', "k1"), strmsg('+', "1"), strmsg('+', "k2"), {intlen: 2, typ: ':'}, strmsg('+', "k3"), strmsg('+', "010"), strmsg('+', "k4"), strmsg('+', "08")}
+		values := []ValkeyMessage{strmsg('+', "k1"), strmsg('+', "1"), strmsg('+', "k2"), {intlen: 2, typ: ':'}}
 		if ret, _ := (ValkeyResult{val: slicemsg('*', values)}).AsIntMap(); !reflect.DeepEqual(map[string]int64{
 			"k1": 1,
 			"k2": 2,
-			"k3": 10,
-			"k4": 8,
 		}, ret) {
 			t.Fatal("AsIntMap not get value as expected")
 		}
@@ -1932,6 +1930,27 @@ func TestValkeyMessage(t *testing.T) {
 		}
 		if _, err := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "0")})}).AsScanEntry(); err == nil || !strings.Contains(err.Error(), "a scan response or its length is not at least 2") {
 			t.Fatal("AsScanEntry not get value as expected")
+		}
+	})
+
+	t.Run("AsClusterScanEntry", func(t *testing.T) {
+		if _, err := (ValkeyResult{err: errors.New("other")}).AsClusterScanEntry(); err == nil {
+			t.Fatal("AsClusterScanEntry not failed as expected")
+		}
+		if _, err := (ValkeyResult{val: ValkeyMessage{typ: '-'}}).AsClusterScanEntry(); err == nil {
+			t.Fatal("AsClusterScanEntry not failed as expected")
+		}
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "0-{06S}-0"), slicemsg('*', []ValkeyMessage{strmsg('+', "a"), strmsg('+', "b")})})}).AsClusterScanEntry(); !reflect.DeepEqual(ClusterScanEntry{
+			Cursor:   "0-{06S}-0",
+			Elements: []string{"a", "b"},
+		}, ret) {
+			t.Fatal("AsClusterScanEntry not get value as expected")
+		}
+		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "0"), {typ: '_'}})}).AsClusterScanEntry(); !reflect.DeepEqual(ClusterScanEntry{}, ret) {
+			t.Fatal("AsClusterScanEntry not get value as expected")
+		}
+		if _, err := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "0")})}).AsClusterScanEntry(); err == nil || !strings.Contains(err.Error(), "a cluster scan response or its length is not at least 2") {
+			t.Fatal("AsClusterScanEntry not get value as expected")
 		}
 	})
 

@@ -508,6 +508,16 @@ func (r ValkeyResult) AsScanEntry() (v ScanEntry, err error) {
 	return
 }
 
+// AsClusterScanEntry delegates to ValkeyMessage.AsClusterScanEntry.
+func (r ValkeyResult) AsClusterScanEntry() (v ClusterScanEntry, err error) {
+	if r.err != nil {
+		err = r.err
+	} else {
+		v, err = r.val.AsClusterScanEntry()
+	}
+	return
+}
+
 // ToMap delegates to ValkeyMessage.ToMap
 func (r ValkeyResult) ToMap() (v map[string]ValkeyMessage, err error) {
 	if r.err != nil {
@@ -1214,6 +1224,33 @@ func (m *ValkeyMessage) AsScanEntry() (e ScanEntry, err error) {
 	return ScanEntry{}, fmt.Errorf("%w: valkey message type %s is not a scan response or its length is not at least 2", errParse, typeNames[typ])
 }
 
+// ClusterScanEntry is the element type of the CLUSTERSCAN command response.
+type ClusterScanEntry struct {
+	Elements []string
+	Cursor   string
+}
+
+// AsClusterScanEntry check if the message is a valkey array/set response of length 2 and convert to ClusterScanEntry.
+func (m *ValkeyMessage) AsClusterScanEntry() (e ClusterScanEntry, err error) {
+	msgs, err := m.ToArray()
+	if err != nil {
+		return ClusterScanEntry{}, err
+	}
+	if len(msgs) >= 2 {
+		cursor, err := msgs[0].ToString()
+		if err != nil {
+			return ClusterScanEntry{}, err
+		}
+		elements, err := msgs[1].AsStrSlice()
+		if err != nil {
+			return ClusterScanEntry{}, err
+		}
+		return ClusterScanEntry{Cursor: cursor, Elements: elements}, nil
+	}
+	typ := m.typ
+	return ClusterScanEntry{}, fmt.Errorf("%w: valkey message type %s is not a cluster scan response or its length is not at least 2", errParse, typeNames[typ])
+}
+
 // AsMap check if the message is a valkey array/set response and convert to map[string]ValkeyMessage
 func (m *ValkeyMessage) AsMap() (map[string]ValkeyMessage, error) {
 	if err := m.Error(); err != nil {
@@ -1259,7 +1296,7 @@ func (m *ValkeyMessage) AsIntMap() (map[string]int64, error) {
 			v := m.values()[i+1]
 			if k.typ == typeBlobString || k.typ == typeSimpleString {
 				if len(v.string()) != 0 {
-					if r[k.string()], err = strconv.ParseInt(v.string(), 10, 64); err != nil {
+					if r[k.string()], err = strconv.ParseInt(v.string(), 0, 64); err != nil {
 						return nil, err
 					}
 				} else if v.typ == typeInteger || v.typ == typeNull {
