@@ -1122,7 +1122,7 @@ func (c *Compat) MSetEX(ctx context.Context, args MSetEXArgs, values ...any) *In
 	// asking for an expiration don't accidentally create persistent keys.
 	if args.Expiration != nil {
 		switch args.Expiration.Mode {
-		case EX, PX, EXAT, PXAT, KEEPTTL:
+		case ExpirationEX, ExpirationPX, ExpirationEXAT, ExpirationPXAT, ExpirationKEEPTTL:
 			// valid
 		default:
 			errCmd := &IntCmd{}
@@ -1140,22 +1140,29 @@ func (c *Compat) MSetEX(ctx context.Context, args MSetEXArgs, values ...any) *In
 	}
 
 	// Add condition (NX or XX)
-	if args.Condition != "" {
+	switch args.Condition {
+	case ConditionNX, ConditionXX:
 		cmd = cmd.Args(string(args.Condition))
+	case "":
+		// valid: no condition specified
+	default:
+		errCmd := &IntCmd{}
+		errCmd.SetErr(fmt.Errorf("MSETEX: invalid condition: %q: %w", args.Condition, ErrLocalValidation))
+		return errCmd
 	}
 
 	// Add expiration options
 	if args.Expiration != nil {
 		switch args.Expiration.Mode {
-		case EX:
+		case ExpirationEX:
 			cmd = cmd.Args("EX", strconv.FormatInt(args.Expiration.Value, 10))
-		case PX:
+		case ExpirationPX:
 			cmd = cmd.Args("PX", strconv.FormatInt(args.Expiration.Value, 10))
-		case EXAT:
+		case ExpirationEXAT:
 			cmd = cmd.Args("EXAT", strconv.FormatInt(args.Expiration.Value, 10))
-		case PXAT:
+		case ExpirationPXAT:
 			cmd = cmd.Args("PXAT", strconv.FormatInt(args.Expiration.Value, 10))
-		case KEEPTTL:
+		case ExpirationKEEPTTL:
 			cmd = cmd.Args("KEEPTTL")
 		}
 	}

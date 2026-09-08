@@ -1688,7 +1688,7 @@ func testAdapter(resp3 bool) {
 			// Returns 1 when all keys are successfully set
 			mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
 				Expiration: &ExpirationOption{
-					Mode:  EX,
+					Mode:  ExpirationEX,
 					Value: 10,
 				},
 			}, "key1", "hello1", "key2", "hello2")
@@ -1715,9 +1715,9 @@ func testAdapter(resp3 bool) {
 			// Test MSetEX with NX condition
 			// Returns 1 when condition is satisfied and keys are set
 			mSetEX = adapter.MSetEX(ctx, MSetEXArgs{
-				Condition: NX,
+				Condition: ConditionNX,
 				Expiration: &ExpirationOption{
-					Mode:  EX,
+					Mode:  ExpirationEX,
 					Value: 10,
 				},
 			}, "key3", "hello3", "key4", "hello4")
@@ -1726,9 +1726,9 @@ func testAdapter(resp3 bool) {
 
 			// Try again with NX - should fail if keys exist
 			mSetEX = adapter.MSetEX(ctx, MSetEXArgs{
-				Condition: NX,
+				Condition: ConditionNX,
 				Expiration: &ExpirationOption{
-					Mode:  EX,
+					Mode:  ExpirationEX,
 					Value: 10,
 				},
 			}, "key3", "new_value", "key5", "hello5")
@@ -1748,7 +1748,7 @@ func testAdapter(resp3 bool) {
 			// Test MSetEX with PX (milliseconds)
 			mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
 				Expiration: &ExpirationOption{
-					Mode:  PX,
+					Mode:  ExpirationPX,
 					Value: 5000, // 5000 milliseconds = 5 seconds
 				},
 			}, "msetex_px_key1", "value1", "msetex_px_key2", "value2")
@@ -1777,7 +1777,7 @@ func testAdapter(resp3 bool) {
 
 			mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
 				Expiration: &ExpirationOption{
-					Mode:  EXAT,
+					Mode:  ExpirationEXAT,
 					Value: exatValue,
 				},
 			}, "msetex_exat_key1", "value1", "msetex_exat_key2", "value2")
@@ -1806,7 +1806,7 @@ func testAdapter(resp3 bool) {
 
 			mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
 				Expiration: &ExpirationOption{
-					Mode:  PXAT,
+					Mode:  ExpirationPXAT,
 					Value: pxatValue,
 				},
 			}, "msetex_pxat_key1", "value1", "msetex_pxat_key2", "value2")
@@ -1838,7 +1838,7 @@ func testAdapter(resp3 bool) {
 			// Now use MSetEX with KEEPTTL to update value while keeping TTL
 			mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
 				Expiration: &ExpirationOption{
-					Mode: KEEPTTL,
+					Mode: ExpirationKEEPTTL,
 				},
 			}, "msetex_keepttl_key1", "updated_value", "msetex_keepttl_key2", "value2")
 			Expect(mSetEX.Err()).NotTo(HaveOccurred())
@@ -1867,9 +1867,9 @@ func testAdapter(resp3 bool) {
 
 			// Now use MSetEX with XX condition to update existing keys
 			mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
-				Condition: XX,
+				Condition: ConditionXX,
 				Expiration: &ExpirationOption{
-					Mode:  EX,
+					Mode:  ExpirationEX,
 					Value: 10,
 				},
 			}, "msetex_xx_existing1", "new_value1", "msetex_xx_existing2", "new_value2")
@@ -1893,9 +1893,9 @@ func testAdapter(resp3 bool) {
 		It("should MSetEX with XX condition (failure - key does not exist)", func() {
 			// Try to use XX condition with non-existent keys
 			mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
-				Condition: XX,
+				Condition: ConditionXX,
 				Expiration: &ExpirationOption{
-					Mode:  EX,
+					Mode:  ExpirationEX,
 					Value: 10,
 				},
 			}, "msetex_xx_nonexist1", "value1", "msetex_xx_nonexist2", "value2")
@@ -1915,7 +1915,7 @@ func testAdapter(resp3 bool) {
 			// Test MSetEX with 3 key-value pairs
 			mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
 				Expiration: &ExpirationOption{
-					Mode:  EX,
+					Mode:  ExpirationEX,
 					Value: 10,
 				},
 			}, "msetex_multi1", "value1", "msetex_multi2", "value2", "msetex_multi3", "value3")
@@ -1944,7 +1944,7 @@ func testAdapter(resp3 bool) {
 			// Test MSetEX with odd number of arguments (should fail)
 			mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
 				Expiration: &ExpirationOption{
-					Mode:  EX,
+					Mode:  ExpirationEX,
 					Value: 10,
 				},
 			}, "key1", "value1", "key2") // Odd number: 3 args
@@ -1960,8 +1960,8 @@ func testAdapter(resp3 bool) {
 
 			result := adapter.MSetEX(ctx, MSetEXArgs{
 				Expiration: &ExpirationOption{
-					Mode:  EX,
-					Value: 10,
+					Mode:  ExpirationEX,
+					Value: 1,
 				},
 			}, "compare1", "value1", "compare2", "value2")
 
@@ -1971,19 +1971,16 @@ func testAdapter(resp3 bool) {
 			pttl1 := adapter.PTTL(ctx, "compare1").Val()
 			pttl2 := adapter.PTTL(ctx, "compare2").Val()
 
-			fmt.Printf("valkeycompat PTTL compare1 = %d ms\n", pttl1.Milliseconds())
-			fmt.Printf("valkeycompat PTTL compare2 = %d ms\n", pttl2.Milliseconds())
-
 			Expect(pttl1).To(BeNumerically(">", 0))
 			Expect(pttl2).To(BeNumerically(">", 0))
 
 			Eventually(func() int64 {
 				return adapter.Exists(ctx, "compare1").Val()
-			}, 12*time.Second, 100*time.Millisecond).Should(Equal(int64(0)))
+			}, 2*time.Second, 50*time.Millisecond).Should(Equal(int64(0)))
 
 			Eventually(func() int64 {
 				return adapter.Exists(ctx, "compare2").Val()
-			}, 12*time.Second, 100*time.Millisecond).Should(Equal(int64(0)))
+			}, 2*time.Second, 50*time.Millisecond).Should(Equal(int64(0)))
 		})
 
 		It("should MSetEX work with pipeline", func() {
@@ -1992,7 +1989,7 @@ func testAdapter(resp3 bool) {
 			// Add MSetEX command to pipeline
 			mSetEX := pipe.MSetEX(ctx, MSetEXArgs{
 				Expiration: &ExpirationOption{
-					Mode:  EX,
+					Mode:  ExpirationEX,
 					Value: 10,
 				},
 			}, "pipeline_msetex1", "value1", "pipeline_msetex2", "value2")
@@ -2487,7 +2484,7 @@ func testAdapter(resp3 bool) {
 
 	It("should MSetEX reject empty values", func() {
 		mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
-			Expiration: &ExpirationOption{Mode: EX, Value: 10},
+			Expiration: &ExpirationOption{Mode: ExpirationEX, Value: 10},
 		})
 		Expect(mSetEX.Err()).To(HaveOccurred())
 		Expect(errors.Is(mSetEX.Err(), ErrLocalValidation)).To(BeTrue())
@@ -2496,8 +2493,16 @@ func testAdapter(resp3 bool) {
 	It("should MSetEX reject empty map", func() {
 		empty := map[string]string{}
 		mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
-			Expiration: &ExpirationOption{Mode: EX, Value: 10},
+			Expiration: &ExpirationOption{Mode: ExpirationEX, Value: 10},
 		}, empty)
+		Expect(mSetEX.Err()).To(HaveOccurred())
+		Expect(errors.Is(mSetEX.Err(), ErrLocalValidation)).To(BeTrue())
+	})
+
+	It("should MSetEX reject invalid condition", func() {
+		mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
+			Condition: "INVALID",
+		}, "key1", "val1")
 		Expect(mSetEX.Err()).To(HaveOccurred())
 		Expect(errors.Is(mSetEX.Err(), ErrLocalValidation)).To(BeTrue())
 	})

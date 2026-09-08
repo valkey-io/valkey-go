@@ -2300,26 +2300,26 @@ type SetArgs struct {
 type SetCondition string
 
 const (
-	// NX only set the keys and their expiration if none exist
-	NX SetCondition = "NX"
-	// XX only set the keys and their expiration if all already exist
-	XX SetCondition = "XX"
+	// ConditionNX only sets the keys and their expiration if none exist
+	ConditionNX SetCondition = "NX"
+	// ConditionXX only sets the keys and their expiration if all already exist
+	ConditionXX SetCondition = "XX"
 )
 
 // ExpirationMode is the expiration mode for MSetEX
 type ExpirationMode string
 
 const (
-	// EX sets expiration in seconds
-	EX ExpirationMode = "EX"
-	// PX sets expiration in milliseconds
-	PX ExpirationMode = "PX"
-	// EXAT sets expiration as Unix timestamp in seconds
-	EXAT ExpirationMode = "EXAT"
-	// PXAT sets expiration as Unix timestamp in milliseconds
-	PXAT ExpirationMode = "PXAT"
-	// KEEPTTL keeps the existing TTL
-	KEEPTTL ExpirationMode = "KEEPTTL"
+	// ExpirationEX sets expiration in seconds
+	ExpirationEX ExpirationMode = "EX"
+	// ExpirationPX sets expiration in milliseconds
+	ExpirationPX ExpirationMode = "PX"
+	// ExpirationEXAT sets expiration as Unix timestamp in seconds
+	ExpirationEXAT ExpirationMode = "EXAT"
+	// ExpirationPXAT sets expiration as Unix timestamp in milliseconds
+	ExpirationPXAT ExpirationMode = "PXAT"
+	// ExpirationKEEPTTL keeps the existing TTL
+	ExpirationKEEPTTL ExpirationMode = "KEEPTTL"
 )
 
 // ExpirationOption provides expiration options
