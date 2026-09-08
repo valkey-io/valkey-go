@@ -13795,6 +13795,7 @@ func testAdapterSearchRESP2() {
 				"description": "Health trends for the new year, including fitness regimes.",
 				"rating":      4,
 			})
+			WaitForIndexing(client, "idx1", 2)
 
 			res, err := adapter.FTSearchWithArgs(ctx, "idx1", "@uuid:{$uuid}",
 				&FTSearchOptions{
@@ -13842,6 +13843,7 @@ func testAdapterSearchRESP2() {
 			val, err = adapter.FTCreate(ctx, "idx_hash", ftCreateOptions, schema...).Result()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(val).To(Equal("OK"))
+			WaitForIndexing(client, "idx_hash", 2)
 
 			ftSearchOptions := &FTSearchOptions{
 				DialectVersion: 4,
