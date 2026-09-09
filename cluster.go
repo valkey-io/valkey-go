@@ -957,46 +957,34 @@ func (c *clusterClient) rebucketRetries(retries *connretry) {
 		n := len(nr.commands)
 		keepIdx := nr.cIndexes[:0]
 		keepCmd := nr.commands[:0]
-		i := 0
-		for i < n {
-			// Locate the next MULTI or EXEC. Everything before it is a
-			// non-transaction run that can be re-picked per command.
-			txStart := n
-			for j := i; j < n; j++ {
-				if isMulti(nr.commands[j]) || isExec(nr.commands[j]) {
-					txStart = j
-					break
-				}
-			}
-			for j := i; j < txStart; j++ {
-				cmd := nr.commands[j]
+		for i := 0; i < n; {
+			if !isMulti(nr.commands[i]) {
+				cmd := nr.commands[i]
 				nc := c._pick(cmd.Slot(), c.toReplica(cmd))
 				if nc == nil || nc == oldConn {
-					keepIdx = append(keepIdx, nr.cIndexes[j])
+					keepIdx = append(keepIdx, nr.cIndexes[i])
 					keepCmd = append(keepCmd, cmd)
-					continue
+				} else {
+					moves = append(moves, moved{nc: nc, cIndex: nr.cIndexes[i], cmd: cmd})
 				}
-				moves = append(moves, moved{nc: nc, cIndex: nr.cIndexes[j], cmd: cmd})
+				i++
+				continue
 			}
-			if txStart == n {
-				break
+			// Find the matching EXEC. If the bucket only holds a partial
+			// span (which can happen if the original MULTI reply was not
+			// OK), no EXEC is found and the span runs to the end of the
+			// bucket instead; either way, keep the span intact.
+			j := i + 1
+			for j < n && !isExec(nr.commands[j]) {
+				j++
 			}
-			// Extend the transaction span through its matching EXEC. If the
-			// bucket only holds a partial span (which can happen if the
-			// original MULTI reply was not OK) span runs to the end of the
-			// bucket; either way, keep the span intact.
-			txEnd := txStart
-			for k := txStart; k < n; k++ {
-				if isExec(nr.commands[k]) {
-					txEnd = k
-					break
-				}
-				txEnd = k
+			if j == n {
+				j = n - 1
 			}
 			// Pick a slot for the whole span. MULTI/EXEC carry InitSlot, so
 			// prefer the slot of a real key inside the span.
-			spanSlot := nr.commands[txStart].Slot()
-			for k := txStart; k <= txEnd; k++ {
+			spanSlot := nr.commands[i].Slot()
+			for k := i; k <= j; k++ {
 				if s := nr.commands[k].Slot(); s != cmds.InitSlot {
 					spanSlot = s
 					break
@@ -1007,16 +995,16 @@ func (c *clusterClient) rebucketRetries(retries *connretry) {
 				nc = oldConn
 			}
 			if nc == oldConn {
-				for k := txStart; k <= txEnd; k++ {
+				for k := i; k <= j; k++ {
 					keepIdx = append(keepIdx, nr.cIndexes[k])
 					keepCmd = append(keepCmd, nr.commands[k])
 				}
 			} else {
-				for k := txStart; k <= txEnd; k++ {
+				for k := i; k <= j; k++ {
 					moves = append(moves, moved{nc: nc, cIndex: nr.cIndexes[k], cmd: nr.commands[k]})
 				}
 			}
-			i = txEnd + 1
+			i = j + 1
 		}
 		nr.cIndexes = keepIdx
 		nr.commands = keepCmd

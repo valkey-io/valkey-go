@@ -11994,6 +11994,98 @@ func TestClusterDoMultiCacheRepicksAfterReplicaRemoval(t *testing.T) {
 	}
 }
 
+// TestClusterDoMultiTransactionNeverGoesToReplica guards against a tempting
+// but wrong simplification: picking a retrying command's new conn with
+// c._pick(cm.Slot(), c.toReplica(cm)) directly in doresultfn, using the
+// failing command's own replica-routing flag, instead of keeping the conn
+// the transaction was already on. _pickMulti always sends a batch
+// containing MULTI/EXEC to the primary (wslots), never a replica, because a
+// transaction cannot reliably run on a replica. If a retryable read inside
+// the transaction fails and is eligible for replica routing, re-picking the
+// whole MULTI..EXEC span with that command's own toReplica flag would send
+// the entire transaction to a replica on retry. doresultfn keeps nc == cc
+// (the conn already in use) for RedirectRetry precisely to avoid this.
+func TestClusterDoMultiTransactionNeverGoesToReplica(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	var primaryCalls, replicaCalls int64
+
+	primaryConn := &mockConn{
+		DoFn: func(cmd Completed) ValkeyResult {
+			if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
+				return slotsResp
+			}
+			return ValkeyResult{}
+		},
+		DoMultiFn: func(multi ...Completed) *valkeyresults {
+			n := atomic.AddInt64(&primaryCalls, 1)
+			out := make([]ValkeyResult, len(multi))
+			for i, cmd := range multi {
+				if n == 1 && strings.Join(cmd.Commands(), " ") == "GET {t}k" {
+					out[i] = NewErrorResult(errors.New("read: connection reset by peer"))
+				} else {
+					out[i] = NewResult(strmsg('+', "OK"), nil)
+				}
+			}
+			return &valkeyresults{s: out}
+		},
+	}
+	replicaConn := &mockConn{
+		DoFn: func(cmd Completed) ValkeyResult {
+			if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
+				return slotsResp
+			}
+			return ValkeyResult{}
+		},
+		DoMultiFn: func(multi ...Completed) *valkeyresults {
+			atomic.AddInt64(&replicaCalls, 1)
+			out := make([]ValkeyResult, len(multi))
+			for i := range multi {
+				out[i] = NewResult(strmsg('+', "OK"), nil)
+			}
+			return &valkeyresults{s: out}
+		},
+	}
+
+	client, err := newClusterClient(
+		&ClientOption{
+			InitAddress:    []string{":0"},
+			SendToReplicas: func(cmd Completed) bool { return cmd.IsReadOnly() },
+		},
+		func(dst string, opt *ClientOption) conn {
+			switch dst {
+			case "127.0.0.1:0":
+				return primaryConn
+			case "127.0.1.1:1":
+				return replicaConn
+			}
+			return primaryConn
+		},
+		newRetryer(defaultRetryDelayFn),
+	)
+	if err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	defer client.Close()
+
+	multiCmd := client.B().Multi().Build()
+	getCmd := client.B().Get().Key("{t}k").Build()
+	execCmd := client.B().Exec().Build()
+
+	resps := client.DoMulti(context.Background(), multiCmd, getCmd, execCmd)
+	for i, resp := range resps {
+		if v, err := resp.ToString(); err != nil || v != "OK" {
+			t.Fatalf("unexpected response[%d] %v %v", i, v, err)
+		}
+	}
+	if got := atomic.LoadInt64(&replicaCalls); got != 0 {
+		t.Fatalf("replica DoMulti calls = %d; want 0, transaction must never be sent to a replica", got)
+	}
+	if got := atomic.LoadInt64(&primaryCalls); got != 2 {
+		t.Fatalf("primary DoMulti calls = %d; want 2 (initial send + retry)", got)
+	}
+}
+
 // TestClusterDoMultiTransactionStaysCoherent unit-tests rebucketRetries
 // directly. The DoMulti retry envelope's Redirects branch pre-empts the
 // RetryDelay branch whenever a transaction is detected in retries.m (see the
