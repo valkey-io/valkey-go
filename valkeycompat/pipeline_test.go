@@ -643,7 +643,6 @@ func TestPipeliner(t *testing.T) {
 			Args: []any{"1", "2"},
 		})
 
-		if n := len(p.rets); n != 493 {
 		if n := len(p.rets); n != 494 {
 			t.Fatalf("unexpected pipeline calls: %v", n)
 		}
@@ -652,7 +651,6 @@ func TestPipeliner(t *testing.T) {
 				t.Fatalf("unexpected pipeline placeholder err(%d): %v", i, err)
 			}
 		}
-		if n := len(p.comp.client.(*proxy).cmds); n != 493 {
 		if n := len(p.comp.client.(*proxy).cmds); n != 494 {
 			t.Fatalf("unexpected pipeline commands: %v", n)
 		}
