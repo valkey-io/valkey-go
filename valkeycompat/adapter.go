@@ -361,6 +361,8 @@ type CoreCmdable interface {
 	SlaveOf(ctx context.Context, host, port string) *StatusCmd
 	SlowLogGet(ctx context.Context, num int64) *SlowLogCmd
 	SlowLogReset(ctx context.Context) *StatusCmd
+	Latency(ctx context.Context) *LatencyCmd
+	LatencyReset(ctx context.Context, events ...interface{}) *StatusCmd
 	Time(ctx context.Context) *TimeCmd
 	DebugObject(ctx context.Context, key string) *StringCmd
 	ReadOnly(ctx context.Context) *StatusCmd
@@ -3013,6 +3015,37 @@ func (c *Compat) SlowLogReset(ctx context.Context) *StatusCmd {
 	cmd := c.client.B().SlowlogReset().Build()
 	resp := c.client.Do(ctx, cmd)
 	return newStatusCmd(resp)
+}
+
+func (c *Compat) Latency(ctx context.Context) *LatencyCmd {
+	cmd := c.client.B().Arbitrary("LATENCY", "LATEST").ReadOnly()
+	resp := c.client.Do(ctx, cmd)
+	return newLatencyCmd(resp)
+}
+
+func (c *Compat) LatencyReset(ctx context.Context, events ...interface{}) *StatusCmd {
+	b := c.client.B().Arbitrary("LATENCY", "RESET")
+	if len(events) > 0 {
+		b = b.Args(argsToSlice(events)...)
+	}
+
+	cmd := b.Build()
+	resp := c.client.Do(ctx, cmd)
+
+	statusCmd := &StatusCmd{}
+	if err := resp.Error(); err != nil {
+		statusCmd.SetErr(err)
+		return statusCmd
+	}
+
+	val, err := resp.AsInt64()
+	if err != nil {
+		statusCmd.SetErr(err)
+		return statusCmd
+	}
+
+	statusCmd.SetVal(strconv.FormatInt(val, 10))
+	return statusCmd
 }
 
 func (c *Compat) Time(ctx context.Context) *TimeCmd {

@@ -635,6 +635,8 @@ func TestPipeliner(t *testing.T) {
 		p.SlaveOf(ctx, "NO", "ONE")
 		p.SlowLogGet(ctx, 1)
 		p.SlowLogReset(ctx)
+		p.Latency(ctx)
+		p.LatencyReset(ctx)
 		p.ClusterMyShardID(ctx)
 		p.ModuleLoadex(ctx, &ModuleLoadexConfig{
 			Path: "/",
@@ -1173,6 +1175,8 @@ var golden = `[
     ["SLAVEOF","NO","ONE"],
     ["SLOWLOG","GET","1"],
     ["SLOWLOG","RESET"],
+    ["LATENCY","LATEST"],
+    ["LATENCY","RESET"],
     ["CLUSTER","MYSHARDID"],
     ["MODULE","LOADEX","/","CONFIG","k","v","ARGS","1","2"]
 ]`
