@@ -39,6 +39,9 @@ import (
 	"github.com/valkey-io/valkey-go/internal/util"
 )
 
+
+var ErrLocalValidation = errors.New("valkeycompat: local validation error")
+
 type Cmder interface {
 	SetErr(error)
 	Err() error
@@ -2357,6 +2360,44 @@ type SetArgs struct {
 	TTL      time.Duration
 	Get      bool
 	KeepTTL  bool
+}
+
+// SetCondition is the condition for MSetEX
+type SetCondition string
+
+const (
+	// ConditionNX only sets the keys and their expiration if none exist
+	ConditionNX SetCondition = "NX"
+	// ConditionXX only sets the keys and their expiration if all already exist
+	ConditionXX SetCondition = "XX"
+)
+
+// ExpirationMode is the expiration mode for MSetEX
+type ExpirationMode string
+
+const (
+	// ExpirationEX sets expiration in seconds
+	ExpirationEX ExpirationMode = "EX"
+	// ExpirationPX sets expiration in milliseconds
+	ExpirationPX ExpirationMode = "PX"
+	// ExpirationEXAT sets expiration as Unix timestamp in seconds
+	ExpirationEXAT ExpirationMode = "EXAT"
+	// ExpirationPXAT sets expiration as Unix timestamp in milliseconds
+	ExpirationPXAT ExpirationMode = "PXAT"
+	// ExpirationKEEPTTL keeps the existing TTL
+	ExpirationKEEPTTL ExpirationMode = "KEEPTTL"
+)
+
+// ExpirationOption provides expiration options
+type ExpirationOption struct {
+	Mode  ExpirationMode
+	Value int64
+}
+
+// MSetEXArgs provides arguments for the MSetEX function
+type MSetEXArgs struct {
+	Condition  SetCondition
+	Expiration *ExpirationOption
 }
 
 type BitCount struct {

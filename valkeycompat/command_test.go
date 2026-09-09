@@ -35,6 +35,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/valkey-io/valkey-go/mock"
+	"go.uber.org/mock/gomock"
 )
 
 var _ = Describe("Commands", func() {
@@ -612,6 +613,20 @@ var _ = Describe("Commands", func() {
 			Expect(err1).To(Equal(err))
 			Expect(cmd.Err()).To(Equal(err))
 		}
+	})
+
+	It("builds MSETEX command in pipeline", func() {
+		ctrl := gomock.NewController(GinkgoT())
+		defer ctrl.Finish()
+		m := mock.NewClient(ctrl)
+		p := newPipeline(m)
+		// call MSetEX with one key/value and EX 1
+		p.MSetEX(ctx, MSetEXArgs{Expiration: &ExpirationOption{Mode: ExpirationEX, Value: 1}}, "k1", "v1")
+		cmds := p.comp.client.(*proxy).cmds
+		Expect(len(cmds)).To(BeNumerically(">", 0))
+		last := cmds[len(cmds)-1].Commands()
+		expected := []string{"MSETEX", "1", "k1", "v1", "EX", "1"}
+		Expect(last).To(Equal(expected))
 	})
 })
 
