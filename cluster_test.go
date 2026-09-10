@@ -12100,23 +12100,7 @@ func TestClusterDoMultiTransactionStaysCoherent(t *testing.T) {
 	oldConn := &mockConn{DoFn: func(cmd Completed) ValkeyResult { return ValkeyResult{} }}
 	newConn := &mockConn{DoFn: func(cmd Completed) ValkeyResult { return ValkeyResult{} }}
 
-	client, err := newClusterClient(
-		&ClientOption{InitAddress: []string{":0"}},
-		func(dst string, opt *ClientOption) conn {
-			return &mockConn{
-				DoFn: func(cmd Completed) ValkeyResult {
-					if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
-						return slotsResp
-					}
-					return ValkeyResult{}
-				},
-			}
-		},
-		newRetryer(defaultRetryDelayFn),
-	)
-	if err != nil {
-		t.Fatalf("unexpected err %v", err)
-	}
+	client := newRebucketTestClient(t)
 	defer client.Close()
 
 	// Simulate lazyRefresh convergence: every slot now routes to newConn.
@@ -12168,5 +12152,186 @@ func TestClusterDoMultiTransactionStaysCoherent(t *testing.T) {
 	// cIndexes must be preserved: MULTI kept its original batch index 0, SET 1, EXEC 2.
 	if moved.cIndexes[mi] != 0 || moved.cIndexes[si] != 1 || moved.cIndexes[ei] != 2 {
 		t.Fatalf("cIndexes not preserved for transaction span: %+v", moved.cIndexes)
+	}
+}
+
+// newRebucketTestClient builds a cluster client whose slot map every test
+// below can rewrite directly. Like TestClusterDoMultiTransactionStaysCoherent,
+// these unit-test rebucketRetries / rebucketRetriesCache directly, since a
+// natural DoMulti call with a transaction never reaches rebucketRetries.
+func newRebucketTestClient(t *testing.T) *clusterClient {
+	t.Helper()
+	client, err := newClusterClient(
+		&ClientOption{InitAddress: []string{":0"}},
+		func(dst string, opt *ClientOption) conn {
+			return &mockConn{
+				DoFn: func(cmd Completed) ValkeyResult {
+					if strings.Join(cmd.Commands(), " ") == "CLUSTER SLOTS" {
+						return slotsResp
+					}
+					return ValkeyResult{}
+				},
+			}
+		},
+		newRetryer(defaultRetryDelayFn),
+	)
+	if err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	return client
+}
+
+// TestClusterRebucketRetriesSpanStaysWhenSlotUnchanged covers the span branch
+// where _pick returns the conn the span is already on, so it stays put.
+func TestClusterRebucketRetriesSpanStaysWhenSlotUnchanged(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+	client := newRebucketTestClient(t)
+	defer client.Close()
+
+	oldConn := &mockConn{DoFn: func(cmd Completed) ValkeyResult { return ValkeyResult{} }}
+	// The span's slot still maps to oldConn: _pick(spanSlot, false) == oldConn.
+	client.mu.Lock()
+	for i := range client.wslots {
+		client.wslots[i] = oldConn
+	}
+	client.mu.Unlock()
+
+	retries := connretryp.Get(1, 1)
+	defer connretryp.Put(retries)
+	nr := retryp.Get(0, 3)
+	nr.cIndexes = append(nr.cIndexes, 0, 1, 2)
+	nr.commands = append(nr.commands, client.B().Multi().Build(), client.B().Set().Key("{t}k").Value("v").Build(), client.B().Exec().Build())
+	retries.m[oldConn] = nr
+
+	client.rebucketRetries(retries)
+
+	kept := retries.m[oldConn]
+	if kept == nil || len(kept.commands) != 3 {
+		t.Fatalf("span should stay on oldConn intact, got %+v", retries.m)
+	}
+	if len(retries.m) != 1 {
+		t.Fatalf("no new bucket expected, got %d buckets", len(retries.m))
+	}
+}
+
+// TestClusterRebucketRetriesSpanStaysWhenSlotUnmapped covers the span branch
+// where _pick returns nil (slot has no primary conn) and the span falls back
+// to oldConn.
+func TestClusterRebucketRetriesSpanStaysWhenSlotUnmapped(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+	client := newRebucketTestClient(t)
+	defer client.Close()
+
+	oldConn := &mockConn{DoFn: func(cmd Completed) ValkeyResult { return ValkeyResult{} }}
+	// Every slot is unmapped: _pick(spanSlot, false) == nil.
+	client.mu.Lock()
+	for i := range client.wslots {
+		client.wslots[i] = nil
+	}
+	client.mu.Unlock()
+
+	retries := connretryp.Get(1, 1)
+	defer connretryp.Put(retries)
+	nr := retryp.Get(0, 3)
+	nr.cIndexes = append(nr.cIndexes, 0, 1, 2)
+	nr.commands = append(nr.commands, client.B().Multi().Build(), client.B().Set().Key("{t}k").Value("v").Build(), client.B().Exec().Build())
+	retries.m[oldConn] = nr
+
+	client.rebucketRetries(retries)
+
+	kept := retries.m[oldConn]
+	if kept == nil || len(kept.commands) != 3 {
+		t.Fatalf("span should stay on oldConn when slot is unmapped, got %+v", retries.m)
+	}
+	if len(retries.m) != 1 {
+		t.Fatalf("no new bucket expected, got %d buckets", len(retries.m))
+	}
+}
+
+// TestClusterRebucketRetriesPartialSpanWithoutExec covers the j == n fallback:
+// a MULTI with no matching EXEC (a partial span) runs to the end of the bucket
+// and still moves as a single unit.
+func TestClusterRebucketRetriesPartialSpanWithoutExec(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+	client := newRebucketTestClient(t)
+	defer client.Close()
+
+	oldConn := &mockConn{DoFn: func(cmd Completed) ValkeyResult { return ValkeyResult{} }}
+	newConn := &mockConn{DoFn: func(cmd Completed) ValkeyResult { return ValkeyResult{} }}
+	client.mu.Lock()
+	for i := range client.wslots {
+		client.wslots[i] = newConn
+	}
+	client.mu.Unlock()
+
+	// MULTI + SET, no EXEC: the span has no matching EXEC and runs to the end.
+	retries := connretryp.Get(1, 1)
+	defer connretryp.Put(retries)
+	nr := retryp.Get(0, 2)
+	nr.cIndexes = append(nr.cIndexes, 0, 1)
+	nr.commands = append(nr.commands, client.B().Multi().Build(), client.B().Set().Key("{t}k").Value("v").Build())
+	retries.m[oldConn] = nr
+
+	client.rebucketRetries(retries)
+
+	if _, still := retries.m[oldConn]; still {
+		t.Fatalf("oldConn bucket must be drained, got %+v", retries.m[oldConn])
+	}
+	moved := retries.m[newConn]
+	if moved == nil || len(moved.commands) != 2 {
+		t.Fatalf("partial span should move to newConn intact, got %+v", retries.m)
+	}
+	if strings.Join(moved.commands[0].Commands(), " ") != "MULTI" || moved.cIndexes[0] != 0 || moved.cIndexes[1] != 1 {
+		t.Fatalf("partial span not preserved contiguously: %+v", moved.commands)
+	}
+}
+
+// TestClusterRebucketRetriesAskOnlyBucket covers the len(nr.commands) == 0
+// continue: a bucket that holds only ASK-redirected commands is skipped and
+// left untouched.
+func TestClusterRebucketRetriesAskOnlyBucket(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+	client := newRebucketTestClient(t)
+	defer client.Close()
+
+	askConn := &mockConn{DoFn: func(cmd Completed) ValkeyResult { return ValkeyResult{} }}
+
+	retries := connretryp.Get(1, 1)
+	defer connretryp.Put(retries)
+	nr := retryp.Get(0, 1)
+	// Only ASK entries, no normal commands.
+	nr.aIndexes = append(nr.aIndexes, 0)
+	nr.cAskings = append(nr.cAskings, client.B().Get().Key("{t}k").Build())
+	retries.m[askConn] = nr
+
+	client.rebucketRetries(retries)
+
+	kept := retries.m[askConn]
+	if kept == nil || len(kept.cAskings) != 1 {
+		t.Fatalf("ASK-only bucket must be left untouched, got %+v", retries.m)
+	}
+}
+
+// TestClusterRebucketRetriesCacheAskOnlyBucket covers the same
+// len(nr.commands) == 0 continue in the DoMultiCache path.
+func TestClusterRebucketRetriesCacheAskOnlyBucket(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+	client := newRebucketTestClient(t)
+	defer client.Close()
+
+	askConn := &mockConn{DoFn: func(cmd Completed) ValkeyResult { return ValkeyResult{} }}
+
+	retries := connretrycachep.Get(1, 1)
+	defer connretrycachep.Put(retries)
+	nr := retrycachep.Get(0, 1)
+	nr.aIndexes = append(nr.aIndexes, 0)
+	nr.cAskings = append(nr.cAskings, CT(client.B().Get().Key("{t}k").Cache(), time.Second))
+	retries.m[askConn] = nr
+
+	client.rebucketRetriesCache(retries)
+
+	kept := retries.m[askConn]
+	if kept == nil || len(kept.cAskings) != 1 {
+		t.Fatalf("ASK-only cache bucket must be left untouched, got %+v", retries.m)
 	}
 }

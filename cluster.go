@@ -941,9 +941,6 @@ func (c *clusterClient) doresultfn(
 // A MULTI..EXEC transaction span is moved as a unit to _pick(slot, false)
 // (the primary) so a transaction never splits across two conns.
 func (c *clusterClient) rebucketRetries(retries *connretry) {
-	if len(retries.m) == 0 {
-		return
-	}
 	type moved struct {
 		nc     conn
 		cIndex int
@@ -1458,9 +1455,6 @@ func (c *clusterClient) resultcachefn(
 // Cacheable commands never contain MULTI/EXEC so the transaction pinning
 // is omitted, but the ASK-preservation and empty-bucket cleanup match.
 func (c *clusterClient) rebucketRetriesCache(retries *connretrycache) {
-	if len(retries.m) == 0 {
-		return
-	}
 	type moved struct {
 		nc     conn
 		cIndex int
