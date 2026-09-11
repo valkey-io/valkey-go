@@ -2,6 +2,7 @@ package valkey
 
 import (
 	"context"
+	"errors"
 	"net"
 	"runtime"
 	"strings"
@@ -69,6 +70,18 @@ type mux struct {
 	optIn   bool
 }
 
+func isLoadingErr(err error) bool {
+	var vErr *ValkeyError
+	if errors.As(err, &vErr) {
+		return vErr.IsLoading()
+	}
+	return false
+}
+
+func isConnRetryable(err error) bool {
+	return isLoadingErr(err) || isDialRetryable(err)
+}
+
 func makeMux(dst string, option *ClientOption, dialFn dialFn) *mux {
 	dead := deadFn()
 	connFn := func(ctx context.Context) (net.Conn, error) {
@@ -76,12 +89,36 @@ func makeMux(dst string, option *ClientOption, dialFn dialFn) *mux {
 	}
 	wireFn := func(pipeFn pipeFn) func(context.Context) wire {
 		return func(ctx context.Context) (w wire) {
-			w, err := pipeFn(ctx, connFn, option)
-			if err != nil {
-				dead.error.Store(&errs{error: err})
-				w = dead
+			maxAttempts := max(0, option.DialerRetries)
+			for attempt := 0; attempt <= maxAttempts; attempt++ {
+				if ctx.Err() != nil {
+					dead.error.Store(&errs{error: ctx.Err()})
+					return dead
+				}
+				w, err := pipeFn(ctx, connFn, option)
+				if err == nil {
+					return w
+				}
+				if !isConnRetryable(err) || attempt == maxAttempts {
+					dead.error.Store(&errs{error: err})
+					return dead
+				}
+				var backoff time.Duration
+				if option.DialerRetryBackoff != nil {
+					backoff = option.DialerRetryBackoff(attempt)
+				}
+				if backoff > 0 {
+					tm := time.NewTimer(backoff)
+					select {
+					case <-ctx.Done():
+						tm.Stop()
+						dead.error.Store(&errs{error: ctx.Err()})
+						return dead
+					case <-tm.C:
+					}
+				}
 			}
-			return w
+			return dead
 		}
 	}
 	return newMux(dst, option, (*pipe)(nil), dead, wireFn(newPipe), wireFn(newPipeNoBg))

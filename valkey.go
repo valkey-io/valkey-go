@@ -12,6 +12,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/valkey-io/valkey-go/internal/util"
@@ -97,9 +98,36 @@ var (
 type ReadNodeSelectorFunc func(slot uint16, nodes []NodeInfo) int
 type ReplicaSelectorFunc func(slot uint16, replicas []NodeInfo) int
 
+// DialerRetryBackoffFn returns the delay before the next connection retry attempt.
+type DialerRetryBackoffFn func(attempt int) time.Duration
+
+// FullJitterRetryDelayFn is an alternative RetryDelay option that delays the next retry exponentially with Full Jitter.
+// Maximum delay is 1 second.
+func FullJitterRetryDelayFn(attempts int, cmd Completed, err error) time.Duration {
+	return defaultFullJitterRetryDelayFn(attempts, cmd, err)
+}
+
+var defaultFullJitterRetryDelayFn = fullJitterRetryDelayFn(10*time.Millisecond, defaultMaxRetryDelay)
+
 // ClientOption should be passed to NewClient to construct a Client
 type ClientOption struct {
 	TLSConfig *tls.Config
+
+	// DialerRetries is the maximum connection retry attempts during dial before escalating the error to the caller.
+	// Default is 0 (fail-fast without retrying).
+	DialerRetries int
+
+	// DialerRetryBaseDelay is the base backoff duration applied between consecutive dial attempts.
+	// Default is 10ms.
+	DialerRetryBaseDelay time.Duration
+
+	// DialerRetryMaxDelay is the maximum backoff duration ceiling applied between consecutive dial attempts.
+	// Default is 3s.
+	DialerRetryMaxDelay time.Duration
+
+	// DialerRetryBackoff is a custom backoff algorithm (e.g., Full Jitter, Exponential with Cap) to disperse reconnect bursts.
+	// If nil and DialerRetries > 0, fullJitterDelayFn is used with DialerRetryBaseDelay and DialerRetryMaxDelay.
+	DialerRetryBackoff DialerRetryBackoffFn
 
 	// DialFn allows for a custom function to be used to create net.Conn connections
 	// Deprecated: use DialCtxFn instead.
@@ -124,7 +152,8 @@ type ClientOption struct {
 	AuthCredentialsFn func(AuthCredentialsContext) (AuthCredentials, error)
 
 	// RetryDelay is the function that returns the delay that should be used before retrying the attempt.
-	// The default is an exponential backoff with a maximum delay of 1 second.
+	// The default is an exponential backoff with Equal Jitter and a maximum delay of 1 second (defaultRetryDelayFn).
+	// FullJitterRetryDelayFn (Full Jitter, max delay 1s) is also available.
 	// Only used when DisableRetry is false.
 	RetryDelay RetryDelayFn
 
@@ -547,6 +576,15 @@ func NewClient(option ClientOption) (client Client, err error) {
 	if option.PipelineMultiplex > MaxPipelineMultiplex {
 		return nil, ErrWrongPipelineMultiplex
 	}
+	if option.DialerRetryBaseDelay <= 0 {
+		option.DialerRetryBaseDelay = 10 * time.Millisecond
+	}
+	if option.DialerRetryMaxDelay <= 0 {
+		option.DialerRetryMaxDelay = 3 * time.Second
+	}
+	if option.DialerRetryBackoff == nil {
+		option.DialerRetryBackoff = fullJitterDelayFn(option.DialerRetryBaseDelay, option.DialerRetryMaxDelay)
+	}
 	if option.RetryDelay == nil {
 		option.RetryDelay = defaultRetryDelayFn
 	}
@@ -601,7 +639,29 @@ func makeConn(dst string, opt *ClientOption) conn {
 	return makeMux(dst, opt, dial)
 }
 
+func isDialRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ETIMEDOUT) || errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "timed out")
+}
+
 func dial(ctx context.Context, dst string, opt *ClientOption) (conn net.Conn, err error) {
+	return dialOnce(ctx, dst, opt)
+}
+
+func dialOnce(ctx context.Context, dst string, opt *ClientOption) (conn net.Conn, err error) {
 	if opt.DialCtxFn != nil {
 		return opt.DialCtxFn(ctx, dst, &opt.Dialer, opt.TLSConfig)
 	}

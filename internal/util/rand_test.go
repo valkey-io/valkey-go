@@ -22,6 +22,20 @@ func TestFastRand(t *testing.T) {
 	}
 }
 
+func TestFastRandInt64(t *testing.T) {
+	n := int64(10)
+	res := FastRandInt64(n)
+	if res < 0 || res >= n {
+		t.Errorf("Expected result between 0 and %d, got %d", n-1, res)
+	}
+
+	largeN := int64(10_000_000_000)
+	resLarge := FastRandInt64(largeN)
+	if resLarge < 0 || resLarge >= largeN {
+		t.Errorf("Expected result between 0 and %d, got %d", largeN-1, resLarge)
+	}
+}
+
 func TestRandomBytes(t *testing.T) {
 	val := RandomBytes()
 	if len(val) != 24 {

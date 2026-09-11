@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -1454,4 +1455,230 @@ func (m *mockWire) Close() {
 	if m.CloseFn != nil {
 		m.CloseFn()
 	}
+}
+
+func TestIsLoadingErr(t *testing.T) {
+	if isLoadingErr(nil) {
+		t.Fatalf("expected false for nil")
+	}
+	if isLoadingErr(errors.New("generic error")) {
+		t.Fatalf("expected false for non-valkey error")
+	}
+	loadingMsg := ValkeyError(strmsg('-', "LOADING Valkey is loading the dataset in memory"))
+	if !isLoadingErr(&loadingMsg) {
+		t.Fatalf("expected true for LOADING error")
+	}
+	wrappedErr := fmt.Errorf("wrapped: %w", &loadingMsg)
+	if !isLoadingErr(wrappedErr) {
+		t.Fatalf("expected true for wrapped LOADING error")
+	}
+	otherMsg := ValkeyError(strmsg('-', "ERR unknown command"))
+	if isLoadingErr(&otherMsg) {
+		t.Fatalf("expected false for non-LOADING ValkeyError")
+	}
+}
+
+func TestMakeMux_RetryOnLoading(t *testing.T) {
+	mockLoading := func(t *testing.T, conn net.Conn) {
+		mock := &valkeyMock{t: t, buf: bufio.NewReader(conn), conn: conn}
+		mock.Expect("HELLO", "3").ReplyError("LOADING Valkey is loading dataset in memory")
+		mock.Expect("CLIENT", "TRACKING", "ON", "OPTIN").ReplyError("LOADING Valkey is loading dataset in memory")
+		mock.Expect("CLIENT", "SETINFO", "LIB-NAME", LibName).ReplyError("LOADING Valkey is loading dataset in memory")
+		mock.Expect("CLIENT", "SETINFO", "LIB-VER", LibVer).ReplyError("LOADING Valkey is loading dataset in memory")
+		mock.Close()
+	}
+
+	t.Run("retry succeeds after LOADING errors", func(t *testing.T) {
+		defer ShouldNotLeak(SetupLeakDetection())
+		var attempts int32
+		option := &ClientOption{
+			DialerRetries: 3,
+			DialerRetryBackoff: func(attempt int) time.Duration {
+				return time.Millisecond
+			},
+		}
+		m := makeMux("", option, func(ctx context.Context, dst string, opt *ClientOption) (net.Conn, error) {
+			att := atomic.AddInt32(&attempts, 1)
+			c1, c2 := net.Pipe()
+			if att <= 2 {
+				go mockLoading(t, c2)
+			} else {
+				go func() {
+					mock := &valkeyMock{t: t, buf: bufio.NewReader(c2), conn: c2}
+					mock.Expect("HELLO", "3").
+						Reply(slicemsg(
+							'%',
+							[]ValkeyMessage{
+								strmsg('+', "proto"),
+								{typ: ':', intlen: 3},
+							},
+						))
+					mock.Expect("CLIENT", "TRACKING", "ON", "OPTIN").
+						ReplyString("OK")
+					mock.Expect("CLIENT", "SETINFO", "LIB-NAME", LibName).
+						ReplyError("UNKNOWN COMMAND")
+					mock.Expect("CLIENT", "SETINFO", "LIB-VER", LibVer).
+						ReplyError("UNKNOWN COMMAND")
+					mock.Expect("PING").ReplyString("OK")
+					mock.Close()
+				}()
+			}
+			return c1, nil
+		})
+		defer m.Close()
+
+		if err := m.Dial(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := atomic.LoadInt32(&attempts); got != 3 {
+			t.Fatalf("expected 3 attempts, got %d", got)
+		}
+		if m.pipe(context.Background(), 0) == m.dead {
+			t.Fatalf("expected active wire, got dead")
+		}
+	})
+
+	t.Run("exhausted retries returns LOADING error", func(t *testing.T) {
+		defer ShouldNotLeak(SetupLeakDetection())
+		var attempts int32
+		option := &ClientOption{
+			DialerRetries: 2,
+			DialerRetryBackoff: func(attempt int) time.Duration {
+				return time.Millisecond
+			},
+		}
+		m := makeMux("", option, func(ctx context.Context, dst string, opt *ClientOption) (net.Conn, error) {
+			atomic.AddInt32(&attempts, 1)
+			c1, c2 := net.Pipe()
+			go mockLoading(t, c2)
+			return c1, nil
+		})
+		defer m.Close()
+
+		err := m.Dial()
+		if err == nil {
+			t.Fatalf("expected error, got nil")
+		}
+		var vErr *ValkeyError
+		if !errors.As(err, &vErr) || !vErr.IsLoading() {
+			t.Fatalf("expected LOADING error, got %v", err)
+		}
+		if got := atomic.LoadInt32(&attempts); got != 3 {
+			t.Fatalf("expected 3 attempts (0, 1, 2), got %d", got)
+		}
+	})
+
+	t.Run("non-loading error is not retried", func(t *testing.T) {
+		defer ShouldNotLeak(SetupLeakDetection())
+		var attempts int32
+		option := &ClientOption{
+			DialerRetries: 3,
+			DialerRetryBackoff: func(attempt int) time.Duration {
+				return time.Millisecond
+			},
+		}
+		m := makeMux("", option, func(ctx context.Context, dst string, opt *ClientOption) (net.Conn, error) {
+			atomic.AddInt32(&attempts, 1)
+			c1, c2 := net.Pipe()
+			go func() {
+				mock := &valkeyMock{t: t, buf: bufio.NewReader(c2), conn: c2}
+				mock.Expect("HELLO", "3").ReplyError("ERR unknown command")
+				mock.Expect("CLIENT", "TRACKING", "ON", "OPTIN").ReplyError("ERR unknown command")
+				mock.Expect("CLIENT", "SETINFO", "LIB-NAME", LibName).ReplyError("UNKNOWN COMMAND")
+				mock.Expect("CLIENT", "SETINFO", "LIB-VER", LibVer).ReplyError("UNKNOWN COMMAND")
+				mock.Close()
+			}()
+			return c1, nil
+		})
+		defer m.Close()
+
+		err := m.Dial()
+		if err == nil {
+			t.Fatalf("expected error, got nil")
+		}
+		if got := atomic.LoadInt32(&attempts); got != 1 {
+			t.Fatalf("expected 1 attempt for non-loading error, got %d", got)
+		}
+	})
+
+	t.Run("context cancellation during backoff aborts retry", func(t *testing.T) {
+		defer ShouldNotLeak(SetupLeakDetection())
+		var attempts int32
+		ctx, cancel := context.WithCancel(context.Background())
+		option := &ClientOption{
+			DialerRetries: 5,
+			DialerRetryBackoff: func(attempt int) time.Duration {
+				cancel()
+				return 50 * time.Millisecond
+			},
+		}
+		m := makeMux("", option, func(_ context.Context, dst string, opt *ClientOption) (net.Conn, error) {
+			atomic.AddInt32(&attempts, 1)
+			c1, c2 := net.Pipe()
+			go mockLoading(t, c2)
+			return c1, nil
+		})
+		defer m.Close()
+
+		_, err := m._pipe(ctx, 0)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context.Canceled, got %v", err)
+		}
+		if got := atomic.LoadInt32(&attempts); got != 1 {
+			t.Fatalf("expected 1 attempt before cancel, got %d", got)
+		}
+	})
+
+	t.Run("unified retry mixes L4 dial error and L7 LOADING error within single budget", func(t *testing.T) {
+		defer ShouldNotLeak(SetupLeakDetection())
+		var attempts int32
+		option := &ClientOption{
+			DialerRetries: 2, // total attempts allowed = 3 (0, 1, 2)
+			DialerRetryBackoff: func(attempt int) time.Duration {
+				return time.Millisecond
+			},
+		}
+		m := makeMux("", option, func(ctx context.Context, dst string, opt *ClientOption) (net.Conn, error) {
+			att := atomic.AddInt32(&attempts, 1)
+			if att == 1 {
+				// Attempt 1: L4 network drop
+				return nil, syscall.ECONNREFUSED
+			}
+			c1, c2 := net.Pipe()
+			if att == 2 {
+				// Attempt 2: L7 handshake LOADING error
+				go mockLoading(t, c2)
+			} else {
+				// Attempt 3: Handshake succeeds
+				go func() {
+					mock := &valkeyMock{t: t, buf: bufio.NewReader(c2), conn: c2}
+					mock.Expect("HELLO", "3").
+						Reply(slicemsg(
+							'%',
+							[]ValkeyMessage{
+								strmsg('+', "proto"),
+								{typ: ':', intlen: 3},
+							},
+						))
+					mock.Expect("CLIENT", "TRACKING", "ON", "OPTIN").
+						ReplyString("OK")
+					mock.Expect("CLIENT", "SETINFO", "LIB-NAME", LibName).
+						ReplyError("UNKNOWN COMMAND")
+					mock.Expect("CLIENT", "SETINFO", "LIB-VER", LibVer).
+						ReplyError("UNKNOWN COMMAND")
+					mock.Expect("PING").ReplyString("OK")
+					mock.Close()
+				}()
+			}
+			return c1, nil
+		})
+		defer m.Close()
+
+		if err := m.Dial(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := atomic.LoadInt32(&attempts); got != 3 {
+			t.Fatalf("expected exactly 3 total attempts (DialerRetries + 1), got %d", got)
+		}
+	})
 }

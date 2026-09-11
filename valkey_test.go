@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -841,4 +842,370 @@ func ExampleNewClient_sentinel() {
 		},
 	})
 	defer client.Close()
+}
+
+func TestDial_SingleAttempt(t *testing.T) {
+	var attempts int
+	expectedErr := syscall.ECONNREFUSED
+	opt := &ClientOption{
+		DialerRetries: 5,
+		DialCtxFn: func(ctx context.Context, dst string, d *net.Dialer, cfg *tls.Config) (net.Conn, error) {
+			attempts++
+			return nil, expectedErr
+		},
+	}
+	conn, err := dial(context.Background(), "127.0.0.1:0", opt)
+	if conn != nil {
+		t.Fatalf("expected nil conn")
+	}
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected %v, got %v", expectedErr, err)
+	}
+	if attempts != 1 {
+		t.Fatalf("expected dial to remain a single-attempt dialer, got %d attempts", attempts)
+	}
+}
+
+func TestMakeMux_DialRetries(t *testing.T) {
+	t.Run("no retries (DialerRetries == 0) fails immediately", func(t *testing.T) {
+		defer ShouldNotLeak(SetupLeakDetection())
+		var attempts int32
+		expectedErr := syscall.ECONNREFUSED
+		opt := &ClientOption{
+			DialerRetries: 0,
+		}
+		m := makeMux("", opt, func(ctx context.Context, dst string, opt *ClientOption) (net.Conn, error) {
+			atomic.AddInt32(&attempts, 1)
+			return nil, expectedErr
+		})
+		defer m.Close()
+
+		err := m.Dial()
+		if !errors.Is(err, expectedErr) {
+			t.Fatalf("expected %v, got %v", expectedErr, err)
+		}
+		if got := atomic.LoadInt32(&attempts); got != 1 {
+			t.Fatalf("expected 1 attempt, got %d", got)
+		}
+	})
+
+	t.Run("retry succeeds after transient dial failures", func(t *testing.T) {
+		defer ShouldNotLeak(SetupLeakDetection())
+		var attempts int32
+		var backoffAttempts []int
+		var mu sync.Mutex
+		opt := &ClientOption{
+			DialerRetries: 3,
+			DialerRetryBackoff: func(attempt int) time.Duration {
+				mu.Lock()
+				backoffAttempts = append(backoffAttempts, attempt)
+				mu.Unlock()
+				return time.Millisecond
+			},
+		}
+		m := makeMux("", opt, func(ctx context.Context, dst string, opt *ClientOption) (net.Conn, error) {
+			att := atomic.AddInt32(&attempts, 1)
+			if att < 3 {
+				return nil, syscall.ECONNREFUSED
+			}
+			c1, c2 := net.Pipe()
+			go func() {
+				mock := &valkeyMock{t: t, buf: bufio.NewReader(c2), conn: c2}
+				mock.Expect("HELLO", "3").Reply(slicemsg('%', []ValkeyMessage{
+					strmsg('+', "proto"),
+					{typ: ':', intlen: 3},
+				}))
+				mock.Expect("CLIENT", "TRACKING", "ON", "OPTIN").ReplyString("OK")
+				mock.Expect("CLIENT", "SETINFO", "LIB-NAME", LibName).ReplyError("UNKNOWN COMMAND")
+				mock.Expect("CLIENT", "SETINFO", "LIB-VER", LibVer).ReplyError("UNKNOWN COMMAND")
+				mock.Expect("PING").ReplyString("OK")
+				mock.Close()
+			}()
+			return c1, nil
+		})
+		defer m.Close()
+
+		if err := m.Dial(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := atomic.LoadInt32(&attempts); got != 3 {
+			t.Fatalf("expected 3 attempts, got %d", got)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if len(backoffAttempts) != 2 || backoffAttempts[0] != 0 || backoffAttempts[1] != 1 {
+			t.Fatalf("unexpected backoff attempts: %v", backoffAttempts)
+		}
+	})
+
+	t.Run("retry exhausted returns last error", func(t *testing.T) {
+		defer ShouldNotLeak(SetupLeakDetection())
+		var attempts int32
+		expectedErr := syscall.ECONNREFUSED
+		opt := &ClientOption{
+			DialerRetries: 2,
+			DialerRetryBackoff: func(attempt int) time.Duration {
+				return time.Millisecond
+			},
+		}
+		m := makeMux("", opt, func(ctx context.Context, dst string, opt *ClientOption) (net.Conn, error) {
+			atomic.AddInt32(&attempts, 1)
+			return nil, expectedErr
+		})
+		defer m.Close()
+
+		err := m.Dial()
+		if !errors.Is(err, expectedErr) {
+			t.Fatalf("expected %v, got %v", expectedErr, err)
+		}
+		if got := atomic.LoadInt32(&attempts); got != 3 {
+			t.Fatalf("expected 3 attempts (0, 1, 2), got %d", got)
+		}
+	})
+
+	t.Run("non-retryable error fails immediately without retry", func(t *testing.T) {
+		defer ShouldNotLeak(SetupLeakDetection())
+		var attempts int32
+		expectedErr := errors.New("certificate verification failed")
+		opt := &ClientOption{
+			DialerRetries: 3,
+			DialerRetryBackoff: func(attempt int) time.Duration {
+				return time.Millisecond
+			},
+		}
+		m := makeMux("", opt, func(ctx context.Context, dst string, opt *ClientOption) (net.Conn, error) {
+			atomic.AddInt32(&attempts, 1)
+			return nil, expectedErr
+		})
+		defer m.Close()
+
+		err := m.Dial()
+		if !errors.Is(err, expectedErr) {
+			t.Fatalf("expected %v, got %v", expectedErr, err)
+		}
+		if got := atomic.LoadInt32(&attempts); got != 1 {
+			t.Fatalf("expected 1 attempt, got %d", got)
+		}
+	})
+
+	t.Run("context canceled before dial", func(t *testing.T) {
+		defer ShouldNotLeak(SetupLeakDetection())
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		var attempts int32
+		opt := &ClientOption{
+			DialerRetries: 3,
+		}
+		m := makeMux("", opt, func(ctx context.Context, dst string, opt *ClientOption) (net.Conn, error) {
+			atomic.AddInt32(&attempts, 1)
+			return nil, errors.New("should not be called")
+		})
+		defer m.Close()
+
+		_, err := m._pipe(ctx, 0)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context.Canceled, got %v", err)
+		}
+		if got := atomic.LoadInt32(&attempts); got != 0 {
+			t.Fatalf("expected 0 attempts, got %d", got)
+		}
+	})
+
+	t.Run("context canceled during backoff", func(t *testing.T) {
+		defer ShouldNotLeak(SetupLeakDetection())
+		ctx, cancel := context.WithCancel(context.Background())
+
+		var attempts int32
+		opt := &ClientOption{
+			DialerRetries: 3,
+			DialerRetryBackoff: func(attempt int) time.Duration {
+				cancel()
+				return 5 * time.Second
+			},
+		}
+		m := makeMux("", opt, func(ctx context.Context, dst string, opt *ClientOption) (net.Conn, error) {
+			atomic.AddInt32(&attempts, 1)
+			return nil, syscall.ECONNREFUSED
+		})
+		defer m.Close()
+
+		start := time.Now()
+		_, err := m._pipe(ctx, 0)
+		elapsed := time.Since(start)
+
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context.Canceled, got %v", err)
+		}
+		if got := atomic.LoadInt32(&attempts); got != 1 {
+			t.Fatalf("expected 1 attempt, got %d", got)
+		}
+		if elapsed > time.Second {
+			t.Fatalf("expected dial to abort quickly on context cancel, took %v", elapsed)
+		}
+	})
+}
+
+func TestNewClient_DialerRetryOptions(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	t.Run("retries during NewClient", func(t *testing.T) {
+		var dials int
+		opt := ClientOption{
+			InitAddress:   []string{"127.0.0.1:0"},
+			DialerRetries: 2,
+			DialerRetryBackoff: func(attempt int) time.Duration {
+				return time.Millisecond
+			},
+			DialCtxFn: func(ctx context.Context, s string, dialer *net.Dialer, config *tls.Config) (conn net.Conn, err error) {
+				dials++
+				return nil, syscall.ECONNREFUSED
+			},
+		}
+
+		_, err := NewClient(opt)
+		if err == nil {
+			t.Fatalf("expected dial error")
+		}
+		// 1 initial dial + 2 retries = 3
+		if dials != 3 {
+			t.Fatalf("expected 3 dial attempts, got %d", dials)
+		}
+	})
+
+	t.Run("defaults for DialerRetryBaseDelay and DialerRetryMaxDelay", func(t *testing.T) {
+		opt := ClientOption{
+			InitAddress: []string{"127.0.0.1:0"},
+		}
+		// Check that NewClient sets default backoff without panic
+		_, _ = NewClient(opt)
+	})
+
+	t.Run("custom DialerRetryBaseDelay and DialerRetryMaxDelay", func(t *testing.T) {
+		opt := ClientOption{
+			InitAddress:          []string{"127.0.0.1:0"},
+			DialerRetryBaseDelay: 50 * time.Millisecond,
+			DialerRetryMaxDelay:  500 * time.Millisecond,
+		}
+		_, _ = NewClient(opt)
+	})
+
+	t.Run("assign FullJitterRetryDelayFn to ClientOption", func(t *testing.T) {
+		opt := ClientOption{
+			InitAddress:        []string{"127.0.0.1:0"},
+			DialerRetries:      1,
+			DialerRetryBackoff: fullJitterDelayFn(50*time.Millisecond, time.Second),
+			RetryDelay:         FullJitterRetryDelayFn,
+		}
+		_, _ = NewClient(opt)
+
+		opt2 := ClientOption{
+			InitAddress: []string{"127.0.0.1:0"},
+			RetryDelay:  defaultRetryDelayFn,
+		}
+		_, _ = NewClient(opt2)
+	})
+}
+
+type customTimeoutErr struct{}
+
+func (c customTimeoutErr) Error() string   { return "custom i/o timeout" }
+func (c customTimeoutErr) Timeout() bool   { return true }
+func (c customTimeoutErr) Temporary() bool { return true }
+
+func TestIsDialRetryable(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "nil error is not retryable",
+			err:      nil,
+			expected: false,
+		},
+		{
+			name:     "syscall.ECONNREFUSED is retryable",
+			err:      syscall.ECONNREFUSED,
+			expected: true,
+		},
+		{
+			name:     "syscall.ETIMEDOUT is retryable",
+			err:      syscall.ETIMEDOUT,
+			expected: true,
+		},
+		{
+			name:     "wrapped syscall.ECONNREFUSED is retryable",
+			err:      fmt.Errorf("dial tcp 127.0.0.1:6379: %w", syscall.ECONNREFUSED),
+			expected: true,
+		},
+		{
+			name:     "wrapped syscall.ETIMEDOUT is retryable",
+			err:      fmt.Errorf("dial tcp 127.0.0.1:6379: %w", syscall.ETIMEDOUT),
+			expected: true,
+		},
+		{
+			name:     "syscall.ECONNRESET is retryable",
+			err:      syscall.ECONNRESET,
+			expected: true,
+		},
+		{
+			name:     "wrapped syscall.ECONNRESET is retryable",
+			err:      fmt.Errorf("dial tcp 127.0.0.1:6379: %w", syscall.ECONNRESET),
+			expected: true,
+		},
+		{
+			name:     "string match connection reset is retryable",
+			err:      errors.New("read tcp: connection reset by peer"),
+			expected: true,
+		},
+		{
+			name:     "net.Error with Timeout()=true is retryable",
+			err:      customTimeoutErr{},
+			expected: true,
+		},
+		{
+			name:     "net.OpError with timeout is retryable",
+			err:      &net.OpError{Op: "dial", Net: "tcp", Err: customTimeoutErr{}},
+			expected: true,
+		},
+		{
+			name:     "string match connection refused is retryable",
+			err:      errors.New("dial tcp 127.0.0.1:6379: connect: connection refused"),
+			expected: true,
+		},
+		{
+			name:     "string match timeout is retryable",
+			err:      errors.New("i/o timeout"),
+			expected: true,
+		},
+		{
+			name:     "string match timed out is retryable",
+			err:      errors.New("dial tcp: operation timed out"),
+			expected: true,
+		},
+		{
+			name:     "generic unknown error is not retryable",
+			err:      errors.New("unknown network error"),
+			expected: false,
+		},
+		{
+			name:     "tls bad certificate is not retryable",
+			err:      errors.New("tls: bad certificate"),
+			expected: false,
+		},
+		{
+			name:     "permission denied is not retryable",
+			err:      syscall.EACCES,
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isDialRetryable(tc.err); got != tc.expected {
+				t.Fatalf("isDialRetryable(%v) = %v, expected %v", tc.err, got, tc.expected)
+			}
+		})
+	}
 }
