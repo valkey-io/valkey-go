@@ -14,10 +14,11 @@ A fast Golang Valkey client that does auto pipelining and supports server-assist
 - [Generic Object Mapping with client-side caching](./om)
 - [Cache-Aside pattern with client-side caching](./valkeyaside)
 - [Distributed Locks with client-side caching](./valkeylock)
+- [Distributed Rate Limiting (GCRA & Fixed Window)](./valkeylimiter)
 - [Helpers for writing tests with valkey mock](./mock)
 - [OpenTelemetry integration](./valkeyotel)
 - [Hooks and other integrations](./valkeyhook)
-- [Go-redis like API adapter](./valkeycompat) by [@418Coffee](https://github.com/418Coffee)
+- [Go-redis like API adapter & redis_rate parity](./valkeycompat) by [@418Coffee](https://github.com/418Coffee)
 - Pub/Sub, Sharded Pub/Sub, Streams
 - Valkey Cluster, Sentinel, RedisJSON, RedisBloom, RediSearch, RedisTimeseries, etc.
 - [Probabilistic Data Structures without Redis Stack](./valkeyprob)

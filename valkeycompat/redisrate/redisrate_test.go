@@ -3,6 +3,7 @@ package redisrate_test
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,6 +30,17 @@ func getTestClient() valkey.Client {
 			}
 			client.Close()
 		}
+	}
+	return nil
+}
+
+func getClusterClient() valkey.Client {
+	client, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{"127.0.0.1:7010"}})
+	if err == nil {
+		if err := client.Do(context.Background(), client.B().Ping().Build()).Error(); err == nil {
+			return client
+		}
+		client.Close()
 	}
 	return nil
 }
@@ -316,12 +328,140 @@ var _ = Describe("Redisrate", func() {
 			Expect(res.ResetAfter).To(BeNumerically("~", 100*time.Millisecond, 30*time.Millisecond))
 		})
 	})
+
+	Describe("High Concurrency Contention", func() {
+		It("accurately throttles 100 simultaneous concurrent workers", func() {
+			client := getTestClient()
+			if client == nil {
+				Skip("skipping test: no live Valkey/Redis instance accessible")
+			}
+			defer client.Close()
+
+			limiter := redisrate.NewLimiterFromClient(client)
+			ctx := context.Background()
+			testID := fmt.Sprintf("redisrate_concur_%d", time.Now().UnixNano())
+			defer func() {
+				_ = limiter.Reset(ctx, testID)
+			}()
+
+			limit := redisrate.Limit{
+				Rate:   20,
+				Burst:  20,
+				Period: 10 * time.Second,
+			}
+
+			const numWorkers = 100
+			var allowedCount int64
+			var rejectedCount int64
+
+			startBarrier := make(chan struct{})
+			doneCh := make(chan struct{}, numWorkers)
+
+			for i := 0; i < numWorkers; i++ {
+				go func() {
+					<-startBarrier
+					res, err := limiter.Allow(ctx, testID, limit)
+					if err == nil {
+						if res.Allowed > 0 {
+							atomic.AddInt64(&allowedCount, int64(res.Allowed))
+							Expect(res.RetryAfter).To(Equal(time.Duration(-1)))
+						} else {
+							atomic.AddInt64(&rejectedCount, 1)
+							Expect(res.RetryAfter).To(BeNumerically(">", 0))
+						}
+					}
+					doneCh <- struct{}{}
+				}()
+			}
+
+			close(startBarrier)
+			for i := 0; i < numWorkers; i++ {
+				<-doneCh
+			}
+
+			Expect(allowedCount).To(Equal(int64(20)))
+			Expect(rejectedCount).To(Equal(int64(80)))
+		})
+	})
+
+	Describe("Valkey Cluster Integration", func() {
+		var (
+			clusterClient valkey.Client
+			limiter       *redisrate.Limiter
+			ctx           context.Context
+		)
+
+		BeforeEach(func() {
+			clusterClient = getClusterClient()
+			if clusterClient == nil {
+				Skip("skipping test: Valkey Cluster not accessible on 127.0.0.1:7010")
+			}
+			limiter = redisrate.NewLimiterFromClient(clusterClient)
+			ctx = context.Background()
+		})
+
+		AfterEach(func() {
+			if clusterClient != nil {
+				clusterClient.Close()
+			}
+		})
+
+		It("operates across multiple hash slots without CROSSSLOT errors", func() {
+			limit := redisrate.PerSecond(10)
+
+			testKeys := []string{
+				fmt.Sprintf("redisrate_cluster_plain_1_%d", time.Now().UnixNano()),
+				fmt.Sprintf("redisrate_cluster_plain_2_%d", time.Now().UnixNano()),
+				fmt.Sprintf("{slot_tenant_A}:api_calls_%d", time.Now().UnixNano()),
+				fmt.Sprintf("{slot_tenant_B}:api_calls_%d", time.Now().UnixNano()),
+				fmt.Sprintf("{slot_tenant_C}:api_calls_%d", time.Now().UnixNano()),
+			}
+
+			for _, key := range testKeys {
+				defer func(k string) { _ = limiter.Reset(ctx, k) }(key)
+
+				// 1. Allow 1
+				res, err := limiter.Allow(ctx, key, limit)
+				Expect(err).NotTo(HaveOccurred(), "cluster allow on %s should not error", key)
+				Expect(res.Allowed).To(Equal(1))
+				Expect(res.Remaining).To(Equal(9))
+				Expect(res.RetryAfter).To(Equal(time.Duration(-1)))
+
+				// 2. AllowN 3
+				resN, err := limiter.AllowN(ctx, key, limit, 3)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(resN.Allowed).To(Equal(3))
+				Expect(resN.Remaining).To(Equal(6))
+
+				// 3. AllowAtMost 10 (grants remaining 6)
+				resAtMost, err := limiter.AllowAtMost(ctx, key, limit, 10)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(resAtMost.Allowed).To(Equal(6))
+				Expect(resAtMost.Remaining).To(Equal(0))
+
+				// 4. Over limit
+				resOver, err := limiter.Allow(ctx, key, limit)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(resOver.Allowed).To(Equal(0))
+				Expect(resOver.RetryAfter).To(BeNumerically(">", 0))
+
+				// 5. Reset
+				err = limiter.Reset(ctx, key)
+				Expect(err).NotTo(HaveOccurred())
+
+				resRestored, err := limiter.Allow(ctx, key, limit)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(resRestored.Allowed).To(Equal(1))
+				Expect(resRestored.Remaining).To(Equal(9))
+			}
+		})
+	})
 })
 
 func BenchmarkAllow(b *testing.B) {
-	client, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{"127.0.0.1:6378"}})
-	if err != nil {
-		b.Skipf("cannot connect to 127.0.0.1:6378: %v", err)
+	client := getTestClient()
+	if client == nil {
+		b.Skip("cannot connect to live Valkey/Redis instance")
 	}
 	defer client.Close()
 
@@ -343,10 +483,35 @@ func BenchmarkAllow(b *testing.B) {
 	}
 }
 
+func BenchmarkAllowN(b *testing.B) {
+	client := getTestClient()
+	if client == nil {
+		b.Skip("cannot connect to live Valkey/Redis instance")
+	}
+	defer client.Close()
+
+	l := redisrate.NewLimiterFromClient(client)
+	ctx := context.Background()
+	limit := redisrate.PerSecond(1e6)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		res, err := l.AllowN(ctx, "bench_allown", limit, 1)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if res.Allowed == 0 {
+			b.Fatal("rate limit exceeded during benchmark")
+		}
+	}
+}
+
 func BenchmarkAllowAtMost(b *testing.B) {
-	client, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{"127.0.0.1:6378"}})
-	if err != nil {
-		b.Skipf("cannot connect to 127.0.0.1:6378: %v", err)
+	client := getTestClient()
+	if client == nil {
+		b.Skip("cannot connect to live Valkey/Redis instance")
 	}
 	defer client.Close()
 
@@ -366,4 +531,31 @@ func BenchmarkAllowAtMost(b *testing.B) {
 			b.Fatal("rate limit exceeded during benchmark")
 		}
 	}
+}
+
+func BenchmarkAllow_Parallel(b *testing.B) {
+	client := getTestClient()
+	if client == nil {
+		b.Skip("cannot connect to live Valkey/Redis instance")
+	}
+	defer client.Close()
+
+	l := redisrate.NewLimiterFromClient(client)
+	limit := redisrate.PerSecond(1e6)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	b.RunParallel(func(pb *testing.PB) {
+		ctx := context.Background()
+		for pb.Next() {
+			res, err := l.Allow(ctx, "bench_allow_par", limit)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if res.Allowed == 0 {
+				b.Fatal("rate limit exceeded during benchmark")
+			}
+		}
+	})
 }
