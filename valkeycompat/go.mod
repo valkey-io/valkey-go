@@ -9,7 +9,7 @@ replace github.com/valkey-io/valkey-go/mock => ../mock
 replace github.com/valkey-io/valkey-go/valkeylimiter => ../valkeylimiter
 
 require (
-	github.com/onsi/ginkgo/v2 v2.32.1
+	github.com/onsi/ginkgo/v2 v2.32.2
 	github.com/onsi/gomega v1.42.1
 	github.com/valkey-io/valkey-go v1.0.77
 	github.com/valkey-io/valkey-go/mock v1.0.77
