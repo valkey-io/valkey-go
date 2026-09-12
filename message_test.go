@@ -109,6 +109,22 @@ func TestValkeyErrorIsAsk(t *testing.T) {
 	}
 }
 
+func TestValkeyErrorIsReadOnly(t *testing.T) {
+	for _, c := range []struct {
+		err string
+		ok  bool
+	}{
+		{err: "READONLY You can't write against a read only replica.", ok: true},
+		{err: "READONLY", ok: true},
+		{err: "MOVED 0 127.0.0.1:6379", ok: false},
+	} {
+		e := ValkeyError(strmsg('-', c.err))
+		if e.IsReadOnly() != c.ok {
+			t.Fatalf("IsReadOnly() for %q: got %v want %v", c.err, e.IsReadOnly(), c.ok)
+		}
+	}
+}
+
 func TestValkeyErrorIsRedirect(t *testing.T) {
 	for _, c := range []struct {
 		err  string

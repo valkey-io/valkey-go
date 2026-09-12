@@ -96,6 +96,11 @@ func (r *ValkeyError) IsRedirect() (addr string, ok bool) {
 	return
 }
 
+// IsReadOnly checks if it is a valkey READONLY message (write against a replica).
+func (r *ValkeyError) IsReadOnly() bool {
+	return strings.HasPrefix(r.string(), "READONLY")
+}
+
 func fixIPv6HostPort(addr string) string {
 	if strings.IndexByte(addr, '.') < 0 && len(addr) > 0 && addr[0] != '[' { // skip ipv4 and enclosed ipv6
 		if i := strings.LastIndexByte(addr, ':'); i >= 0 {
