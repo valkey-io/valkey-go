@@ -1169,3 +1169,59 @@ func TestNegativeConnWriteTimeoutKeepalive(t *testing.T) {
 	}
 	client.Close()
 }
+
+func TestAtomicSlotMigrationChaos(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	client, err := NewClient(ClientOption{
+		InitAddress:       []string{"127.0.0.1:7001", "127.0.0.1:7002", "127.0.0.1:7003"},
+		ConnWriteTimeout:  180 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+	err = client.Do(ctx, client.B().Set().Key("asm-chaos-key").Value("value").Build()).Error()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	var errs int32
+	numGoroutines := 1000000
+
+	wg.Add(numGoroutines)
+	
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			defer wg.Done()
+			timeoutCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			defer cancel()
+			
+			for j := 0; j < 2; j++ {
+				_, err := client.Do(timeoutCtx, client.B().Get().Key("asm-chaos-key").Build()).ToString()
+				if err != nil {
+					atomic.AddInt32(&errs, 1)
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		}()
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	
+	err = client.Do(ctx, client.B().ClientPause().Timeout(500).All().Build()).Error()
+	if err != nil {
+		t.Errorf("Failed to trigger CLIENT PAUSE: %v", err)
+	}
+	wg.Wait()
+
+	if failed := atomic.LoadInt32(&errs); failed > 0 {
+		t.Fatalf("Client failed to absorb the ASM server-side pause! %d requests dropped.", failed)
+	}
+}
