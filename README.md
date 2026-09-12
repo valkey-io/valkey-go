@@ -17,6 +17,7 @@ A fast Golang Valkey client that does auto pipelining and supports server-assist
 - [Helpers for writing tests with valkey mock](./mock)
 - [OpenTelemetry integration](./valkeyotel)
 - [Hooks and other integrations](./valkeyhook)
+- **Valkey 9.0 Atomic Slot Migration (ASM)** native survival via context debouncing
 - [Go-redis like API adapter](./valkeycompat) by [@418Coffee](https://github.com/418Coffee)
 - Pub/Sub, Sharded Pub/Sub, Streams
 - Valkey Cluster, Sentinel, RedisJSON, RedisBloom, RediSearch, RedisTimeseries, etc.

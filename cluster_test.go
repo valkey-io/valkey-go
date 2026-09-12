@@ -12335,3 +12335,71 @@ func TestClusterRebucketRetriesCacheAskOnlyBucket(t *testing.T) {
 		t.Fatalf("ASK-only cache bucket must be left untouched, got %+v", retries.m)
 	}
 }
+
+var singleNodeSlotsResp = NewResult(slicemsg('*', []ValkeyMessage{
+	slicemsg('*', []ValkeyMessage{
+		{typ: ':', intlen: 0},
+		{typ: ':', intlen: 16383},
+		slicemsg('*', []ValkeyMessage{ // master
+			strmsg('+', "127.0.0.1"),
+			{typ: ':', intlen: 0},
+			strmsg('+', ""),
+		}),
+	}),
+}), nil)
+
+func TestClusterTopologyDebounce(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	var networkCalls int32
+	client, err := newClusterClient(
+		&ClientOption{InitAddress: []string{"127.0.0.1:0"}},
+		func(dst string, opt *ClientOption) conn {
+			return &mockConn{
+				DialFn: func() error { return nil },
+				DoFn: func(cmd Completed) ValkeyResult {
+					if cmd.Commands()[0] == "CLUSTER" {
+						atomic.AddInt32(&networkCalls, 1)
+						time.Sleep(500 * time.Millisecond)
+						return singleNodeSlotsResp
+					}
+					return ValkeyResult{}
+				},
+				VersionFn: func() int { return 7 },
+			}
+		},
+		newRetryer(defaultRetryDelayFn),
+	)
+	if err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	defer client.Close()
+	atomic.StoreInt32(&networkCalls, 0)
+
+	var wg sync.WaitGroup
+	var startWg sync.WaitGroup
+	numGoroutines := 1000000
+	wg.Add(numGoroutines)
+	startWg.Add(1)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func(idx int) {
+			defer wg.Done()
+			startWg.Wait()
+			if idx%2 == 0 {
+				client.refresh(context.Background())
+			} else {
+				client.lazyRefresh()
+			}
+		}(i)
+	}
+
+	startWg.Done()
+	wg.Wait()
+	time.Sleep(200 * time.Millisecond)
+
+	calls := atomic.LoadInt32(&networkCalls)
+	if calls > 5 {
+		t.Fatalf("Expected strictly deduped network calls (under 5) due to topology singleflight debounce, but got %d", calls)
+	}
+}
