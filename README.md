@@ -22,6 +22,7 @@ A fast Golang Valkey client that does auto pipelining and supports server-assist
 - Valkey Cluster, Sentinel, RedisJSON, RedisBloom, RediSearch, RedisTimeseries, etc.
 - [Probabilistic Data Structures without Redis Stack](./valkeyprob)
 - [Availability zone affinity routing](#availability-zone-affinity-routing)
+- [Dialer connection retries with Full Jitter backoff](#dialer-retry-and-full-jitter-backoff)
 
 ---
 
@@ -270,6 +271,7 @@ to make sure manually cancellation is respected, especially for blocking request
 
 All read-only commands are automatically retried on failures by default before their context deadlines exceeded.
 You can disable this by setting `DisableRetry` or adjust the number of retries and durations between retries using `RetryDelay` function.
+`valkey-go` also provides `valkey.FullJitterRetryDelayFn` if you wish to use stateless Full Jitter backoff for command retries.
 
 ### Retryable Commands
 
@@ -278,6 +280,30 @@ Write commands can set Retryable to automatically retried on failures like read-
 ```golang
 client.Do(ctx, client.B().Set().Key("key").Value("val").Build().ToRetryable())
 client.DoMulti(ctx, client.B().Set().Key("key").Value("val").Build().ToRetryable())
+```
+
+### Dialer Retry and Full Jitter Backoff
+
+During cluster failovers, node restarts, or transient network partitions, aggressive reconnection attempts by many concurrent client goroutines can cause a thundering herd storm against recovering nodes.
+
+`valkey-go` supports fine-grained dialer reconnection retries with stateless Full Jitter exponential backoff:
+
+- `DialerRetries`: Maximum number of reconnection retry attempts per dial operation (default `0`, fail-fast).
+- `DialerRetryBaseDelay`: Base backoff duration (default `10ms`).
+- `DialerRetryMaxDelay`: Upper bound cap for backoff delay (default `3s`).
+- `DialerRetryBackoff`: Custom backoff curve `func(attempts int, base, max time.Duration) time.Duration`. If not set, defaults to Full Jitter (`rand(0, min(max, base * 2^attempts))`).
+
+The dialer retry loop transparently covers:
+1. **L4 Network Failures**: Connection refused (`ECONNREFUSED`), timeouts (`ETIMEDOUT`, `net.Error.Timeout()`), and connection resets (`ECONNRESET`).
+2. **L7 Startup Recovery**: Handshake rejection while the node is loading data (`-LOADING Valkey is loading the dataset in memory`).
+
+```golang
+client, err := valkey.NewClient(valkey.ClientOption{
+    InitAddress:          []string{"127.0.0.1:7001", "127.0.0.1:7002", "127.0.0.1:7003"},
+    DialerRetries:        5,
+    DialerRetryBaseDelay: 20 * time.Millisecond,
+    DialerRetryMaxDelay:  3 * time.Second,
+})
 ```
 
 ## Pub/Sub

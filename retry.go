@@ -26,6 +26,53 @@ func defaultRetryDelayFn(attempts int, _ Completed, _ error) time.Duration {
 	return min(defaultMaxRetryDelay, time.Duration(base+jitter)*time.Microsecond)
 }
 
+// fullJitterDelayFn creates a full jitter backoff function for connection dialing:
+// sleep = rand(0, min(maxDelay, base * 2^attempt))
+func fullJitterDelayFn(base, maxDelay time.Duration) DialerRetryBackoffFn {
+	if base <= 0 {
+		base = 10 * time.Millisecond
+	}
+	if maxDelay <= 0 {
+		maxDelay = 3 * time.Second
+	}
+
+	return func(attempt int) time.Duration {
+		if attempt < 0 {
+			return 0
+		}
+		shift := min(30, attempt)
+		temp := base
+		if shift > 0 {
+			if maxDelay/(1<<shift) < temp {
+				temp = maxDelay
+			} else {
+				temp = min(maxDelay, temp*(1<<shift))
+			}
+		} else {
+			temp = min(maxDelay, temp)
+		}
+		if temp <= 0 {
+			return 0
+		}
+		return time.Duration(util.FastRandInt64(int64(temp)))
+	}
+}
+
+// fullJitterRetryDelayFn creates a full jitter backoff function for command retries:
+// sleep = rand(0, min(maxDelay, base * 2^attempts))
+func fullJitterRetryDelayFn(base, maxDelay time.Duration) RetryDelayFn {
+	if base <= 0 {
+		base = 10 * time.Millisecond
+	}
+	if maxDelay <= 0 {
+		maxDelay = defaultMaxRetryDelay
+	}
+	fn := fullJitterDelayFn(base, maxDelay)
+	return func(attempts int, _ Completed, _ error) time.Duration {
+		return fn(attempts)
+	}
+}
+
 type retryHandler interface {
 	// RetryDelay returns the delay that should be used before retrying the
 	// attempt. Will return a negative delay if the delay could not be determined or does
