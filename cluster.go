@@ -392,9 +392,9 @@ func (c *clusterClient) refreshConns(pending []conn, batchDelay time.Duration) (
 				time.Sleep(batchDelay)
 			}
 			for j := i; j < i+4 && j < len(pending); j++ {
-				go func(c conn, timeout time.Duration) {
+				go func(c conn, timeout time.Duration, preferShards bool) {
 					results <- getClusterSlots(c, timeout, preferShards)
-				}(pending[j], c.opt.ConnWriteTimeout)
+				}(pending[j], c.opt.ConnWriteTimeout, preferShards)
 			}
 		}
 		result = <-results
