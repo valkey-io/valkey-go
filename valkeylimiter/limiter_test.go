@@ -457,3 +457,332 @@ func BenchmarkAllowN(b *testing.B) {
 		}
 	}
 }
+
+func TestDurFromSecString(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    time.Duration
+		wantErr bool
+	}{
+		{
+			name:  "negative one represents no retry",
+			input: "-1",
+			want:  -1,
+		},
+		{
+			name:  "zero seconds",
+			input: "0",
+			want:  0,
+		},
+		{
+			name:  "fractional seconds 100ms",
+			input: "0.1",
+			want:  100 * time.Millisecond,
+		},
+		{
+			name:  "one second",
+			input: "1.0",
+			want:  time.Second,
+		},
+		{
+			name:  "multi second float",
+			input: "2.5",
+			want:  2500 * time.Millisecond,
+		},
+		{
+			name:  "negative number other than -1",
+			input: "-0.5",
+			want:  0,
+		},
+		{
+			name:    "invalid float string",
+			input:   "not-a-number",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := valkeylimiter.DurFromSecString(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("DurFromSecString(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			if got != tt.want {
+				t.Fatalf("DurFromSecString(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseGCRAResponse(t *testing.T) {
+	t.Run("success allowed", func(t *testing.T) {
+		resp := mock.Result(mock.ValkeyArray(
+			mock.ValkeyInt64(1),
+			mock.ValkeyInt64(9),
+			mock.ValkeyString("-1"),
+			mock.ValkeyString("0.1"),
+		))
+
+		got, err := valkeylimiter.ParseGCRAResponse(resp)
+		if err != nil {
+			t.Fatalf("ParseGCRAResponse() unexpected error: %v", err)
+		}
+
+		want := valkeylimiter.GCRAResult{
+			Allowed:    1,
+			Remaining:  9,
+			RetryAfter: -1,
+			ResetAfter: 100 * time.Millisecond,
+		}
+		if got != want {
+			t.Fatalf("ParseGCRAResponse() = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("success rejected", func(t *testing.T) {
+		resp := mock.Result(mock.ValkeyArray(
+			mock.ValkeyInt64(0),
+			mock.ValkeyInt64(0),
+			mock.ValkeyString("0.5"),
+			mock.ValkeyString("1.0"),
+		))
+
+		got, err := valkeylimiter.ParseGCRAResponse(resp)
+		if err != nil {
+			t.Fatalf("ParseGCRAResponse() unexpected error: %v", err)
+		}
+
+		want := valkeylimiter.GCRAResult{
+			Allowed:    0,
+			Remaining:  0,
+			RetryAfter: 500 * time.Millisecond,
+			ResetAfter: time.Second,
+		}
+		if got != want {
+			t.Fatalf("ParseGCRAResponse() = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("valkey error", func(t *testing.T) {
+		resp := mock.ErrorResult(errors.New("valkey cluster error"))
+		_, err := valkeylimiter.ParseGCRAResponse(resp)
+		if err == nil {
+			t.Fatal("ParseGCRAResponse() expected error, got nil")
+		}
+	})
+
+	t.Run("invalid non-array response", func(t *testing.T) {
+		resp := mock.Result(mock.ValkeyString("unexpected string"))
+		_, err := valkeylimiter.ParseGCRAResponse(resp)
+		if !errors.Is(err, valkeylimiter.ErrInvalidResponse) {
+			t.Fatalf("ParseGCRAResponse() error = %v, want ErrInvalidResponse", err)
+		}
+	})
+
+	t.Run("invalid array length less than 4", func(t *testing.T) {
+		resp := mock.Result(mock.ValkeyArray(
+			mock.ValkeyInt64(1),
+			mock.ValkeyInt64(9),
+			mock.ValkeyString("-1"),
+		))
+		_, err := valkeylimiter.ParseGCRAResponse(resp)
+		if !errors.Is(err, valkeylimiter.ErrInvalidResponse) {
+			t.Fatalf("ParseGCRAResponse() error = %v, want ErrInvalidResponse", err)
+		}
+	})
+
+	t.Run("invalid array length greater than 4", func(t *testing.T) {
+		resp := mock.Result(mock.ValkeyArray(
+			mock.ValkeyInt64(1),
+			mock.ValkeyInt64(9),
+			mock.ValkeyString("-1"),
+			mock.ValkeyString("0.1"),
+			mock.ValkeyString("extra"),
+		))
+		_, err := valkeylimiter.ParseGCRAResponse(resp)
+		if !errors.Is(err, valkeylimiter.ErrInvalidResponse) {
+			t.Fatalf("ParseGCRAResponse() error = %v, want ErrInvalidResponse", err)
+		}
+	})
+
+	t.Run("invalid first element (not int64 or int string)", func(t *testing.T) {
+		resp := mock.Result(mock.ValkeyArray(
+			mock.ValkeyString("not-an-int"),
+			mock.ValkeyInt64(9),
+			mock.ValkeyString("-1"),
+			mock.ValkeyString("0.1"),
+		))
+		_, err := valkeylimiter.ParseGCRAResponse(resp)
+		if !errors.Is(err, valkeylimiter.ErrInvalidResponse) {
+			t.Fatalf("ParseGCRAResponse() error = %v, want ErrInvalidResponse", err)
+		}
+	})
+
+	t.Run("invalid second element (not int64 or int string)", func(t *testing.T) {
+		resp := mock.Result(mock.ValkeyArray(
+			mock.ValkeyInt64(1),
+			mock.ValkeyString("not-an-int"),
+			mock.ValkeyString("-1"),
+			mock.ValkeyString("0.1"),
+		))
+		_, err := valkeylimiter.ParseGCRAResponse(resp)
+		if !errors.Is(err, valkeylimiter.ErrInvalidResponse) {
+			t.Fatalf("ParseGCRAResponse() error = %v, want ErrInvalidResponse", err)
+		}
+	})
+
+	t.Run("invalid retry_after float string", func(t *testing.T) {
+		resp := mock.Result(mock.ValkeyArray(
+			mock.ValkeyInt64(1),
+			mock.ValkeyInt64(9),
+			mock.ValkeyString("invalid-float"),
+			mock.ValkeyString("0.1"),
+		))
+		_, err := valkeylimiter.ParseGCRAResponse(resp)
+		if !errors.Is(err, valkeylimiter.ErrInvalidResponse) {
+			t.Fatalf("ParseGCRAResponse() error = %v, want ErrInvalidResponse", err)
+		}
+	})
+
+	t.Run("invalid reset_after float string", func(t *testing.T) {
+		resp := mock.Result(mock.ValkeyArray(
+			mock.ValkeyInt64(1),
+			mock.ValkeyInt64(9),
+			mock.ValkeyString("-1"),
+			mock.ValkeyString("invalid-float"),
+		))
+		_, err := valkeylimiter.ParseGCRAResponse(resp)
+		if !errors.Is(err, valkeylimiter.ErrInvalidResponse) {
+			t.Fatalf("ParseGCRAResponse() error = %v, want ErrInvalidResponse", err)
+		}
+	})
+}
+
+func TestExecGCRAAllowN_Mock(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	client := mock.NewClient(ctrl)
+	client.EXPECT().Do(gomock.Any(), gomock.Any()).Return(mock.Result(mock.ValkeyArray(
+		mock.ValkeyInt64(2),
+		mock.ValkeyInt64(8),
+		mock.ValkeyString("-1"),
+		mock.ValkeyString("0.2"),
+	))).Times(1)
+
+	got, err := valkeylimiter.ExecGCRAAllowN(context.Background(), client, "rate:{user:1}", 10, 10, time.Second, 2)
+	if err != nil {
+		t.Fatalf("ExecGCRAAllowN() unexpected error: %v", err)
+	}
+
+	want := valkeylimiter.GCRAResult{
+		Allowed:    2,
+		Remaining:  8,
+		RetryAfter: -1,
+		ResetAfter: 200 * time.Millisecond,
+	}
+	if got != want {
+		t.Fatalf("ExecGCRAAllowN() = %+v, want %+v", got, want)
+	}
+}
+
+func TestExecGCRAAllowAtMost_Mock(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	client := mock.NewClient(ctrl)
+	client.EXPECT().Do(gomock.Any(), gomock.Any()).Return(mock.Result(mock.ValkeyArray(
+		mock.ValkeyInt64(4),
+		mock.ValkeyInt64(0),
+		mock.ValkeyString("-1"),
+		mock.ValkeyString("0.6"),
+	))).Times(1)
+
+	got, err := valkeylimiter.ExecGCRAAllowAtMost(context.Background(), client, "rate:{user:2}", 10, 10, time.Second, 5)
+	if err != nil {
+		t.Fatalf("ExecGCRAAllowAtMost() unexpected error: %v", err)
+	}
+
+	want := valkeylimiter.GCRAResult{
+		Allowed:    4,
+		Remaining:  0,
+		RetryAfter: -1,
+		ResetAfter: 600 * time.Millisecond,
+	}
+	if got != want {
+		t.Fatalf("ExecGCRAAllowAtMost() = %+v, want %+v", got, want)
+	}
+}
+
+func TestGCRA_LiveServer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping live server test in short mode")
+	}
+
+	client, err := valkey.NewClient(valkey.ClientOption{
+		InitAddress: []string{"127.0.0.1:6378"},
+	})
+	if err != nil {
+		t.Skipf("cannot connect to 127.0.0.1:6378: %v", err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+	testKey := fmt.Sprintf("test:gcra:live:%d", time.Now().UnixNano())
+
+	// Clean up key after test
+	defer func() {
+		_ = client.Do(ctx, client.B().Del().Key(testKey).Build()).Error()
+	}()
+
+	// Test AllowN: Limit 10 req / 1 sec, burst 10
+	// 1. Initial request for 1 token: should succeed, allowed = 1, remaining = 9
+	res1, err := valkeylimiter.ExecGCRAAllowN(ctx, client, testKey, 10, 10, time.Second, 1)
+	if err != nil {
+		t.Fatalf("ExecGCRAAllowN 1st call error: %v", err)
+	}
+	if res1.Allowed != 1 || res1.Remaining != 9 || res1.RetryAfter != -1 {
+		t.Fatalf("ExecGCRAAllowN 1st call unexpected result: %+v", res1)
+	}
+
+	// 2. Request for 2 tokens: should succeed, allowed = 2, remaining = 7
+	res2, err := valkeylimiter.ExecGCRAAllowN(ctx, client, testKey, 10, 10, time.Second, 2)
+	if err != nil {
+		t.Fatalf("ExecGCRAAllowN 2nd call error: %v", err)
+	}
+	if res2.Allowed != 2 || res2.Remaining != 7 || res2.RetryAfter != -1 {
+		t.Fatalf("ExecGCRAAllowN 2nd call unexpected result: %+v", res2)
+	}
+
+	// 3. Request exceeding remaining tokens with AllowN (cost 100): should be rejected all-or-nothing
+	res3, err := valkeylimiter.ExecGCRAAllowN(ctx, client, testKey, 10, 10, time.Second, 100)
+	if err != nil {
+		t.Fatalf("ExecGCRAAllowN 3rd call error: %v", err)
+	}
+	if res3.Allowed != 0 || res3.Remaining != 0 || res3.RetryAfter <= 0 {
+		t.Fatalf("ExecGCRAAllowN 3rd call should be rejected: %+v", res3)
+	}
+
+	// 4. Test AllowAtMost with 7 remaining, asking for 10: should grant 7
+	res4, err := valkeylimiter.ExecGCRAAllowAtMost(ctx, client, testKey, 10, 10, time.Second, 10)
+	if err != nil {
+		t.Fatalf("ExecGCRAAllowAtMost error: %v", err)
+	}
+	if res4.Allowed != 7 || res4.Remaining != 0 || res4.RetryAfter != -1 {
+		t.Fatalf("ExecGCRAAllowAtMost unexpected result: %+v", res4)
+	}
+
+	// 5. Test AllowAtMost when exhausted: should be rejected
+	res5, err := valkeylimiter.ExecGCRAAllowAtMost(ctx, client, testKey, 10, 10, time.Second, 1)
+	if err != nil {
+		t.Fatalf("ExecGCRAAllowAtMost exhausted error: %v", err)
+	}
+	if res5.Allowed != 0 || res5.Remaining != 0 || res5.RetryAfter <= 0 {
+		t.Fatalf("ExecGCRAAllowAtMost exhausted should be rejected: %+v", res5)
+	}
+}
+
