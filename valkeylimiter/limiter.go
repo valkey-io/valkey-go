@@ -3,6 +3,7 @@ package valkeylimiter
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -18,21 +19,27 @@ var (
 )
 
 type Result struct {
-	Allowed   bool
-	Remaining int64
-	ResetAtMs int64
+	Allowed    bool
+	Remaining  int64
+	ResetAtMs  int64
+	RetryAfter time.Duration
+	ResetAfter time.Duration
+	Granted    int64
 }
 
 type RateLimiterClient interface {
 	Check(ctx context.Context, identifier string, options ...RateLimitOption) (Result, error)
 	Allow(ctx context.Context, identifier string, options ...RateLimitOption) (Result, error)
 	AllowN(ctx context.Context, identifier string, n int64, options ...RateLimitOption) (Result, error)
+	AllowAtMost(ctx context.Context, identifier string, n int64, options ...RateLimitOption) (Result, error)
+	Reset(ctx context.Context, identifier string) error
 	Limit() int
 	Close()
 }
 
 const (
 	PlaceholderPrefix = "valkeylimiter"
+	GCRAPrefix        = "rate:"
 	keyDelimOpen      = ":{"
 	keyDelimClose     = "}"
 )
@@ -49,6 +56,8 @@ type RateLimiterOption struct {
 	ClientOption  valkey.ClientOption
 	Limit         int
 	Window        time.Duration
+	Burst         int
+	Algorithm     Algorithm
 }
 
 func NewRateLimiter(option RateLimiterOption) (RateLimiterClient, error) {
@@ -58,15 +67,27 @@ func NewRateLimiter(option RateLimiterOption) (RateLimiterClient, error) {
 	if option.Limit <= 0 {
 		return nil, ErrInvalidLimit
 	}
+	if option.Burst <= 0 {
+		option.Burst = option.Limit
+	}
 	if option.KeyPrefix == "" {
-		option.KeyPrefix = PlaceholderPrefix
+		if option.Algorithm == AlgorithmFixedWindow {
+			option.KeyPrefix = PlaceholderPrefix
+		} else {
+			option.KeyPrefix = GCRAPrefix
+		}
 	}
 
 	rl := &rateLimiter{
 		defaultRateLimit: RateLimitOption{
-			limit:  int64(option.Limit),
-			window: option.Window,
+			limit:     int64(option.Limit),
+			window:    option.Window,
+			burst:     int64(option.Burst),
+			algorithm: option.Algorithm,
+			hasBurst:  true,
+			hasAlg:    true,
 		},
+		keyPrefix: option.KeyPrefix,
 	}
 
 	var err error
@@ -78,12 +99,37 @@ func NewRateLimiter(option RateLimiterOption) (RateLimiterClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	rl.keyPrefix = option.KeyPrefix
 	return rl, nil
 }
 
 func (l *rateLimiter) Limit() int {
 	return int(l.defaultRateLimit.limit)
+}
+
+func (l *rateLimiter) resolveOptions(options []RateLimitOption) (limit int64, window time.Duration, burst int64, alg Algorithm) {
+	limit = l.defaultRateLimit.limit
+	window = l.defaultRateLimit.window
+	burst = l.defaultRateLimit.burst
+	alg = l.defaultRateLimit.algorithm
+
+	for _, opt := range options {
+		if opt.limit > 0 {
+			limit = opt.limit
+		}
+		if opt.window > 0 {
+			window = opt.window
+		}
+		if opt.hasBurst && opt.burst > 0 {
+			burst = opt.burst
+		}
+		if opt.hasAlg {
+			alg = opt.algorithm
+		}
+	}
+	if burst <= 0 {
+		burst = limit
+	}
+	return
 }
 
 func (l *rateLimiter) Check(ctx context.Context, identifier string, options ...RateLimitOption) (Result, error) {
@@ -98,11 +144,87 @@ func (l *rateLimiter) AllowN(ctx context.Context, identifier string, n int64, op
 	if n < 0 {
 		return Result{}, ErrInvalidTokens
 	}
-	rl := l.defaultRateLimit
-	if len(options) > 0 {
-		rl = options[len(options)-1]
+	limit, window, burst, alg := l.resolveOptions(options)
+	if alg == AlgorithmFixedWindow {
+		return l.allowNFixedWindow(ctx, identifier, n, limit, window)
+	}
+	return l.allowNGCRA(ctx, identifier, n, limit, window, burst)
+}
+
+func (l *rateLimiter) AllowAtMost(ctx context.Context, identifier string, n int64, options ...RateLimitOption) (Result, error) {
+	if n < 0 {
+		return Result{}, ErrInvalidTokens
+	}
+	limit, window, burst, alg := l.resolveOptions(options)
+	if alg == AlgorithmFixedWindow {
+		return l.allowAtMostFixedWindow(ctx, identifier, n, limit, window)
+	}
+	return l.allowAtMostGCRA(ctx, identifier, n, limit, window, burst)
+}
+
+func (l *rateLimiter) Reset(ctx context.Context, identifier string) error {
+	bufs := rateBuffersPool.Get(0, 128)
+	defer rateBuffersPool.Put(bufs)
+
+	if l.defaultRateLimit.algorithm == AlgorithmFixedWindow {
+		offset := len(bufs.keyBuf)
+		bufs.keyBuf = append(bufs.keyBuf, l.keyPrefix...)
+		bufs.keyBuf = append(bufs.keyBuf, keyDelimOpen...)
+		bufs.keyBuf = append(bufs.keyBuf, identifier...)
+		bufs.keyBuf = append(bufs.keyBuf, keyDelimClose...)
+		key := valkey.BinaryString(bufs.keyBuf[offset:])
+
+		offset = len(bufs.keyBuf)
+		bufs.keyBuf = append(bufs.keyBuf, key...)
+		bufs.keyBuf = append(bufs.keyBuf, ":ex"...)
+		expiresAtKey := valkey.BinaryString(bufs.keyBuf[offset:])
+
+		return l.client.Do(ctx, l.client.B().Del().Key(key, expiresAtKey).Build()).Error()
 	}
 
+	offset := len(bufs.keyBuf)
+	bufs.keyBuf = append(bufs.keyBuf, l.keyPrefix...)
+	bufs.keyBuf = append(bufs.keyBuf, identifier...)
+	key := valkey.BinaryString(bufs.keyBuf[offset:])
+
+	return l.client.Do(ctx, l.client.B().Del().Key(key).Build()).Error()
+}
+
+func (l *rateLimiter) allowAtMostFixedWindow(ctx context.Context, identifier string, n int64, limit int64, window time.Duration) (Result, error) {
+	checkRes, err := l.allowNFixedWindow(ctx, identifier, 0, limit, window)
+	if err != nil {
+		return Result{}, err
+	}
+	if checkRes.Remaining <= 0 {
+		return Result{
+			Allowed:    false,
+			Remaining:  0,
+			ResetAtMs:  checkRes.ResetAtMs,
+			RetryAfter: checkRes.RetryAfter,
+			ResetAfter: checkRes.ResetAfter,
+			Granted:    0,
+		}, nil
+	}
+	granted := min(n, checkRes.Remaining)
+	if granted <= 0 {
+		return Result{
+			Allowed:    false,
+			Remaining:  checkRes.Remaining,
+			ResetAtMs:  checkRes.ResetAtMs,
+			RetryAfter: checkRes.RetryAfter,
+			ResetAfter: checkRes.ResetAfter,
+			Granted:    0,
+		}, nil
+	}
+	res, err := l.allowNFixedWindow(ctx, identifier, granted, limit, window)
+	if err != nil {
+		return Result{}, err
+	}
+	res.Granted = granted
+	return res, nil
+}
+
+func (l *rateLimiter) allowNFixedWindow(ctx context.Context, identifier string, n int64, limit int64, window time.Duration) (Result, error) {
 	bufs := rateBuffersPool.Get(0, 128)
 	defer rateBuffersPool.Put(bufs)
 
@@ -125,7 +247,7 @@ func (l *rateLimiter) AllowN(ctx context.Context, identifier string, n int64, op
 	arg1 := valkey.BinaryString(bufs.keyBuf[offset:])
 
 	offset = len(bufs.keyBuf)
-	bufs.keyBuf = strconv.AppendInt(bufs.keyBuf, now.Add(rl.window).UnixMilli(), 10)
+	bufs.keyBuf = strconv.AppendInt(bufs.keyBuf, now.Add(window).UnixMilli(), 10)
 	arg2 := valkey.BinaryString(bufs.keyBuf[offset:])
 
 	offset = len(bufs.keyBuf)
@@ -152,13 +274,139 @@ func (l *rateLimiter) AllowN(ctx context.Context, identifier string, n int64, op
 		return Result{}, ErrInvalidResponse
 	}
 
-	remaining := max(rl.limit-current, 0)
-	allowed := current <= rl.limit && (n > 0 || current < rl.limit)
+	remaining := max(limit-current, 0)
+	allowed := current <= limit && (n > 0 || current < limit)
+
+	var retryAfter time.Duration
+	if !allowed {
+		diffMs := resetAt - now.UnixMilli()
+		if diffMs > 0 {
+			retryAfter = time.Duration(diffMs) * time.Millisecond
+		}
+	} else {
+		retryAfter = -1
+	}
+
+	var resetAfter time.Duration
+	diffResetMs := resetAt - now.UnixMilli()
+	if diffResetMs > 0 {
+		resetAfter = time.Duration(diffResetMs) * time.Millisecond
+	}
+
+	granted := int64(0)
+	if allowed {
+		granted = n
+	}
 
 	return Result{
-		Allowed:   allowed,
-		Remaining: remaining,
-		ResetAtMs: resetAt,
+		Allowed:    allowed,
+		Remaining:  remaining,
+		ResetAtMs:  resetAt,
+		RetryAfter: retryAfter,
+		ResetAfter: resetAfter,
+		Granted:    granted,
+	}, nil
+}
+
+func (l *rateLimiter) allowNGCRA(ctx context.Context, identifier string, n int64, limit int64, window time.Duration, burst int64) (Result, error) {
+	bufs := rateBuffersPool.Get(0, 128)
+	defer rateBuffersPool.Put(bufs)
+
+	offset := len(bufs.keyBuf)
+	bufs.keyBuf = append(bufs.keyBuf, l.keyPrefix...)
+	bufs.keyBuf = append(bufs.keyBuf, identifier...)
+	key := valkey.BinaryString(bufs.keyBuf[offset:])
+
+	offset = len(bufs.keyBuf)
+	bufs.keyBuf = strconv.AppendInt(bufs.keyBuf, burst, 10)
+	argBurst := valkey.BinaryString(bufs.keyBuf[offset:])
+
+	offset = len(bufs.keyBuf)
+	bufs.keyBuf = strconv.AppendInt(bufs.keyBuf, limit, 10)
+	argRate := valkey.BinaryString(bufs.keyBuf[offset:])
+
+	offset = len(bufs.keyBuf)
+	bufs.keyBuf = strconv.AppendFloat(bufs.keyBuf, window.Seconds(), 'f', -1, 64)
+	argPeriod := valkey.BinaryString(bufs.keyBuf[offset:])
+
+	offset = len(bufs.keyBuf)
+	bufs.keyBuf = strconv.AppendInt(bufs.keyBuf, n, 10)
+	argCost := valkey.BinaryString(bufs.keyBuf[offset:])
+
+	resp := gcraAllowNScript.Exec(ctx, l.client, []string{key}, []string{argBurst, argRate, argPeriod, argCost})
+	gcraRes, err := ParseGCRAResponse(resp)
+	if err != nil {
+		return Result{}, err
+	}
+
+	allowed := gcraRes.Allowed > 0
+	if n == 0 {
+		allowed = gcraRes.Remaining > 0 && gcraRes.RetryAfter == -1
+	}
+
+	resetAtMs := int64(0)
+	if gcraRes.ResetAfter > 0 {
+		resetAtMs = time.Now().Add(gcraRes.ResetAfter).UnixMilli()
+	}
+
+	return Result{
+		Allowed:    allowed,
+		Remaining:  gcraRes.Remaining,
+		ResetAtMs:  resetAtMs,
+		RetryAfter: gcraRes.RetryAfter,
+		ResetAfter: gcraRes.ResetAfter,
+		Granted:    gcraRes.Allowed,
+	}, nil
+}
+
+func (l *rateLimiter) allowAtMostGCRA(ctx context.Context, identifier string, n int64, limit int64, window time.Duration, burst int64) (Result, error) {
+	bufs := rateBuffersPool.Get(0, 128)
+	defer rateBuffersPool.Put(bufs)
+
+	offset := len(bufs.keyBuf)
+	bufs.keyBuf = append(bufs.keyBuf, l.keyPrefix...)
+	bufs.keyBuf = append(bufs.keyBuf, identifier...)
+	key := valkey.BinaryString(bufs.keyBuf[offset:])
+
+	offset = len(bufs.keyBuf)
+	bufs.keyBuf = strconv.AppendInt(bufs.keyBuf, burst, 10)
+	argBurst := valkey.BinaryString(bufs.keyBuf[offset:])
+
+	offset = len(bufs.keyBuf)
+	bufs.keyBuf = strconv.AppendInt(bufs.keyBuf, limit, 10)
+	argRate := valkey.BinaryString(bufs.keyBuf[offset:])
+
+	offset = len(bufs.keyBuf)
+	bufs.keyBuf = strconv.AppendFloat(bufs.keyBuf, window.Seconds(), 'f', -1, 64)
+	argPeriod := valkey.BinaryString(bufs.keyBuf[offset:])
+
+	offset = len(bufs.keyBuf)
+	bufs.keyBuf = strconv.AppendInt(bufs.keyBuf, n, 10)
+	argCost := valkey.BinaryString(bufs.keyBuf[offset:])
+
+	resp := gcraAllowAtMostScript.Exec(ctx, l.client, []string{key}, []string{argBurst, argRate, argPeriod, argCost})
+	gcraRes, err := ParseGCRAResponse(resp)
+	if err != nil {
+		return Result{}, err
+	}
+
+	allowed := gcraRes.Allowed > 0
+	if n == 0 {
+		allowed = gcraRes.Remaining > 0 && gcraRes.RetryAfter == -1
+	}
+
+	resetAtMs := int64(0)
+	if gcraRes.ResetAfter > 0 {
+		resetAtMs = time.Now().Add(gcraRes.ResetAfter).UnixMilli()
+	}
+
+	return Result{
+		Allowed:    allowed,
+		Remaining:  gcraRes.Remaining,
+		ResetAtMs:  resetAtMs,
+		RetryAfter: gcraRes.RetryAfter,
+		ResetAfter: gcraRes.ResetAfter,
+		Granted:    gcraRes.Allowed,
 	}, nil
 }
 
@@ -181,3 +429,225 @@ end
 local current = redis.call("incrby", rate_limit_key, increment_amount)
 return { current, expires_at }
 `)
+
+// GCRAResult contains the raw numeric and timing results returned by the GCRA Lua engine.
+type GCRAResult struct {
+	Allowed    int64
+	Remaining  int64
+	RetryAfter time.Duration
+	ResetAfter time.Duration
+}
+
+// DurFromSecString parses a float-in-seconds string (e.g., "-1", "0.1", "1.5") into a time.Duration.
+// A value of -1 returns time.Duration(-1), indicating no retry wait is needed.
+func DurFromSecString(s string) (time.Duration, error) {
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, err
+	}
+	if f == -1 {
+		return -1, nil
+	}
+	if f < 0 {
+		return 0, nil
+	}
+	return time.Duration(f * float64(time.Second)), nil
+}
+
+// ParseGCRAResponse parses the 4-element array response from the GCRA Lua scripts.
+// The array format is:
+// [0] allowed (int64): count of allowed tokens (0 if rejected, or cost if allowed)
+// [1] remaining (int64): maximum permitted instantaneous tokens
+// [2] retry_after (string): float seconds until next request permitted ("-1" if allowed)
+// [3] reset_after (string): float seconds until full rate limit restoration
+func ParseGCRAResponse(resp valkey.ValkeyResult) (GCRAResult, error) {
+	if err := resp.Error(); err != nil {
+		return GCRAResult{}, err
+	}
+
+	arr, err := resp.ToArray()
+	if err != nil || len(arr) != 4 {
+		return GCRAResult{}, ErrInvalidResponse
+	}
+
+	allowed, err := arr[0].AsInt64()
+	if err != nil {
+		return GCRAResult{}, fmt.Errorf("%w: invalid allowed count: %v", ErrInvalidResponse, err)
+	}
+
+	remaining, err := arr[1].AsInt64()
+	if err != nil {
+		return GCRAResult{}, fmt.Errorf("%w: invalid remaining count: %v", ErrInvalidResponse, err)
+	}
+
+	retryStr, err := arr[2].ToString()
+	if err != nil {
+		return GCRAResult{}, fmt.Errorf("%w: invalid retry_after: %v", ErrInvalidResponse, err)
+	}
+	retryAfter, err := DurFromSecString(retryStr)
+	if err != nil {
+		return GCRAResult{}, fmt.Errorf("%w: failed to parse retry_after %q: %v", ErrInvalidResponse, retryStr, err)
+	}
+
+	resetStr, err := arr[3].ToString()
+	if err != nil {
+		return GCRAResult{}, fmt.Errorf("%w: invalid reset_after: %v", ErrInvalidResponse, err)
+	}
+	resetAfter, err := DurFromSecString(resetStr)
+	if err != nil {
+		return GCRAResult{}, fmt.Errorf("%w: failed to parse reset_after %q: %v", ErrInvalidResponse, resetStr, err)
+	}
+
+	return GCRAResult{
+		Allowed:    allowed,
+		Remaining:  remaining,
+		RetryAfter: retryAfter,
+		ResetAfter: resetAfter,
+	}, nil
+}
+
+func ExecGCRAAllowN(ctx context.Context, client valkey.Client, key string, burst int64, rate int64, period time.Duration, cost int64) (GCRAResult, error) {
+	resp := gcraAllowNScript.Exec(ctx, client, []string{key}, []string{
+		strconv.FormatInt(burst, 10),
+		strconv.FormatInt(rate, 10),
+		strconv.FormatFloat(period.Seconds(), 'f', -1, 64),
+		strconv.FormatInt(cost, 10),
+	})
+	return ParseGCRAResponse(resp)
+}
+
+func ExecGCRAAllowAtMost(ctx context.Context, client valkey.Client, key string, burst int64, rate int64, period time.Duration, cost int64) (GCRAResult, error) {
+	resp := gcraAllowAtMostScript.Exec(ctx, client, []string{key}, []string{
+		strconv.FormatInt(burst, 10),
+		strconv.FormatInt(rate, 10),
+		strconv.FormatFloat(period.Seconds(), 'f', -1, 64),
+		strconv.FormatInt(cost, 10),
+	})
+	return ParseGCRAResponse(resp)
+}
+
+// gcraAllowNScript implements the atomic GCRA allowN (all-or-nothing) algorithm in Lua.
+// KEYS[1]: rate limit key
+// ARGV[1]: burst tolerance count
+// ARGV[2]: rate (number of operations per period)
+// ARGV[3]: period in seconds
+// ARGV[4]: cost (tokens requested)
+var gcraAllowNScript = valkey.NewLuaScript(`
+redis.replicate_commands()
+
+local rate_limit_key = KEYS[1]
+local burst = tonumber(ARGV[1])
+local rate = tonumber(ARGV[2])
+local period = tonumber(ARGV[3])
+local cost = tonumber(ARGV[4])
+
+local emission_interval = period / rate
+local increment = emission_interval * cost
+local burst_offset = emission_interval * burst
+
+local jan_1_2017 = 1483228800
+local now = redis.call("TIME")
+now = (now[1] - jan_1_2017) + (now[2] / 1000000)
+
+local tat = redis.call("GET", rate_limit_key)
+
+if not tat then
+  tat = now
+else
+  tat = tonumber(tat)
+end
+
+tat = math.max(tat, now)
+
+local diff = burst_offset - increment - (tat - now)
+local remaining = diff / emission_interval
+
+if remaining < 0 then
+  local reset_after = tat - now
+  local retry_after = diff * -1
+  return {
+    0,
+    0,
+    tostring(retry_after),
+    tostring(reset_after),
+  }
+end
+
+local new_tat = tat + increment
+local reset_after = new_tat - now
+if reset_after > 0 then
+  redis.call("SET", rate_limit_key, new_tat, "EX", math.ceil(reset_after))
+end
+local retry_after = -1
+return {cost, math.floor(remaining + 1e-9), tostring(retry_after), tostring(reset_after)}
+`)
+
+// gcraAllowAtMostScript implements the atomic GCRA allowAtMost (partial grant) algorithm in Lua.
+// KEYS[1]: rate limit key
+// ARGV[1]: burst tolerance count
+// ARGV[2]: rate (number of operations per period)
+// ARGV[3]: period in seconds
+// ARGV[4]: cost (maximum tokens requested)
+var gcraAllowAtMostScript = valkey.NewLuaScript(`
+redis.replicate_commands()
+
+local rate_limit_key = KEYS[1]
+local burst = tonumber(ARGV[1])
+local rate = tonumber(ARGV[2])
+local period = tonumber(ARGV[3])
+local cost = tonumber(ARGV[4])
+
+local emission_interval = period / rate
+local burst_offset = emission_interval * burst
+
+local jan_1_2017 = 1483228800
+local now = redis.call("TIME")
+now = (now[1] - jan_1_2017) + (now[2] / 1000000)
+
+local tat = redis.call("GET", rate_limit_key)
+
+if not tat then
+  tat = now
+else
+  tat = tonumber(tat)
+end
+
+tat = math.max(tat, now)
+
+local diff = burst_offset - (tat - now)
+local remaining = diff / emission_interval
+
+if remaining < 1 then
+  local reset_after = tat - now
+  local retry_after = emission_interval - diff
+  return {
+    0,
+    0,
+    tostring(retry_after),
+    tostring(reset_after),
+  }
+end
+
+if remaining < cost then
+  cost = remaining
+  remaining = 0
+else
+  remaining = remaining - cost
+end
+
+local increment = emission_interval * cost
+local new_tat = tat + increment
+
+local reset_after = new_tat - now
+if reset_after > 0 then
+  redis.call("SET", rate_limit_key, new_tat, "EX", math.ceil(reset_after))
+end
+
+return {
+  cost,
+  math.floor(remaining + 1e-9),
+  tostring(-1),
+  tostring(reset_after),
+}
+`)
+
