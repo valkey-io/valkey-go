@@ -291,7 +291,7 @@ During cluster failovers, node restarts, or transient network partitions, aggres
 - `DialerRetries`: Maximum number of reconnection retry attempts per dial operation (default `0`, fail-fast).
 - `DialerRetryBaseDelay`: Base backoff duration (default `10ms`).
 - `DialerRetryMaxDelay`: Upper bound cap for backoff delay (default `3s`).
-- `DialerRetryBackoff`: Custom backoff curve `func(attempts int, base, max time.Duration) time.Duration`. If not set, defaults to Full Jitter (`rand(0, min(max, base * 2^attempts))`).
+- `DialerRetryBackoff`: Custom backoff curve `func(attempt int) time.Duration`. If not set, defaults to Full Jitter (`rand(0, min(max, base * 2^attempt))`).
 
 The dialer retry loop transparently covers:
 1. **L4 Network Failures**: Connection refused (`ECONNREFUSED`), timeouts (`ETIMEDOUT`, `net.Error.Timeout()`), and connection resets (`ECONNRESET`).
