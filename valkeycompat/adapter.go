@@ -130,6 +130,7 @@ type CoreCmdable interface {
 	MSetEX(ctx context.Context, args MSetEXArgs, values ...any) *IntCmd
 	Set(ctx context.Context, key string, value any, expiration time.Duration) *StatusCmd
 	SetArgs(ctx context.Context, key string, value any, a SetArgs) *StatusCmd
+	SetFromBuffer(ctx context.Context, key string, buf []byte) *StatusCmd
 	SetEX(ctx context.Context, key string, value any, expiration time.Duration) *StatusCmd
 	SetNX(ctx context.Context, key string, value any, expiration time.Duration) *BoolCmd
 	SetXX(ctx context.Context, key string, value any, expiration time.Duration) *BoolCmd
@@ -359,7 +360,9 @@ type CoreCmdable interface {
 	ShutdownSave(ctx context.Context) *StatusCmd
 	ShutdownNoSave(ctx context.Context) *StatusCmd
 	SlaveOf(ctx context.Context, host, port string) *StatusCmd
+	ReplicaOf(ctx context.Context, host, port string) *StatusCmd
 	SlowLogGet(ctx context.Context, num int64) *SlowLogCmd
+	SlowLogLen(ctx context.Context) *IntCmd
 	SlowLogReset(ctx context.Context) *StatusCmd
 	Time(ctx context.Context) *TimeCmd
 	DebugObject(ctx context.Context, key string) *StringCmd
@@ -1286,6 +1289,13 @@ func (c *Compat) SetNX(ctx context.Context, key string, value any, expiration ti
 	}
 
 	return newBoolCmd(resp)
+}
+
+func (c *Compat) SetFromBuffer(ctx context.Context, key string, buf []byte) *StatusCmd {
+	value := valkey.BinaryString(buf)
+	cmd := c.client.B().Set().Key(key).Value(value).Build()
+	resp := c.client.Do(ctx, cmd)
+	return newStatusCmd(resp)
 }
 
 func (c *Compat) SetXX(ctx context.Context, key string, value any, expiration time.Duration) *BoolCmd {
@@ -3076,10 +3086,22 @@ func (c *Compat) SlaveOf(ctx context.Context, host, port string) *StatusCmd {
 	return newStatusCmd(resp)
 }
 
+func (c *Compat) ReplicaOf(ctx context.Context, host, port string) *StatusCmd {
+	cmd := c.client.B().Arbitrary("REPLICAOF").Args(host, port).Build()
+	resp := c.client.Do(ctx, cmd)
+	return newStatusCmd(resp)
+}
+
 func (c *Compat) SlowLogGet(ctx context.Context, num int64) *SlowLogCmd {
 	cmd := c.client.B().SlowlogGet().Count(num).Build()
 	resp := c.client.Do(ctx, cmd)
 	return newSlowLogCmd(resp)
+}
+
+func (c *Compat) SlowLogLen(ctx context.Context) *IntCmd {
+	cmd := c.client.B().SlowlogLen().Build()
+	resp := c.client.Do(ctx, cmd)
+	return newIntCmd(resp)
 }
 
 func (c *Compat) SlowLogReset(ctx context.Context) *StatusCmd {

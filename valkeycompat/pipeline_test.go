@@ -203,6 +203,7 @@ func TestPipeliner(t *testing.T) {
 		p.MSetEX(ctx, MSetEXArgs{Expiration: &ExpirationOption{Mode: ExpirationEX, Value: 1}}, 1, 2)
 		p.Set(ctx, "1", 2, time.Second)
 		p.SetArgs(ctx, "1", 2, SetArgs{})
+		p.SetFromBuffer(ctx, "1", []byte("3"))
 		p.SetEX(ctx, "1", 2, time.Second)
 		p.SetNX(ctx, "1", 2, time.Second)
 		p.SetXX(ctx, "1", 2, time.Second)
@@ -633,7 +634,9 @@ func TestPipeliner(t *testing.T) {
 		p.JSONToggle(ctx, "1", "1")
 		p.JSONType(ctx, "1", "1")
 		p.SlaveOf(ctx, "NO", "ONE")
+		p.ReplicaOf(ctx, "NO", "ONE")
 		p.SlowLogGet(ctx, 1)
+		p.SlowLogLen(ctx)
 		p.SlowLogReset(ctx)
 		p.ClusterMyShardID(ctx)
 		p.ModuleLoadex(ctx, &ModuleLoadexConfig{
@@ -642,7 +645,7 @@ func TestPipeliner(t *testing.T) {
 			Args: []any{"1", "2"},
 		})
 
-		if n := len(p.rets); n != 493 {
+		if n := len(p.rets); n != 496 {
 			t.Fatalf("unexpected pipeline calls: %v", n)
 		}
 		for i, cmd := range p.rets {
@@ -650,7 +653,7 @@ func TestPipeliner(t *testing.T) {
 				t.Fatalf("unexpected pipeline placeholder err(%d): %v", i, err)
 			}
 		}
-		if n := len(p.comp.client.(*proxy).cmds); n != 493 {
+		if n := len(p.comp.client.(*proxy).cmds); n != 496 {
 			t.Fatalf("unexpected pipeline commands: %v", n)
 		}
 		var pipeline [][]string
@@ -741,6 +744,7 @@ var golden = `[
 	["MSETEX","1","1","2","EX","1"],
     ["SET","1","2","EX","1"],
     ["SET","1","2"],
+    ["SET","1","3"],
     ["SETEX","1","1","2"],
     ["SET","1","2","NX","EX","1"],
     ["SET","1","2","XX","EX","1"],
@@ -1171,7 +1175,9 @@ var golden = `[
     ["JSON.TOGGLE","1","1"],
     ["JSON.TYPE","1","1"],
     ["SLAVEOF","NO","ONE"],
+	["REPLICAOF","NO","ONE"],
     ["SLOWLOG","GET","1"],
+	["SLOWLOG","LEN"],
     ["SLOWLOG","RESET"],
     ["CLUSTER","MYSHARDID"],
     ["MODULE","LOADEX","/","CONFIG","k","v","ARGS","1","2"]

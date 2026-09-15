@@ -474,6 +474,12 @@ func (c *Pipeline) SetRange(ctx context.Context, key string, offset int64, value
 	return ret
 }
 
+func (c *Pipeline) SetFromBuffer(ctx context.Context, key string, buf []byte) *StatusCmd {
+	ret := c.comp.SetFromBuffer(ctx, key, buf)
+	c.rets = append(c.rets, ret)
+	return ret
+}
+
 func (c *Pipeline) StrLen(ctx context.Context, key string) *IntCmd {
 	ret := c.comp.StrLen(ctx, key)
 	c.rets = append(c.rets, ret)
@@ -1764,8 +1770,20 @@ func (c *Pipeline) SlaveOf(ctx context.Context, host, port string) *StatusCmd {
 	return ret
 }
 
+func (c *Pipeline) ReplicaOf(ctx context.Context, host, port string) *StatusCmd {
+	ret := c.comp.ReplicaOf(ctx, host, port)
+	c.rets = append(c.rets, ret)
+	return ret
+}
+
 func (c *Pipeline) SlowLogGet(ctx context.Context, num int64) *SlowLogCmd {
 	ret := c.comp.SlowLogGet(ctx, num)
+	c.rets = append(c.rets, ret)
+	return ret
+}
+
+func (c *Pipeline) SlowLogLen(ctx context.Context) *IntCmd {
+	ret := c.comp.SlowLogLen(ctx)
 	c.rets = append(c.rets, ret)
 	return ret
 }

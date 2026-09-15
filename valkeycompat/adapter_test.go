@@ -383,6 +383,12 @@ func testAdapter(resp3 bool) {
 			}, "10s").Should(Equal("OK"))
 		})
 
+		It("should ReplicaOf", func() {
+			r := adapter.ReplicaOf(ctx, "NO", "ONE")
+			Expect(r.Err()).NotTo(HaveOccurred())
+			Expect(r.Val()).To(Equal("OK"))
+		})
+
 		It("should Time", func() {
 			tm, err := adapter.Time(ctx).Result()
 			Expect(err).NotTo(HaveOccurred())
@@ -2069,6 +2075,16 @@ func testAdapter(resp3 bool) {
 
 		It("should SetGet", func() {
 			set := adapter.Set(ctx, "key", "hello", 0)
+			Expect(set.Err()).NotTo(HaveOccurred())
+			Expect(set.Val()).To(Equal("OK"))
+
+			get := adapter.Get(ctx, "key")
+			Expect(get.Err()).NotTo(HaveOccurred())
+			Expect(get.Val()).To(Equal("hello"))
+		})
+
+		It("should SetFromBuffer", func() {
+			set := adapter.SetFromBuffer(ctx, "key", []byte("hello"))
 			Expect(set.Err()).NotTo(HaveOccurred())
 			Expect(set.Val()).To(Equal("OK"))
 
@@ -7574,6 +7590,23 @@ func testAdapterCache(resp3 bool) {
 				result, err := adapter.SlowLogGet(ctx, -1).Result()
 				Expect(err).NotTo(HaveOccurred())
 				Expect(len(result)).NotTo(BeZero())
+			})
+		})
+
+		Describe("SlowLogLen", func() {
+			It("returns the number of slow queries", func() {
+				const key = "slowlog-log-slower-than"
+
+				old := adapter.ConfigGet(ctx, key).Val()
+				adapter.ConfigSet(ctx, key, "0")
+				defer adapter.ConfigSet(ctx, key, old[key])
+
+				Expect(adapter.SlowLogReset(ctx).Err()).NotTo(HaveOccurred())
+				adapter.Set(ctx, "slowlog-len-test", "true", 0)
+
+				length, err := adapter.SlowLogLen(ctx).Result()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(length).To(BeNumerically(">", 0))
 			})
 		})
 	}
