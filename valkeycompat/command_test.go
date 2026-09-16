@@ -621,7 +621,7 @@ var _ = Describe("Commands", func() {
 		m := mock.NewClient(ctrl)
 		p := newPipeline(m)
 		// call MSetEX with one key/value and EX 1
-		p.MSetEX(ctx, MSetEXArgs{Expiration: &ExpirationOption{Mode: ExpirationEX, Value: 1}}, "k1", "v1")
+		p.MSetEX(ctx, MSetEXArgs{Expiration: &ExpirationOption{Mode: EX, Value: 1}}, "k1", "v1")
 		cmds := p.comp.client.(*proxy).cmds
 		Expect(len(cmds)).To(BeNumerically(">", 0))
 		last := cmds[len(cmds)-1].Commands()

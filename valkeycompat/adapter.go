@@ -1144,69 +1144,41 @@ func (c *Compat) MSetNX(ctx context.Context, values ...any) *BoolCmd {
 func (c *Compat) MSetEX(ctx context.Context, args MSetEXArgs, values ...any) *IntCmd {
 	expandedArgs := argsToSlice(values)
 
-	// Validate there is at least one key/value pair
-	if len(expandedArgs) == 0 {
-		errCmd := &IntCmd{}
-		errCmd.SetErr(fmt.Errorf("MSETEX requires at least one key/value pair: %w", ErrLocalValidation))
-		return errCmd
-	}
-
-	// Validate even number of key-value pairs
-	if len(expandedArgs)%2 != 0 {
-		errCmd := &IntCmd{}
-		errCmd.SetErr(fmt.Errorf("MSETEX requires an even number of key/value arguments, got %d: %w", len(expandedArgs), ErrLocalValidation))
-		return errCmd
-	}
-
 	numkeys := len(expandedArgs) / 2
 
 	cmd := c.client.B().Arbitrary("MSETEX").Args(strconv.Itoa(numkeys))
 
-	// Validate expiration mode early: if an Expiration was provided it must be a
-	// known, non-empty ExpirationMode. Reject unknown or empty modes so callers
-	// asking for an expiration don't accidentally create persistent keys.
-	if args.Expiration != nil {
-		switch args.Expiration.Mode {
-		case ExpirationEX, ExpirationPX, ExpirationEXAT, ExpirationPXAT, ExpirationKEEPTTL:
-			// valid
-		default:
-			errCmd := &IntCmd{}
-			errCmd.SetErr(fmt.Errorf("MSETEX: invalid expiration mode: %q: %w", args.Expiration.Mode, ErrLocalValidation))
-			return errCmd
-		}
-	}
-
 	// Add all key-value pairs and register keys for proper routing in cluster mode.
 	// Use Keys(...) to mark key positions and Args(...) for the corresponding values.
-	for i := 0; i < len(expandedArgs); i += 2 {
+	for i := 0; i < len(expandedArgs)-1; i += 2 {
 		cmd = cmd.Keys(expandedArgs[i]).Args(expandedArgs[i+1])
+	}
+	if len(expandedArgs)%2 != 0 {
+		cmd = cmd.Args(expandedArgs[len(expandedArgs)-1])
 	}
 
 	// Add condition (NX or XX)
-	switch args.Condition {
-	case ConditionNX, ConditionXX:
+	if args.Condition != "" {
 		cmd = cmd.Args(string(args.Condition))
-	case "":
-		// valid: no condition specified
-	default:
-		errCmd := &IntCmd{}
-		errCmd.SetErr(fmt.Errorf("MSETEX: invalid condition: %q: %w", args.Condition, ErrLocalValidation))
-		return errCmd
 	}
 
 	// Add expiration options
 	if args.Expiration != nil {
 		switch args.Expiration.Mode {
-		case ExpirationEX:
+		case EX:
 			cmd = cmd.Args("EX", strconv.FormatInt(args.Expiration.Value, 10))
-		case ExpirationPX:
+		case PX:
 			cmd = cmd.Args("PX", strconv.FormatInt(args.Expiration.Value, 10))
-		case ExpirationEXAT:
+		case EXAT:
 			cmd = cmd.Args("EXAT", strconv.FormatInt(args.Expiration.Value, 10))
-		case ExpirationPXAT:
+		case PXAT:
 			cmd = cmd.Args("PXAT", strconv.FormatInt(args.Expiration.Value, 10))
-		case ExpirationKEEPTTL:
+		case KEEPTTL:
 			cmd = cmd.Args("KEEPTTL")
+		default:
+			if args.Expiration.Mode != "" {
+				cmd = cmd.Args(string(args.Expiration.Mode), strconv.FormatInt(args.Expiration.Value, 10))
+			}
 		}
 	}
 

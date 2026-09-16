@@ -200,7 +200,7 @@ func TestPipeliner(t *testing.T) {
 		p.MGet(ctx, "1", "2")
 		p.MSet(ctx, 1, 2)
 		p.MSetNX(ctx, 1, 2)
-		p.MSetEX(ctx, MSetEXArgs{Expiration: &ExpirationOption{Mode: ExpirationEX, Value: 1}}, 1, 2)
+		p.MSetEX(ctx, MSetEXArgs{Expiration: &ExpirationOption{Mode: EX, Value: 1}}, 1, 2)
 		p.Set(ctx, "1", 2, time.Second)
 		p.SetArgs(ctx, "1", 2, SetArgs{})
 		p.SetFromBuffer(ctx, "1", []byte("3"))

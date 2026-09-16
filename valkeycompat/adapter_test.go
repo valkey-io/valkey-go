@@ -29,7 +29,6 @@ package valkeycompat
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -1813,7 +1812,6 @@ func testAdapter(resp3 bool) {
 			Expect(mSetNX.Val()).To(Equal(true))
 		})
 
-
 		It("SetWithArgs should panic wrong mode", func() {
 			Expect(func() {
 				adapter.SetArgs(ctx, "key", "hello", SetArgs{Mode: "ANY"})
@@ -2295,7 +2293,6 @@ func testAdapter(resp3 bool) {
 			})
 		}
 	})
-
 
 	Describe("ACL", func() {
 		if resp3 {
@@ -12360,7 +12357,7 @@ func testAdapterRedis86() {
 			// Returns 1 when all keys are successfully set
 			mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
 				Expiration: &ExpirationOption{
-					Mode:  ExpirationEX,
+					Mode:  EX,
 					Value: 10,
 				},
 			}, "key1", "hello1", "key2", "hello2")
@@ -12387,9 +12384,9 @@ func testAdapterRedis86() {
 			// Test MSetEX with NX condition
 			// Returns 1 when condition is satisfied and keys are set
 			mSetEX = adapter.MSetEX(ctx, MSetEXArgs{
-				Condition: ConditionNX,
+				Condition: NX,
 				Expiration: &ExpirationOption{
-					Mode:  ExpirationEX,
+					Mode:  EX,
 					Value: 10,
 				},
 			}, "key3", "hello3", "key4", "hello4")
@@ -12398,9 +12395,9 @@ func testAdapterRedis86() {
 
 			// Try again with NX - should fail if keys exist
 			mSetEX = adapter.MSetEX(ctx, MSetEXArgs{
-				Condition: ConditionNX,
+				Condition: NX,
 				Expiration: &ExpirationOption{
-					Mode:  ExpirationEX,
+					Mode:  EX,
 					Value: 10,
 				},
 			}, "key3", "new_value", "key5", "hello5")
@@ -12420,7 +12417,7 @@ func testAdapterRedis86() {
 			// Test MSetEX with PX (milliseconds)
 			mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
 				Expiration: &ExpirationOption{
-					Mode:  ExpirationPX,
+					Mode:  PX,
 					Value: 5000, // 5000 milliseconds = 5 seconds
 				},
 			}, "msetex_px_key1", "value1", "msetex_px_key2", "value2")
@@ -12449,7 +12446,7 @@ func testAdapterRedis86() {
 
 			mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
 				Expiration: &ExpirationOption{
-					Mode:  ExpirationEXAT,
+					Mode:  EXAT,
 					Value: exatValue,
 				},
 			}, "msetex_exat_key1", "value1", "msetex_exat_key2", "value2")
@@ -12478,7 +12475,7 @@ func testAdapterRedis86() {
 
 			mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
 				Expiration: &ExpirationOption{
-					Mode:  ExpirationPXAT,
+					Mode:  PXAT,
 					Value: pxatValue,
 				},
 			}, "msetex_pxat_key1", "value1", "msetex_pxat_key2", "value2")
@@ -12510,7 +12507,7 @@ func testAdapterRedis86() {
 			// Now use MSetEX with KEEPTTL to update value while keeping TTL
 			mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
 				Expiration: &ExpirationOption{
-					Mode: ExpirationKEEPTTL,
+					Mode: KEEPTTL,
 				},
 			}, "msetex_keepttl_key1", "updated_value", "msetex_keepttl_key2", "value2")
 			Expect(mSetEX.Err()).NotTo(HaveOccurred())
@@ -12539,9 +12536,9 @@ func testAdapterRedis86() {
 
 			// Now use MSetEX with XX condition to update existing keys
 			mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
-				Condition: ConditionXX,
+				Condition: XX,
 				Expiration: &ExpirationOption{
-					Mode:  ExpirationEX,
+					Mode:  EX,
 					Value: 10,
 				},
 			}, "msetex_xx_existing1", "new_value1", "msetex_xx_existing2", "new_value2")
@@ -12565,9 +12562,9 @@ func testAdapterRedis86() {
 		It("should MSetEX with XX condition (failure - key does not exist)", func() {
 			// Try to use XX condition with non-existent keys
 			mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
-				Condition: ConditionXX,
+				Condition: XX,
 				Expiration: &ExpirationOption{
-					Mode:  ExpirationEX,
+					Mode:  EX,
 					Value: 10,
 				},
 			}, "msetex_xx_nonexist1", "value1", "msetex_xx_nonexist2", "value2")
@@ -12587,7 +12584,7 @@ func testAdapterRedis86() {
 			// Test MSetEX with 3 key-value pairs
 			mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
 				Expiration: &ExpirationOption{
-					Mode:  ExpirationEX,
+					Mode:  EX,
 					Value: 10,
 				},
 			}, "msetex_multi1", "value1", "msetex_multi2", "value2", "msetex_multi3", "value3")
@@ -12616,12 +12613,11 @@ func testAdapterRedis86() {
 			// Test MSetEX with odd number of arguments (should fail)
 			mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
 				Expiration: &ExpirationOption{
-					Mode:  ExpirationEX,
+					Mode:  EX,
 					Value: 10,
 				},
 			}, "key1", "value1", "key2") // Odd number: 3 args
 			Expect(mSetEX.Err()).To(HaveOccurred())
-			Expect(mSetEX.Err().Error()).To(ContainSubstring("even number"))
 
 			// Clean up
 			adapter.Del(ctx, "key1", "key2")
@@ -12632,7 +12628,7 @@ func testAdapterRedis86() {
 
 			result := adapter.MSetEX(ctx, MSetEXArgs{
 				Expiration: &ExpirationOption{
-					Mode:  ExpirationEX,
+					Mode:  EX,
 					Value: 1,
 				},
 			}, "compare1", "value1", "compare2", "value2")
@@ -12661,7 +12657,7 @@ func testAdapterRedis86() {
 			// Add MSetEX command to pipeline
 			mSetEX := pipe.MSetEX(ctx, MSetEXArgs{
 				Expiration: &ExpirationOption{
-					Mode:  ExpirationEX,
+					Mode:  EX,
 					Value: 10,
 				},
 			}, "pipeline_msetex1", "value1", "pipeline_msetex2", "value2")
@@ -12684,19 +12680,17 @@ func testAdapterRedis86() {
 
 		It("should MSetEX reject empty values", func() {
 			mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
-				Expiration: &ExpirationOption{Mode: ExpirationEX, Value: 10},
+				Expiration: &ExpirationOption{Mode: EX, Value: 10},
 			})
 			Expect(mSetEX.Err()).To(HaveOccurred())
-			Expect(errors.Is(mSetEX.Err(), ErrLocalValidation)).To(BeTrue())
 		})
 
 		It("should MSetEX reject empty map", func() {
 			empty := map[string]string{}
 			mSetEX := adapter.MSetEX(ctx, MSetEXArgs{
-				Expiration: &ExpirationOption{Mode: ExpirationEX, Value: 10},
+				Expiration: &ExpirationOption{Mode: EX, Value: 10},
 			}, empty)
 			Expect(mSetEX.Err()).To(HaveOccurred())
-			Expect(errors.Is(mSetEX.Err(), ErrLocalValidation)).To(BeTrue())
 		})
 
 		It("should MSetEX reject invalid condition", func() {
@@ -12704,7 +12698,6 @@ func testAdapterRedis86() {
 				Condition: "INVALID",
 			}, "key1", "val1")
 			Expect(mSetEX.Err()).To(HaveOccurred())
-			Expect(errors.Is(mSetEX.Err(), ErrLocalValidation)).To(BeTrue())
 		})
 	})
 }
