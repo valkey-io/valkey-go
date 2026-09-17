@@ -1175,10 +1175,6 @@ func (c *Compat) MSetEX(ctx context.Context, args MSetEXArgs, values ...any) *In
 			cmd = cmd.Args("PXAT", strconv.FormatInt(args.Expiration.Value, 10))
 		case KEEPTTL:
 			cmd = cmd.Args("KEEPTTL")
-		default:
-			if args.Expiration.Mode != "" {
-				cmd = cmd.Args(string(args.Expiration.Mode), strconv.FormatInt(args.Expiration.Value, 10))
-			}
 		}
 	}
 
