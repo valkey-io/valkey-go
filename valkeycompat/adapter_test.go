@@ -13945,7 +13945,6 @@ func testAdapterSearchRESP2() {
 				"description": "Health trends for the new year, including fitness regimes.",
 				"rating":      4,
 			})
-			WaitForIndexing(client, "idx1", 2)
 
 			res, err := adapter.FTSearchWithArgs(ctx, "idx1", "@uuid:{$uuid}",
 				&FTSearchOptions{
@@ -14023,6 +14022,7 @@ func testAdapterSearchRESP2() {
 			val, err := adapter.FTCreate(ctx, "idx1", &FTCreateOptions{}, &FieldSchema{FieldName: "geom", FieldType: SearchFieldTypeGeoShape, GeoShapeFieldType: "FLAT"}).Result()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(val).To(BeEquivalentTo("OK"))
+			WaitForIndexing(client, "idx1", 2)
 
 			adapter.HSet(ctx, "small", "geom", "POLYGON((1 1, 1 100, 100 100, 100 1, 1 1))")
 			adapter.HSet(ctx, "large", "geom", "POLYGON((1 1, 1 200, 200 200, 200 1, 1 1))")
