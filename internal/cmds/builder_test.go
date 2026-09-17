@@ -171,3 +171,31 @@ func TestVerify(t *testing.T) {
 	}()
 	cmd1.cs.Verify()
 }
+
+// Benchmark_ZAdd measures sorted sets construction and heavy argument parsing.
+func Benchmark_ZAdd(b *testing.B) {
+	builder := NewBuilder(InitSlot)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cmd := builder.Zadd().Key("myzset").ScoreMember().
+			ScoreMember(1.1, "member1").
+			ScoreMember(2.2, "member2").
+			ScoreMember(3.3, "member3").
+			ScoreMember(4.4, "member4").
+			ScoreMember(5.5, "member5").
+			Build()
+		PutCompleted(cmd)
+	}
+}
+
+// BenchmarkCommandBuilder_Allocation verifies zero-allocation command building.
+func BenchmarkCommandBuilder_Allocation(b *testing.B) {
+	builder := NewBuilder(InitSlot)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cmd := builder.Get().Key("benchmark_key").Build()
+		PutCompleted(cmd)
+	}
+}

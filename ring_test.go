@@ -4,6 +4,7 @@ import (
 	"context"
 	"runtime"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -135,4 +136,49 @@ func TestRing(t *testing.T) {
 		}
 		t.Fatal("Should sleep")
 	})
+}
+
+// Benchmark_Ring_Multiplexer_Contention measures concurrent goroutine contention on the ring buffer multiplexer.
+func Benchmark_Ring_Multiplexer_Contention(b *testing.B) {
+	r := newRing(DefaultRingScale)
+	cmd := cmds.NewCompleted([]string{"PING"})
+	ctx := context.Background()
+
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				one, multi, _ := r.NextWriteCmd()
+				if !one.IsEmpty() || len(multi) > 0 {
+					_, _, _, _ = r.NextResultCh()
+					r.FinishResult()
+				} else {
+					runtime.Gosched()
+				}
+			}
+		}
+	}()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_, _ = r.PutOne(ctx, cmd)
+		}
+	})
+	b.StopTimer()
+	close(done)
+	wg.Wait()
+}
+
+// BenchmarkRingBufferMultiplexer_Contention is an alias for CI naming compatibility.
+func BenchmarkRingBufferMultiplexer_Contention(b *testing.B) {
+	Benchmark_Ring_Multiplexer_Contention(b)
 }

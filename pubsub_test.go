@@ -1,6 +1,7 @@
 package valkey
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -95,4 +96,40 @@ func TestSubs_Unsubscribe(t *testing.T) {
 	if ok {
 		t.Fatalf("unexpected ch unclosed")
 	}
+}
+
+// Benchmark_PubSub_Receive measures blocking loop message delivery in pubsub subscriptions.
+func Benchmark_PubSub_Receive(b *testing.B) {
+	s := newSubs()
+	ch, cancel := s.Subscribe([]string{"channel"}, nil)
+	s.Confirm(PubSubSubscription{Channel: "channel"})
+	defer cancel()
+
+	msg := PubSubMessage{Channel: "channel", Message: "payload"}
+	ready := make(chan struct{})
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ready:
+				s.Publish("channel", msg)
+			}
+		}
+	}()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ready <- struct{}{}
+		<-ch
+	}
+	b.StopTimer()
+	close(done)
+	wg.Wait()
 }

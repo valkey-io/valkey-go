@@ -700,3 +700,21 @@ func randN(n int) (v int) {
 	}
 	return
 }
+
+// BenchmarkRESP3WireDecoder_Latency measures deserialization latency of RESP3 wire messages.
+func BenchmarkRESP3WireDecoder_Latency(b *testing.B) {
+	payload := []byte("$11\r\nhello world\r\n")
+	rd := bytes.NewReader(payload)
+	r := bufio.NewReader(rd)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		rd.Reset(payload)
+		r.Reset(rd)
+		_, err := readNextMessage(r)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}

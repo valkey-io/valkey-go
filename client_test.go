@@ -1763,3 +1763,49 @@ func BenchmarkSingleClient_DoCache(b *testing.B) {
 	})
 	client.Close()
 }
+
+// Benchmark_Parallel_DoMulti measures manual transaction pipelining under parallel client load.
+func Benchmark_Parallel_DoMulti(b *testing.B) {
+	m := &mockConn{
+		DoMultiFn: func(cmd ...Completed) *valkeyresults {
+			res := make([]ValkeyResult, len(cmd))
+			for i := range res {
+				res[i] = NewResult(strmsg('+', "OK"), nil)
+			}
+			return &valkeyresults{s: res}
+		},
+	}
+	client, err := newSingleClient(
+		&ClientOption{InitAddress: []string{""}},
+		m,
+		func(dst string, opt *ClientOption) conn { return m },
+		newRetryer(defaultRetryDelayFn),
+	)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer client.Close()
+
+	cmd1 := client.B().Set().Key("k1").Value("v1").Build()
+	cmd2 := client.B().Get().Key("k1").Build()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		ctx := context.Background()
+		for pb.Next() {
+			_ = client.DoMulti(ctx, cmd1, cmd2)
+		}
+	})
+}
+
+// BenchmarkClient_B_Allocation measures the allocation of client.B() command construction.
+func BenchmarkClient_B_Allocation(b *testing.B) {
+	c := &singleClient{cmd: cmds.NewBuilder(cmds.InitSlot)}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cmd := c.B().Get().Key("benchmark_key").Build()
+		cmds.PutCompleted(cmd)
+	}
+}
