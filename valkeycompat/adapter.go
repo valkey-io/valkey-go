@@ -3094,21 +3094,7 @@ func (c *Compat) LatencyReset(ctx context.Context, events ...interface{}) *Statu
 
 	cmd := b.Build()
 	resp := c.client.Do(ctx, cmd)
-
-	statusCmd := &StatusCmd{}
-	if err := resp.Error(); err != nil {
-		statusCmd.SetErr(err)
-		return statusCmd
-	}
-
-	val, err := resp.AsInt64()
-	if err != nil {
-		statusCmd.SetErr(err)
-		return statusCmd
-	}
-
-	statusCmd.SetVal(strconv.FormatInt(val, 10))
-	return statusCmd
+	return newStatusCmd(resp)
 }
 
 func (c *Compat) Time(ctx context.Context) *TimeCmd {

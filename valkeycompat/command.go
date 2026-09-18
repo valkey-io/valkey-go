@@ -372,6 +372,12 @@ func (cmd *ZeroCopyStringCmd) Bytes() []byte {
 
 func (cmd *StringCmd) from(res valkey.ValkeyResult) {
 	val, err := res.ToString()
+	if err != nil {
+		if v, errInt := res.AsInt64(); errInt == nil {
+			val = strconv.FormatInt(v, 10)
+			err = nil
+		}
+	}
 	cmd.SetErr(err)
 	cmd.SetVal(val)
 	cmd.setIsCacheHit(res.IsCacheHit())
@@ -511,9 +517,7 @@ type StatusCmd = StringCmd
 
 func newStatusCmd(res valkey.ValkeyResult) *StatusCmd {
 	cmd := &StatusCmd{}
-	val, err := res.ToString()
-	cmd.SetErr(err)
-	cmd.SetVal(val)
+	cmd.from(res)
 	return cmd
 }
 
@@ -5292,8 +5296,8 @@ func (cmd *LatencyCmd) from(res valkey.ValkeyResult) {
 			return
 		}
 
-		if len(fields) != 4 {
-			cmd.SetErr(fmt.Errorf("valkey: got %d elements in latency latest, expected 4", len(fields)))
+		if len(fields) < 4 {
+			cmd.SetErr(fmt.Errorf("valkey: got %d elements in latency latest, expected at least 4", len(fields)))
 			return
 		}
 

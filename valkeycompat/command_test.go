@@ -29,6 +29,7 @@ package valkeycompat
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -1300,6 +1301,175 @@ func TestStringCmdBool(t *testing.T) {
 			t.Errorf("input %q: got %v, want %v", tt.input, got, tt.want)
 		}
 	}
+}
+
+func TestStringCmdFromInteger(t *testing.T) {
+	t.Parallel()
+
+	res := mock.Result(mock.ValkeyInt64(1))
+	cmd := newStringCmd(res)
+	if err := cmd.Err(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := cmd.Val(); got != "1" {
+		t.Fatalf("got %q, want %q", got, "1")
+	}
+
+	statusCmd := newStatusCmd(res)
+	if err := statusCmd.Err(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := statusCmd.Val(); got != "1" {
+		t.Fatalf("got %q, want %q", got, "1")
+	}
+}
+
+func TestLatencyCmdFrom(t *testing.T) {
+	t.Parallel()
+
+	t.Run("success with 4 elements", func(t *testing.T) {
+		res := mock.Result(mock.ValkeyArray(
+			mock.ValkeyArray(
+				mock.ValkeyString("command"),
+				mock.ValkeyInt64(1700000000),
+				mock.ValkeyInt64(15),
+				mock.ValkeyInt64(30),
+			),
+		))
+		cmd := newLatencyCmd(res)
+		if err := cmd.Err(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		val := cmd.Val()
+		if len(val) != 1 {
+			t.Fatalf("expected 1 entry, got %d", len(val))
+		}
+		expected := Latency{
+			Name:   "command",
+			Time:   time.Unix(1700000000, 0),
+			Latest: 15 * time.Millisecond,
+			Max:    30 * time.Millisecond,
+		}
+		if val[0] != expected {
+			t.Fatalf("got %+v, want %+v", val[0], expected)
+		}
+	})
+
+	t.Run("forward compatibility with extra fields", func(t *testing.T) {
+		res := mock.Result(mock.ValkeyArray(
+			mock.ValkeyArray(
+				mock.ValkeyString("command"),
+				mock.ValkeyInt64(1700000000),
+				mock.ValkeyInt64(15),
+				mock.ValkeyInt64(30),
+				mock.ValkeyString("extra_field"),
+			),
+		))
+		cmd := newLatencyCmd(res)
+		if err := cmd.Err(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		val := cmd.Val()
+		if len(val) != 1 || val[0].Name != "command" || val[0].Latest != 15*time.Millisecond || val[0].Max != 30*time.Millisecond {
+			t.Fatalf("unexpected value: %+v", val)
+		}
+	})
+
+	t.Run("empty array", func(t *testing.T) {
+		res := mock.Result(mock.ValkeyArray())
+		cmd := newLatencyCmd(res)
+		if err := cmd.Err(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(cmd.Val()) != 0 {
+			t.Fatalf("expected empty slice, got %+v", cmd.Val())
+		}
+	})
+
+	t.Run("inner entry not an array", func(t *testing.T) {
+		res := mock.Result(mock.ValkeyArray(mock.ValkeyString("not_an_array")))
+		cmd := newLatencyCmd(res)
+		if cmd.Err() == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("fewer than 4 fields", func(t *testing.T) {
+		res := mock.Result(mock.ValkeyArray(
+			mock.ValkeyArray(
+				mock.ValkeyString("command"),
+				mock.ValkeyInt64(1700000000),
+				mock.ValkeyInt64(15),
+			),
+		))
+		cmd := newLatencyCmd(res)
+		if cmd.Err() == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(cmd.Err().Error(), "expected at least 4") {
+			t.Fatalf("unexpected error message: %v", cmd.Err())
+		}
+	})
+
+	t.Run("invalid name type", func(t *testing.T) {
+		res := mock.Result(mock.ValkeyArray(
+			mock.ValkeyArray(
+				mock.ValkeyInt64(123),
+				mock.ValkeyInt64(1700000000),
+				mock.ValkeyInt64(15),
+				mock.ValkeyInt64(30),
+			),
+		))
+		cmd := newLatencyCmd(res)
+		if cmd.Err() == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("invalid timestamp type", func(t *testing.T) {
+		res := mock.Result(mock.ValkeyArray(
+			mock.ValkeyArray(
+				mock.ValkeyString("command"),
+				mock.ValkeyString("not_an_int"),
+				mock.ValkeyInt64(15),
+				mock.ValkeyInt64(30),
+			),
+		))
+		cmd := newLatencyCmd(res)
+		if cmd.Err() == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("invalid latest type", func(t *testing.T) {
+		res := mock.Result(mock.ValkeyArray(
+			mock.ValkeyArray(
+				mock.ValkeyString("command"),
+				mock.ValkeyInt64(1700000000),
+				mock.ValkeyString("not_an_int"),
+				mock.ValkeyInt64(30),
+			),
+		))
+		cmd := newLatencyCmd(res)
+		if cmd.Err() == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("invalid max type", func(t *testing.T) {
+		res := mock.Result(mock.ValkeyArray(
+			mock.ValkeyArray(
+				mock.ValkeyString("command"),
+				mock.ValkeyInt64(1700000000),
+				mock.ValkeyInt64(15),
+				mock.ValkeyString("not_an_int"),
+			),
+		))
+		cmd := newLatencyCmd(res)
+		if cmd.Err() == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
 }
 
 // TestCacheHitCmd tests the IsCacheHit and setIsCacheHit functionality for Cmd
