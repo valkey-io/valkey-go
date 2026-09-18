@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"os"
@@ -1182,6 +1183,61 @@ func TestIsDialRetryable(t *testing.T) {
 		{
 			name:     "string match timed out is retryable",
 			err:      errors.New("dial tcp: operation timed out"),
+			expected: true,
+		},
+		{
+			name:     "io.EOF is retryable",
+			err:      io.EOF,
+			expected: true,
+		},
+		{
+			name:     "wrapped io.EOF is retryable",
+			err:      fmt.Errorf("connection closed during handshake: %w", io.EOF),
+			expected: true,
+		},
+		{
+			name:     "io.ErrUnexpectedEOF is retryable",
+			err:      io.ErrUnexpectedEOF,
+			expected: true,
+		},
+		{
+			name:     "syscall.EPIPE is retryable",
+			err:      syscall.EPIPE,
+			expected: true,
+		},
+		{
+			name:     "string match broken pipe is retryable",
+			err:      errors.New("write: broken pipe"),
+			expected: true,
+		},
+		{
+			name:     "syscall.ENETUNREACH is retryable",
+			err:      syscall.ENETUNREACH,
+			expected: true,
+		},
+		{
+			name:     "string match network is unreachable is retryable",
+			err:      errors.New("dial tcp: connect: network is unreachable"),
+			expected: true,
+		},
+		{
+			name:     "syscall.EHOSTUNREACH is retryable",
+			err:      syscall.EHOSTUNREACH,
+			expected: true,
+		},
+		{
+			name:     "string match no route to host is retryable",
+			err:      errors.New("dial tcp: connect: no route to host"),
+			expected: true,
+		},
+		{
+			name:     "string match eof is retryable",
+			err:      errors.New("EOF"),
+			expected: true,
+		},
+		{
+			name:     "string match unexpected EOF is retryable",
+			err:      errors.New("unexpected EOF"),
 			expected: true,
 		},
 		{

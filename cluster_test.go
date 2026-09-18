@@ -6305,11 +6305,11 @@ func TestGetClusterSlotsPreferShards(t *testing.T) {
 		wantCmd      string
 		wantShards   bool
 	}{
-		{version: 8, preferShards: false, wantCmd: "CLUSTER SHARDS", wantShards: true},  // >= 8 always shards
-		{version: 7, preferShards: false, wantCmd: "CLUSTER SLOTS", wantShards: false},  // default keeps 7.x on slots
-		{version: 7, preferShards: true, wantCmd: "CLUSTER SHARDS", wantShards: true},   // opt-in enables shards on 7
-		{version: 6, preferShards: true, wantCmd: "CLUSTER SLOTS", wantShards: false},   // floor: no shards below 7
-		{version: 5, preferShards: true, wantCmd: "CLUSTER SLOTS", wantShards: false},   // RESP2 fallback stays slots
+		{version: 8, preferShards: false, wantCmd: "CLUSTER SHARDS", wantShards: true}, // >= 8 always shards
+		{version: 7, preferShards: false, wantCmd: "CLUSTER SLOTS", wantShards: false}, // default keeps 7.x on slots
+		{version: 7, preferShards: true, wantCmd: "CLUSTER SHARDS", wantShards: true},  // opt-in enables shards on 7
+		{version: 6, preferShards: true, wantCmd: "CLUSTER SLOTS", wantShards: false},  // floor: no shards below 7
+		{version: 5, preferShards: true, wantCmd: "CLUSTER SLOTS", wantShards: false},  // RESP2 fallback stays slots
 	} {
 		t.Run(fmt.Sprintf("v%d_prefer%v", tc.version, tc.preferShards), func(t *testing.T) {
 			var got string
@@ -11693,7 +11693,6 @@ func TestClusterClientRefreshClosesConnConnectedByAZ(t *testing.T) {
 
 func TestCluster_ThunderingHerd_FullJitterRetry(t *testing.T) {
 	const numClients = 50
-	const failoverDuration = 30 * time.Millisecond
 
 	t.Run("without jitter (reproduces thundering herd spike)", func(t *testing.T) {
 		defer ShouldNotLeak(SetupLeakDetection())
@@ -11701,7 +11700,7 @@ func TestCluster_ThunderingHerd_FullJitterRetry(t *testing.T) {
 		var attempts int32
 		var mu sync.Mutex
 		var attemptOffsets []time.Duration
-		startTime := time.Now()
+		var startTime time.Time
 
 		opt := &ClientOption{
 			InitAddress:   []string{"127.0.0.1:7001"},
@@ -11717,6 +11716,10 @@ func TestCluster_ThunderingHerd_FullJitterRetry(t *testing.T) {
 			return nil, syscall.ECONNREFUSED
 		}
 
+		startBarrier := make(chan struct{})
+		var ready sync.WaitGroup
+		ready.Add(numClients)
+
 		var wg sync.WaitGroup
 		for i := 0; i < numClients; i++ {
 			wg.Add(1)
@@ -11724,9 +11727,14 @@ func TestCluster_ThunderingHerd_FullJitterRetry(t *testing.T) {
 				defer wg.Done()
 				m := makeMux("127.0.0.1:7001", opt, dialFn)
 				defer m.Close()
+				ready.Done()
+				<-startBarrier
 				_ = m.Dial()
 			}()
 		}
+		ready.Wait()
+		startTime = time.Now()
+		close(startBarrier)
 		wg.Wait()
 
 		mu.Lock()
@@ -11748,62 +11756,76 @@ func TestCluster_ThunderingHerd_FullJitterRetry(t *testing.T) {
 	t.Run("with full jitter (disperses thundering herd and recovers)", func(t *testing.T) {
 		defer ShouldNotLeak(SetupLeakDetection())
 
-		var attempts int32
 		var mu sync.Mutex
 		var attemptOffsets []time.Duration
-		startTime := time.Now()
+		var startTime time.Time
 
 		opt := &ClientOption{
 			InitAddress:          []string{"127.0.0.1:7001"},
 			DialerRetries:        5,
-			DialerRetryBaseDelay: 15 * time.Millisecond,
+			DialerRetryBaseDelay: 20 * time.Millisecond,
 			DialerRetryMaxDelay:  200 * time.Millisecond,
-			DialerRetryBackoff:   fullJitterDelayFn(15*time.Millisecond, 200*time.Millisecond),
+			DialerRetryBackoff:   fullJitterDelayFn(20*time.Millisecond, 200*time.Millisecond),
 		}
 
-		dialFn := func(ctx context.Context, dst string, o *ClientOption) (net.Conn, error) {
-			atomic.AddInt32(&attempts, 1)
-			offset := time.Since(startTime)
-			mu.Lock()
-			attemptOffsets = append(attemptOffsets, offset)
-			mu.Unlock()
+		clientAttempts := make([]int32, numClients)
 
-			// Node down during failover
-			if offset < failoverDuration {
-				return nil, syscall.ECONNREFUSED
+		makeDialFn := func(clientId int) dialFn {
+			return func(ctx context.Context, dst string, o *ClientOption) (net.Conn, error) {
+				attempt := atomic.AddInt32(&clientAttempts[clientId], 1)
+				offset := time.Since(startTime)
+				mu.Lock()
+				attemptOffsets = append(attemptOffsets, offset)
+				mu.Unlock()
+
+				// Fail each client on its first 2 attempts, succeed on the 3rd
+				if attempt <= 2 {
+					return nil, syscall.ECONNREFUSED
+				}
+
+				// Recovered: complete handshake
+				c1, c2 := net.Pipe()
+				go func() {
+					mock := &valkeyMock{t: t, buf: bufio.NewReader(c2), conn: c2}
+					mock.Expect("HELLO", "3").Reply(slicemsg('%', []ValkeyMessage{
+						strmsg('+', "proto"),
+						{typ: ':', intlen: 3},
+					}))
+					mock.Expect("CLIENT", "TRACKING", "ON", "OPTIN").ReplyString("OK")
+					mock.Expect("CLIENT", "SETINFO", "LIB-NAME", LibName).ReplyError("UNKNOWN COMMAND")
+					mock.Expect("CLIENT", "SETINFO", "LIB-VER", LibVer).ReplyError("UNKNOWN COMMAND")
+					mock.Expect("PING").ReplyString("OK")
+					mock.Close()
+				}()
+				return c1, nil
 			}
-
-			// Node recovered: complete handshake
-			c1, c2 := net.Pipe()
-			go func() {
-				mock := &valkeyMock{t: t, buf: bufio.NewReader(c2), conn: c2}
-				mock.Expect("HELLO", "3").Reply(slicemsg('%', []ValkeyMessage{
-					strmsg('+', "proto"),
-					{typ: ':', intlen: 3},
-				}))
-				mock.Expect("CLIENT", "TRACKING", "ON", "OPTIN").ReplyString("OK")
-				mock.Expect("CLIENT", "SETINFO", "LIB-NAME", LibName).ReplyError("UNKNOWN COMMAND")
-				mock.Expect("CLIENT", "SETINFO", "LIB-VER", LibVer).ReplyError("UNKNOWN COMMAND")
-				mock.Expect("PING").ReplyString("OK")
-				mock.Close()
-			}()
-			return c1, nil
 		}
+
+		startBarrier := make(chan struct{})
+		var ready sync.WaitGroup
+		ready.Add(numClients)
 
 		var wg sync.WaitGroup
 		var successCount int32
 		for i := 0; i < numClients; i++ {
 			wg.Add(1)
+			clientId := i
 			go func() {
 				defer wg.Done()
-				m := makeMux("127.0.0.1:7001", opt, dialFn)
+				m := makeMux("127.0.0.1:7001", opt, makeDialFn(clientId))
 				defer m.Close()
+
+				ready.Done()
+				<-startBarrier
 
 				if err := m.Dial(); err == nil {
 					atomic.AddInt32(&successCount, 1)
 				}
 			}()
 		}
+		ready.Wait()
+		startTime = time.Now()
+		close(startBarrier)
 		wg.Wait()
 
 		if got := atomic.LoadInt32(&successCount); got != numClients {

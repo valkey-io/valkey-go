@@ -2,56 +2,76 @@ package valkey
 
 import (
 	"context"
-	"crypto/tls"
+	"io"
 	"net"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
-type dummyNetConn struct {
-	net.Conn
+type mockHandshakeConn struct {
+	data []byte
 }
 
-func (d *dummyNetConn) Close() error { return nil }
+func (m *mockHandshakeConn) Read(b []byte) (int, error) {
+	if len(m.data) == 0 {
+		return 0, io.EOF
+	}
+	n := copy(b, m.data)
+	m.data = m.data[n:]
+	return n, nil
+}
+
+func (m *mockHandshakeConn) Write(b []byte) (int, error) {
+	return len(b), nil
+}
+
+func (m *mockHandshakeConn) Close() error                       { return nil }
+func (m *mockHandshakeConn) LocalAddr() net.Addr                { return &net.TCPAddr{} }
+func (m *mockHandshakeConn) RemoteAddr() net.Addr               { return &net.TCPAddr{} }
+func (m *mockHandshakeConn) SetDeadline(t time.Time) error      { return nil }
+func (m *mockHandshakeConn) SetReadDeadline(t time.Time) error  { return nil }
+func (m *mockHandshakeConn) SetWriteDeadline(t time.Time) error { return nil }
+
+const hello3Reply = "%1\r\n+proto\r\n:3\r\n"
 
 func BenchmarkDial_HappyPath_NoRetry(b *testing.B) {
-	conn := &dummyNetConn{}
 	opt := &ClientOption{
 		DialerRetries: 0,
-		DialCtxFn: func(ctx context.Context, _ string, _ *net.Dialer, _ *tls.Config) (net.Conn, error) {
-			return conn, nil
-		},
+		DisableCache:  true,
+		ClientSetInfo: []string{},
 	}
-	ctx := context.Background()
+	dialFn := func(ctx context.Context, _ string, _ *ClientOption) (net.Conn, error) {
+		return &mockHandshakeConn{data: []byte(hello3Reply)}, nil
+	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		c, err := dial(ctx, "127.0.0.1:6379", opt)
-		if err != nil || c == nil {
+		m := makeMux("127.0.0.1:6379", opt, dialFn)
+		if err := m.Dial(); err != nil {
 			b.Fatalf("dial failed: %v", err)
 		}
 	}
 }
 
 func BenchmarkDial_HappyPath_WithRetry(b *testing.B) {
-	conn := &dummyNetConn{}
 	opt := &ClientOption{
 		DialerRetries:        3,
 		DialerRetryBaseDelay: 50 * time.Millisecond,
 		DialerRetryMaxDelay:  500 * time.Millisecond,
-		DialCtxFn: func(ctx context.Context, _ string, _ *net.Dialer, _ *tls.Config) (net.Conn, error) {
-			return conn, nil
-		},
+		DisableCache:         true,
+		ClientSetInfo:        []string{},
 	}
-	ctx := context.Background()
+	dialFn := func(ctx context.Context, _ string, _ *ClientOption) (net.Conn, error) {
+		return &mockHandshakeConn{data: []byte(hello3Reply)}, nil
+	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		c, err := dial(ctx, "127.0.0.1:6379", opt)
-		if err != nil || c == nil {
+		m := makeMux("127.0.0.1:6379", opt, dialFn)
+		if err := m.Dial(); err != nil {
 			b.Fatalf("dial failed: %v", err)
 		}
 	}

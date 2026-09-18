@@ -103,6 +103,10 @@ func makeMux(dst string, option *ClientOption, dialFn dialFn) *mux {
 					dead.error.Store(&errs{error: err})
 					return dead
 				}
+				if option.DialerRetryBackoff == nil {
+					option.DialerRetryBackoff = fullJitterDelayFn(option.DialerRetryBaseDelay, option.DialerRetryMaxDelay)
+
+				}
 				var backoff time.Duration
 				if option.DialerRetryBackoff != nil {
 					backoff = option.DialerRetryBackoff(attempt)
