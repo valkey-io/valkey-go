@@ -25,6 +25,7 @@ type mockConn struct {
 	InfoFn          func() map[string]ValkeyMessage
 	VersionFn       func() int
 	AZFn            func() string
+	RoleFn          func() string
 	ErrorFn         func() error
 	CloseFn         func()
 	DialFn          func() error
@@ -173,6 +174,13 @@ func (m *mockConn) Version() int {
 func (m *mockConn) AZ() string {
 	if m.AZFn != nil {
 		return m.AZFn()
+	}
+	return ""
+}
+
+func (m *mockConn) Role() string {
+	if m.RoleFn != nil {
+		return m.RoleFn()
 	}
 	return ""
 }
