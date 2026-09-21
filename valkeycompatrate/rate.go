@@ -1,4 +1,4 @@
-package redisrate
+package valkeycompatrate
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 
 const redisPrefix = "rate:"
 
-var errNilClient = errors.New("redisrate: client is nil")
+var errNilClient = errors.New("valkeycompatrate: client is nil")
 
 type Limit struct {
 	Rate   int
@@ -66,9 +66,9 @@ func PerHour(rate int) Limit {
 }
 
 type Result struct {
-	Limit Limit
-	Allowed int
-	Remaining int
+	Limit      Limit
+	Allowed    int
+	Remaining  int
 	RetryAfter time.Duration
 	ResetAfter time.Duration
 }

@@ -1,4 +1,4 @@
-package redisrate_test
+package valkeycompatrate_test
 
 import (
 	"context"
@@ -12,12 +12,12 @@ import (
 
 	"github.com/valkey-io/valkey-go"
 	"github.com/valkey-io/valkey-go/valkeycompat"
-	"github.com/valkey-io/valkey-go/valkeycompat/redisrate"
+	"github.com/valkey-io/valkey-go/valkeycompatrate"
 )
 
-func TestRedisrate(t *testing.T) {
+func TestValkeycompatrate(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Redisrate Suite")
+	RunSpecs(t, "Valkeycompatrate Suite")
 }
 
 func getTestClient() valkey.Client {
@@ -45,10 +45,10 @@ func getClusterClient() valkey.Client {
 	return nil
 }
 
-var _ = Describe("Redisrate", func() {
+var _ = Describe("Valkeycompatrate", func() {
 	Describe("Limit Helpers", func() {
 		It("formats and initializes PerSecond correctly", func() {
-			s := redisrate.PerSecond(10)
+			s := valkeycompatrate.PerSecond(10)
 			Expect(s.Rate).To(Equal(10))
 			Expect(s.Burst).To(Equal(10))
 			Expect(s.Period).To(Equal(time.Second))
@@ -57,7 +57,7 @@ var _ = Describe("Redisrate", func() {
 		})
 
 		It("formats and initializes PerMinute correctly", func() {
-			m := redisrate.PerMinute(120)
+			m := valkeycompatrate.PerMinute(120)
 			Expect(m.Rate).To(Equal(120))
 			Expect(m.Burst).To(Equal(120))
 			Expect(m.Period).To(Equal(time.Minute))
@@ -66,7 +66,7 @@ var _ = Describe("Redisrate", func() {
 		})
 
 		It("formats and initializes PerHour correctly", func() {
-			h := redisrate.PerHour(3600)
+			h := valkeycompatrate.PerHour(3600)
 			Expect(h.Rate).To(Equal(3600))
 			Expect(h.Burst).To(Equal(3600))
 			Expect(h.Period).To(Equal(time.Hour))
@@ -75,10 +75,10 @@ var _ = Describe("Redisrate", func() {
 		})
 
 		It("formats custom limits and detects IsZero", func() {
-			custom := redisrate.Limit{Rate: 5, Burst: 15, Period: 2 * time.Second}
+			custom := valkeycompatrate.Limit{Rate: 5, Burst: 15, Period: 2 * time.Second}
 			Expect(custom.String()).To(Equal("5 req/2s (burst 15)"))
 
-			empty := redisrate.Limit{}
+			empty := valkeycompatrate.Limit{}
 			Expect(empty.IsZero()).To(BeTrue())
 		})
 	})
@@ -92,20 +92,20 @@ var _ = Describe("Redisrate", func() {
 			defer client.Close()
 
 			adapter := valkeycompat.NewAdapter(client)
-			l1 := redisrate.NewLimiter(adapter)
+			l1 := valkeycompatrate.NewLimiter(adapter)
 			Expect(l1).NotTo(BeNil())
 
-			l2 := redisrate.NewLimiterFromClient(client)
+			l2 := valkeycompatrate.NewLimiterFromClient(client)
 			Expect(l2).NotTo(BeNil())
 
-			l3 := redisrate.NewLimiter(nil)
+			l3 := valkeycompatrate.NewLimiter(nil)
 			Expect(l3).NotTo(BeNil())
 		})
 
 		It("returns appropriate errors when client is nil", func() {
-			l := redisrate.NewLimiter(nil)
+			l := valkeycompatrate.NewLimiter(nil)
 			ctx := context.Background()
-			limit := redisrate.PerSecond(10)
+			limit := valkeycompatrate.PerSecond(10)
 
 			_, err := l.Allow(ctx, "k", limit)
 			Expect(err).To(HaveOccurred())
@@ -124,7 +124,7 @@ var _ = Describe("Redisrate", func() {
 	Context("Live Valkey Rate Limiting Operations", func() {
 		var (
 			client  valkey.Client
-			limiter *redisrate.Limiter
+			limiter *valkeycompatrate.Limiter
 			ctx     context.Context
 			testID  string
 		)
@@ -134,7 +134,7 @@ var _ = Describe("Redisrate", func() {
 			if client == nil {
 				Skip("skipping test: no live Valkey/Redis instance accessible on 127.0.0.1:6379 or 6378")
 			}
-			limiter = redisrate.NewLimiter(valkeycompat.NewAdapter(client))
+			limiter = valkeycompatrate.NewLimiter(valkeycompat.NewAdapter(client))
 			ctx = context.Background()
 			testID = fmt.Sprintf("ginkgo_rate_%d", time.Now().UnixNano())
 		})
@@ -147,7 +147,7 @@ var _ = Describe("Redisrate", func() {
 		})
 
 		It("executes Allow and Reset correctly", func() {
-			limit := redisrate.PerSecond(10)
+			limit := valkeycompatrate.PerSecond(10)
 
 			// 1. First request
 			res, err := limiter.Allow(ctx, testID, limit)
@@ -194,7 +194,7 @@ var _ = Describe("Redisrate", func() {
 		})
 
 		It("peeks without consumption when increment is zero in AllowN", func() {
-			limit := redisrate.PerSecond(10)
+			limit := valkeycompatrate.PerSecond(10)
 
 			// Non-existent key
 			res, err := limiter.AllowN(ctx, testID, limit, 0)
@@ -222,7 +222,7 @@ var _ = Describe("Redisrate", func() {
 		})
 
 		It("calculates RetryAfter accurately under high-frequency rates", func() {
-			limit := redisrate.Limit{
+			limit := valkeycompatrate.Limit{
 				Rate:   1,
 				Period: time.Millisecond,
 				Burst:  1,
@@ -241,7 +241,7 @@ var _ = Describe("Redisrate", func() {
 		})
 
 		It("grants partial capacity when calling AllowAtMost", func() {
-			limit := redisrate.PerSecond(10)
+			limit := valkeycompatrate.PerSecond(10)
 
 			// 1. Consume 1 token
 			res, err := limiter.Allow(ctx, testID, limit)
@@ -301,7 +301,7 @@ var _ = Describe("Redisrate", func() {
 		})
 
 		It("peeks without consumption when increment is zero in AllowAtMost", func() {
-			limit := redisrate.PerSecond(10)
+			limit := valkeycompatrate.PerSecond(10)
 
 			// Non-existent key
 			res, err := limiter.AllowAtMost(ctx, testID, limit, 0)
@@ -337,14 +337,14 @@ var _ = Describe("Redisrate", func() {
 			}
 			defer client.Close()
 
-			limiter := redisrate.NewLimiterFromClient(client)
+			limiter := valkeycompatrate.NewLimiterFromClient(client)
 			ctx := context.Background()
-			testID := fmt.Sprintf("redisrate_concur_%d", time.Now().UnixNano())
+			testID := fmt.Sprintf("valkeycompatrate_concur_%d", time.Now().UnixNano())
 			defer func() {
 				_ = limiter.Reset(ctx, testID)
 			}()
 
-			limit := redisrate.Limit{
+			limit := valkeycompatrate.Limit{
 				Rate:   20,
 				Burst:  20,
 				Period: 10 * time.Second,
@@ -387,7 +387,7 @@ var _ = Describe("Redisrate", func() {
 	Describe("Valkey Cluster Integration", func() {
 		var (
 			clusterClient valkey.Client
-			limiter       *redisrate.Limiter
+			limiter       *valkeycompatrate.Limiter
 			ctx           context.Context
 		)
 
@@ -396,7 +396,7 @@ var _ = Describe("Redisrate", func() {
 			if clusterClient == nil {
 				Skip("skipping test: Valkey Cluster not accessible on 127.0.0.1:7010")
 			}
-			limiter = redisrate.NewLimiterFromClient(clusterClient)
+			limiter = valkeycompatrate.NewLimiterFromClient(clusterClient)
 			ctx = context.Background()
 		})
 
@@ -407,11 +407,11 @@ var _ = Describe("Redisrate", func() {
 		})
 
 		It("operates across multiple hash slots without CROSSSLOT errors", func() {
-			limit := redisrate.PerSecond(10)
+			limit := valkeycompatrate.PerSecond(10)
 
 			testKeys := []string{
-				fmt.Sprintf("redisrate_cluster_plain_1_%d", time.Now().UnixNano()),
-				fmt.Sprintf("redisrate_cluster_plain_2_%d", time.Now().UnixNano()),
+				fmt.Sprintf("valkeycompatrate_cluster_plain_1_%d", time.Now().UnixNano()),
+				fmt.Sprintf("valkeycompatrate_cluster_plain_2_%d", time.Now().UnixNano()),
 				fmt.Sprintf("{slot_tenant_A}:api_calls_%d", time.Now().UnixNano()),
 				fmt.Sprintf("{slot_tenant_B}:api_calls_%d", time.Now().UnixNano()),
 				fmt.Sprintf("{slot_tenant_C}:api_calls_%d", time.Now().UnixNano()),
@@ -465,9 +465,9 @@ func BenchmarkAllow(b *testing.B) {
 	}
 	defer client.Close()
 
-	l := redisrate.NewLimiterFromClient(client)
+	l := valkeycompatrate.NewLimiterFromClient(client)
 	ctx := context.Background()
-	limit := redisrate.PerSecond(1e6)
+	limit := valkeycompatrate.PerSecond(1e6)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -490,9 +490,9 @@ func BenchmarkAllowN(b *testing.B) {
 	}
 	defer client.Close()
 
-	l := redisrate.NewLimiterFromClient(client)
+	l := valkeycompatrate.NewLimiterFromClient(client)
 	ctx := context.Background()
-	limit := redisrate.PerSecond(1e6)
+	limit := valkeycompatrate.PerSecond(1e6)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -515,9 +515,9 @@ func BenchmarkAllowAtMost(b *testing.B) {
 	}
 	defer client.Close()
 
-	l := redisrate.NewLimiterFromClient(client)
+	l := valkeycompatrate.NewLimiterFromClient(client)
 	ctx := context.Background()
-	limit := redisrate.PerSecond(1e6)
+	limit := valkeycompatrate.PerSecond(1e6)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -540,8 +540,8 @@ func BenchmarkAllow_Parallel(b *testing.B) {
 	}
 	defer client.Close()
 
-	l := redisrate.NewLimiterFromClient(client)
-	limit := redisrate.PerSecond(1e6)
+	l := valkeycompatrate.NewLimiterFromClient(client)
+	limit := valkeycompatrate.PerSecond(1e6)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -559,3 +559,4 @@ func BenchmarkAllow_Parallel(b *testing.B) {
 		}
 	})
 }
+
