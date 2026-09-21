@@ -445,7 +445,7 @@ func NewClusterScanner(next func(cursor string) (ClusterScanEntry, error)) *Clus
 func (s *ClusterScanner) scan() iter.Seq[[]string] {
 	return func(yield func([]string) bool) {
 		var e ClusterScanEntry
-		for e, s.err = s.next("0"); s.err == nil && yield(e.Elements) && e.Cursor != "0" && e.Cursor != "finished" && e.Cursor != ""; {
+		for e, s.err = s.next("0"); s.err == nil && yield(e.Elements) && e.Cursor != "0" && e.Cursor != ""; {
 			e, s.err = s.next(e.Cursor)
 		}
 	}

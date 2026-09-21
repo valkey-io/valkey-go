@@ -1962,7 +1962,7 @@ func TestClusterScanner(t *testing.T) {
 			name: "multi page iteration with tag cursor",
 			entries: []ClusterScanEntry{
 				{Elements: []string{"key1", "key2"}, Cursor: "0-{06S}-0"},
-				{Elements: []string{"key3", "key4"}, Cursor: "finished"},
+				{Elements: []string{"key3", "key4"}, Cursor: "0"},
 			},
 			expected: []string{"key1", "key2", "key3", "key4"},
 		},
