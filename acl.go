@@ -318,9 +318,6 @@ func ParseClientInfo(txt string) (*ClientInfo, error) {
 	return info, nil
 }
 
-// StringToClientInfo is an alias for ParseClientInfo for specification compatibility.
-var StringToClientInfo = ParseClientInfo
-
 func tokenizeACL(raw string) []string {
 	var tokens []string
 	raw = strings.TrimSpace(raw)
