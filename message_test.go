@@ -1948,6 +1948,9 @@ func TestValkeyMessage(t *testing.T) {
 		}, ret) {
 			t.Fatal("AsClusterScanEntry not get value as expected")
 		}
+		if _, err := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{{typ: '_'}, slicemsg('*', []ValkeyMessage{strmsg('+', "a"), strmsg('+', "b")})})}).AsClusterScanEntry(); err == nil {
+			t.Fatal("AsClusterScanEntry not failed as expected")
+		}
 		if ret, _ := (ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "0"), {typ: '_'}})}).AsClusterScanEntry(); !reflect.DeepEqual(ClusterScanEntry{}, ret) {
 			t.Fatal("AsClusterScanEntry not get value as expected")
 		}

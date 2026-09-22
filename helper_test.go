@@ -1945,18 +1945,20 @@ func TestScannerIter2(t *testing.T) {
 
 func TestClusterScanner(t *testing.T) {
 	tests := []struct {
-		name     string
-		entries  []ClusterScanEntry
-		err      error
-		expected []string
-		wantErr  bool
+		name            string
+		entries         []ClusterScanEntry
+		expectedCursors []string
+		err             error
+		expected        []string
+		wantErr         bool
 	}{
 		{
 			name: "single page iteration",
 			entries: []ClusterScanEntry{
 				{Elements: []string{"key1", "key2"}, Cursor: "0"},
 			},
-			expected: []string{"key1", "key2"},
+			expectedCursors: []string{"0"},
+			expected:        []string{"key1", "key2"},
 		},
 		{
 			name: "multi page iteration with tag cursor",
@@ -1964,7 +1966,8 @@ func TestClusterScanner(t *testing.T) {
 				{Elements: []string{"key1", "key2"}, Cursor: "0-{06S}-0"},
 				{Elements: []string{"key3", "key4"}, Cursor: "0"},
 			},
-			expected: []string{"key1", "key2", "key3", "key4"},
+			expectedCursors: []string{"0", "0-{06S}-0"},
+			expected:        []string{"key1", "key2", "key3", "key4"},
 		},
 		{
 			name: "multi page ending with 0 cursor",
@@ -1972,26 +1975,34 @@ func TestClusterScanner(t *testing.T) {
 				{Elements: []string{"key1"}, Cursor: "1234"},
 				{Elements: []string{"key2"}, Cursor: "0"},
 			},
-			expected: []string{"key1", "key2"},
+			expectedCursors: []string{"0", "1234"},
+			expected:        []string{"key1", "key2"},
 		},
 		{
 			name: "empty entries",
 			entries: []ClusterScanEntry{
 				{Elements: []string{}, Cursor: "0"},
 			},
-			expected: nil,
+			expectedCursors: []string{"0"},
+			expected:        nil,
 		},
 		{
-			name:    "error during iteration",
-			err:     errors.New("scan error"),
-			wantErr: true,
+			name:            "error during iteration",
+			expectedCursors: []string{"0"},
+			err:             errors.New("scan error"),
+			wantErr:         true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			callCount := 0
+			var receivedCursors []string
 			scanner := NewClusterScanner(func(cursor string) (ClusterScanEntry, error) {
+				receivedCursors = append(receivedCursors, cursor)
+				if callCount < len(tt.expectedCursors) && cursor != tt.expectedCursors[callCount] {
+					t.Errorf("call %d: got cursor %q, want %q", callCount, cursor, tt.expectedCursors[callCount])
+				}
 				if tt.err != nil {
 					return ClusterScanEntry{}, tt.err
 				}
@@ -2006,6 +2017,10 @@ func TestClusterScanner(t *testing.T) {
 			var result []string
 			for element := range scanner.Iter() {
 				result = append(result, element)
+			}
+
+			if !reflect.DeepEqual(receivedCursors, tt.expectedCursors) {
+				t.Errorf("cursors: got %v, want %v", receivedCursors, tt.expectedCursors)
 			}
 
 			if tt.wantErr {
@@ -2025,10 +2040,15 @@ func TestClusterScanner(t *testing.T) {
 
 	t.Run("early exit", func(t *testing.T) {
 		callCount := 0
+		var receivedCursors []string
 		entries := []ClusterScanEntry{
 			{Elements: []string{"key1", "key2"}, Cursor: "next-cursor"},
 		}
 		scanner := NewClusterScanner(func(cursor string) (ClusterScanEntry, error) {
+			receivedCursors = append(receivedCursors, cursor)
+			if cursor != "0" {
+				t.Errorf("expected cursor \"0\", got %q", cursor)
+			}
 			if callCount >= len(entries) {
 				return ClusterScanEntry{}, errors.New("unexpected call")
 			}
@@ -2041,6 +2061,9 @@ func TestClusterScanner(t *testing.T) {
 		}
 		if scanner.Err() != nil {
 			t.Errorf("unexpected error: %v", scanner.Err())
+		}
+		if !reflect.DeepEqual(receivedCursors, []string{"0"}) {
+			t.Errorf("cursors: got %v, want %v", receivedCursors, []string{"0"})
 		}
 	})
 }
