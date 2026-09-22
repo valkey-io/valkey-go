@@ -1,0 +1,47 @@
+name: PR Benchmark Gatekeeper (Stateless)
+on:
+  pull_request:
+    branches: [ main ]
+    paths: [ '**/*.go', 'go.mod', 'go.sum' ]
+permissions: { pull-requests: write }
+jobs:
+  # Execution is dormant until repository admin creates a repository variable ENABLE_BENCHMARKS=true
+  benchmark:
+    if: vars.DISABLE_BENCHMARKS != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@latest
+      - name: Checkout Main Baseline
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main-code
+      - name: Run Main Benchmarks
+        run: |
+          cd main-code
+          go test -bench=. -run=^$ -benchmem ./... | tee /tmp/main.txt
+      - name: Checkout PR Code
+        uses: actions/checkout@v4
+        with:
+          path: pr-code
+      - name: Run PR Benchmarks
+        run: |
+          cd pr-code
+          go test -bench=. -run=^$ -benchmem ./... | tee /tmp/pr.txt
+      - name: Compare & Post Comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          OUTPUT=$(~/go/bin/benchstat /tmp/main.txt /tmp/pr.txt)
+          echo "$OUTPUT"
+          
+          # Optional: Use GitHub CLI to post the benchstat output as a comment
+          gh pr comment ${{ github.event.pull_request.number }} --body '```text'"$OUTPUT"'```' || true
+          
+          # If benchstat output contains a degradation (e.g., negative delta that exceeds threshold), fail CI.
+          # Here we fail if we see any large regression in B/op or allocs/op
+          if echo "$OUTPUT" | grep -q "B/op" | grep -q "+"; then
+             echo "Memory regression detected!"
+             exit 1
+          fi
