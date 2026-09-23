@@ -15,10 +15,12 @@ import (
 )
 
 var (
-	name   = "github.com/valkey-io/valkey-go"
-	kind   = trace.WithSpanKind(trace.SpanKindClient)
-	dbattr = attribute.String("db.system", "valkey")
-	dbstmt = attribute.Key("db.statement")
+	name     = "github.com/valkey-io/valkey-go"
+	kind     = trace.WithSpanKind(trace.SpanKindClient)
+	dbattr   = attribute.String("db.system", "valkey")
+	dbstmt   = attribute.Key("db.statement")
+	cacheHit = attribute.Key("valkey.cache.hit")
+	multiHit = attribute.Key("valkey.multicache.hits")
 )
 
 type contextKey struct{}
@@ -310,6 +312,7 @@ func (o *otelclient) DoCache(ctx context.Context, cmd valkey.Cacheable, ttl time
 
 	resp = o.client.DoCache(ctx, cmd, ttl)
 	o.recordCacheHitMiss(ctx, resp)
+	span.SetAttributes(cacheHit.Bool(resp.IsCacheHit()))
 	o.end(span, resp.Error())
 	o.recordError(ctx, op, resp.Error())
 	return
@@ -321,9 +324,13 @@ func (o *otelclient) DoMultiCache(ctx context.Context, multi ...valkey.Cacheable
 
 	ctx, span := o.start(ctx, op, multiCacheableSum(multi))
 	resps = o.client.DoMultiCache(ctx, multi...)
+
+	hits := make([]bool, 0, len(resps))
 	for _, resp := range resps {
 		o.recordCacheHitMiss(ctx, resp)
+		hits = append(hits, resp.IsCacheHit())
 	}
+	span.SetAttributes(multiHit.BoolSlice(hits))
 	err := firstError(resps)
 	o.end(span, err)
 	o.recordError(ctx, op, err)
