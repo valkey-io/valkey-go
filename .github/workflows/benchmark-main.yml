@@ -1,0 +1,23 @@
+name: Update Benchmark Baseline
+on:
+  push:
+    branches: [ main ]
+    paths: [ '**/*.go', 'go.mod', 'go.sum' ]
+permissions: { contents: write }
+jobs:
+  benchmark-main:
+    if: vars.DISABLE_BENCHMARKS != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.22' }
+      - name: Run Main Benchmarks
+        run: go test -bench=. -run=^$ -benchmem ./... | tee out.txt
+      - name: Update gh-pages Baseline
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: 'go'
+          output-file-path: out.txt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true # Pushes JSON directly to gh-pages branch

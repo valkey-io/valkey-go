@@ -1,6 +1,9 @@
 package valkey
 
 import (
+	"strconv"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -95,4 +98,73 @@ func TestSubs_Unsubscribe(t *testing.T) {
 	if ok {
 		t.Fatalf("unexpected ch unclosed")
 	}
+}
+
+var (
+	pubsubChannels1000     []string
+	pubsubPayloadsGradient = map[string]string{
+		"64B":  strings.Repeat("a", 64),
+		"1KB":  strings.Repeat("b", 1024),
+		"64KB": strings.Repeat("c", 65536),
+	}
+)
+
+func init() {
+	pubsubChannels1000 = make([]string, 1000)
+	for i := 0; i < 1000; i++ {
+		pubsubChannels1000[i] = "chan_" + strconv.Itoa(i)
+	}
+}
+
+// Benchmark_PubSub_Receive measures blocking loop message delivery with dynamic channels and payload gradient.
+func Benchmark_PubSub_Receive(b *testing.B) {
+	for _, size := range []string{"64B", "1KB", "64KB"} {
+		payload := pubsubPayloadsGradient[size]
+		b.Run("Payload="+size, func(b *testing.B) {
+			s := newSubs()
+			ch, cancel := s.Subscribe(pubsubChannels1000, nil)
+			defer cancel()
+			for _, chName := range pubsubChannels1000 {
+				s.Confirm(PubSubSubscription{Channel: chName})
+			}
+
+			messages := make([]PubSubMessage, len(pubsubChannels1000))
+			for i, chName := range pubsubChannels1000 {
+				messages[i] = PubSubMessage{Channel: chName, Message: payload}
+			}
+
+			ready := make(chan struct{})
+			done := make(chan struct{})
+			var wg sync.WaitGroup
+			wg.Add(1)
+
+			go func() {
+				defer wg.Done()
+				idx := 0
+				for {
+					select {
+					case <-done:
+						return
+					case <-ready:
+						s.Publish(pubsubChannels1000[idx], messages[idx])
+						idx = (idx + 1) % len(pubsubChannels1000)
+					}
+				}
+			}()
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				ready <- struct{}{}
+				<-ch
+			}
+			b.StopTimer()
+			close(done)
+			wg.Wait()
+		})
+	}
+}
+
+func Benchmark_PubSub_Dispatch_Loop(b *testing.B) {
+	Benchmark_PubSub_Receive(b) // Alias to the existing Benchmark_PubSub_Receive which does exactly this
 }
