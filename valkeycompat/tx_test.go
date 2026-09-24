@@ -27,6 +27,10 @@
 package valkeycompat
 
 import (
+	"context"
+	"testing"
+	"github.com/valkey-io/valkey-go/mock"
+	"go.uber.org/mock/gomock"
 	"errors"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -111,8 +115,8 @@ func testAdapterTxPipeline(resp3 bool) {
 	})
 
 	It("should Watch", func() {
-		k1 := "_k1_"
-		k2 := "_k2_"
+		k1 := "{k}1"
+		k2 := "{k}2"
 		err := adapter.Watch(ctx, func(t Tx) error {
 			if t.Get(ctx, k1).Err() != Nil {
 				return errors.New("unclean")
@@ -133,7 +137,7 @@ func testAdapterTxPipeline(resp3 bool) {
 	})
 
 	It("should Watch Abort", func() {
-		k1 := "_k1_"
+		k1 := "{k}1"
 		ch := make(chan error)
 		go func() {
 			ch <- adapter.Watch(ctx, func(t Tx) error {
@@ -153,7 +157,7 @@ func testAdapterTxPipeline(resp3 bool) {
 	})
 
 	It("should Unwatch and Close", func() {
-		k1 := "_k1_"
+		k1 := "{k}1"
 		err := adapter.Watch(ctx, func(t Tx) error {
 			Expect(t.Unwatch(ctx).Err()).NotTo(HaveOccurred())
 			Expect(t.Close(ctx)).NotTo(HaveOccurred())
@@ -185,5 +189,73 @@ func testAdapterTxPipeline(resp3 bool) {
 		Expect(func() {
 			pipe.GetToBuffer(ctx, "key", make([]byte, 10))
 		}).To(Panic())
+	})
+	It("should fast-fail on cross-slot", func() {
+		pipe := adapter.TxPipeline()
+		pipe.Set(ctx, "k1", "v1", 0)
+		pipe.Set(ctx, "k2", "v2", 0)
+		rets, err := pipe.Exec(ctx)
+		Expect(err).To(MatchError(ErrCrossSlot))
+		Expect(rets).To(BeNil())
+	})
+
+	It("should fast-fail on cross-slot MGET", func() {
+		pipe := adapter.TxPipeline()
+		pipe.MGet(ctx, "k1", "k2")
+		rets, err := pipe.Exec(ctx)
+		Expect(err).To(MatchError(ErrCrossSlot))
+		Expect(rets).To(BeNil())
+	})
+}
+func TestCrossSlotValidation(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mc := mock.NewClient(ctrl)
+	adapter := NewAdapter(mc)
+	
+	ctx := context.Background()
+
+	t.Run("same slot", func(t *testing.T) {
+		pipe := adapter.TxPipeline()
+		pipe.Set(ctx, "{user1}k1", "v1", 0)
+		pipe.Get(ctx, "{user1}k2")
+		
+		resps := []valkey.ValkeyResult{
+			valkey.NewErrorResult(errors.New("mock error")),
+		}
+		
+		mc.EXPECT().DoMulti(ctx, gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(resps)
+		
+		_, err := pipe.Exec(ctx)
+		if err == ErrCrossSlot {
+			t.Fatalf("expected no cross-slot error, got %v", err)
+		}
+	})
+
+	t.Run("cross slot keys", func(t *testing.T) {
+		pipe := adapter.TxPipeline()
+		pipe.Set(ctx, "k1", "v1", 0)
+		pipe.Set(ctx, "k2", "v2", 0)
+		_, err := pipe.Exec(ctx)
+		if err != ErrCrossSlot {
+			t.Fatalf("expected ErrCrossSlot, got %v", err)
+		}
+	})
+
+	t.Run("cross slot mget", func(t *testing.T) {
+		pipe := adapter.TxPipeline()
+		pipe.MGet(ctx, "k1", "k2")
+		_, err := pipe.Exec(ctx)
+		if err != ErrCrossSlot {
+			t.Fatalf("expected ErrCrossSlot, got %v", err)
+		}
+	})
+	
+	t.Run("cross slot mset", func(t *testing.T) {
+		pipe := adapter.TxPipeline()
+		pipe.MSet(ctx, "k1", "v1", "k2", "v2")
+		_, err := pipe.Exec(ctx)
+		if err != ErrCrossSlot {
+			t.Fatalf("expected ErrCrossSlot, got %v", err)
+		}
 	})
 }
