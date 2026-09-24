@@ -178,3 +178,5 @@ func (a *adapterEntry) Wait(ctx context.Context) (ValkeyMessage, error) {
 		return a.val, a.err
 	}
 }
+
+// Triggering end-to-end test for benchmark suite
