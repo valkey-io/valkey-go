@@ -19,8 +19,8 @@ var (
 	kind     = trace.WithSpanKind(trace.SpanKindClient)
 	dbattr   = attribute.String("db.system", "valkey")
 	dbstmt   = attribute.Key("db.statement")
-	cacheHit = attribute.Key("valkey.cache.hit")
-	multiHit = attribute.Key("valkey.multicache.hits")
+	cacheHit = attribute.Key("db.cache.hit")
+	multiHit = attribute.Key("db.multicache.hits")
 )
 
 type contextKey struct{}
