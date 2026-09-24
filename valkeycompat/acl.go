@@ -1,4 +1,4 @@
-package valkey
+package valkeycompat
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/valkey-io/valkey-go"
 )
 
 // ClientFlags represents valkey-server client flags
@@ -318,7 +320,7 @@ func ParseClientInfo(txt string) (*ClientInfo, error) {
 	return info, nil
 }
 
-func tokenizeACL(raw string) []string {
+func tokenizeACL(raw string) ([]string, error) {
 	var tokens []string
 	raw = strings.TrimSpace(raw)
 	n := len(raw)
@@ -342,16 +344,19 @@ func tokenizeACL(raw string) []string {
 				}
 				i++
 			}
+			if depth > 0 {
+				return nil, fmt.Errorf("valkey: unclosed selector in ACL rule: %s", raw[start:i])
+			}
 			tokens = append(tokens, raw[start:i])
 		} else {
 			start := i
-			for i < n && !(raw[i] == ' ' || raw[i] == '\t' || raw[i] == '\r' || raw[i] == '\n' || raw[i] == '(') {
+			for i < n && !(raw[i] == ' ' || raw[i] == '\t' || raw[i] == '\r' || raw[i] == '\n') {
 				i++
 			}
 			tokens = append(tokens, raw[start:i])
 		}
 	}
-	return tokens
+	return tokens, nil
 }
 
 func parseSelector(raw string) ACLSelector {
@@ -411,7 +416,10 @@ func parseSelector(raw string) ACLSelector {
 
 // ParseACLUser tokenizes and decodes an individual ACL rule DSL string into an ACLUser struct.
 func ParseACLUser(raw string) (ACLUser, error) {
-	tokens := tokenizeACL(raw)
+	tokens, err := tokenizeACL(raw)
+	if err != nil {
+		return ACLUser{}, err
+	}
 	if len(tokens) == 0 {
 		return ACLUser{}, errors.New("valkey: empty ACL rule")
 	}
@@ -491,8 +499,13 @@ func ParseACLUser(raw string) (ACLUser, error) {
 			user.Selectors = nil
 		case tok == "clearselectors":
 			user.Selectors = nil
-		case strings.HasPrefix(tok, "(") && strings.HasSuffix(tok, ")"):
+		case strings.HasPrefix(tok, "("):
+			if !strings.HasSuffix(tok, ")") {
+				return ACLUser{}, fmt.Errorf("valkey: unclosed selector in ACL rule: %s", tok)
+			}
 			user.Selectors = append(user.Selectors, parseSelector(tok))
+		case tok == ")":
+			return ACLUser{}, errors.New("valkey: unexpected ')' in ACL rule")
 		default:
 			// Flags such as sanitize-payload, skip-sanitize-payload
 			user.Flags = append(user.Flags, tok)
@@ -515,7 +528,7 @@ func ParseACLListStrings(lines []string) ([]ACLUser, error) {
 }
 
 // ParseACLList decodes a multi-bulk array response from ACL LIST into []ACLUser.
-func ParseACLList(res ValkeyResult) ([]ACLUser, error) {
+func ParseACLList(res valkey.ValkeyResult) ([]ACLUser, error) {
 	if err := res.Error(); err != nil {
 		return nil, err
 	}
@@ -527,15 +540,16 @@ func ParseACLList(res ValkeyResult) ([]ACLUser, error) {
 }
 
 // ParseACLLog decodes nested RESP3 maps or RESP2 flat key-value arrays into []ACLLogEntry.
-func ParseACLLog(res ValkeyResult) ([]ACLLogEntry, error) {
-	if err := res.Error(); err != nil {
+func ParseACLLog(res valkey.ValkeyResult) ([]ACLLogEntry, error) {
+	msg, err := res.ToMessage()
+	if err != nil {
 		return nil, err
 	}
-	return ParseACLLogMessage(res.val)
+	return ParseACLLogMessage(msg)
 }
 
 // ParseACLLogMessage decodes an array ValkeyMessage containing ACL log entries.
-func ParseACLLogMessage(msg ValkeyMessage) ([]ACLLogEntry, error) {
+func ParseACLLogMessage(msg valkey.ValkeyMessage) ([]ACLLogEntry, error) {
 	arr, err := msg.ToArray()
 	if err != nil {
 		return nil, err
@@ -585,7 +599,7 @@ func ParseACLLogMessage(msg ValkeyMessage) ([]ACLLogEntry, error) {
 }
 
 // ParseACLDryRun converts a raw ValkeyResult from ACL DRYRUN into an ACLDryRunResult.
-func ParseACLDryRun(res ValkeyResult) (ACLDryRunResult, error) {
+func ParseACLDryRun(res valkey.ValkeyResult) (ACLDryRunResult, error) {
 	if err := res.Error(); err != nil {
 		return ACLDryRunResult{}, err
 	}
@@ -633,15 +647,15 @@ func ParseACLDryRunString(s string) ACLDryRunResult {
 }
 
 // ACLList executes ACL LIST and parses the result into []ACLUser.
-func ACLList(ctx context.Context, client Client) ([]ACLUser, error) {
+func ACLList(ctx context.Context, client valkey.Client) ([]ACLUser, error) {
 	cmd := client.B().AclList().Build()
 	res := client.Do(ctx, cmd)
 	return ParseACLList(res)
 }
 
 // ACLLog executes ACL LOG [count] and parses the entries into []ACLLogEntry.
-func ACLLog(ctx context.Context, client Client, count int64) ([]ACLLogEntry, error) {
-	var cmd Completed
+func ACLLog(ctx context.Context, client valkey.Client, count int64) ([]ACLLogEntry, error) {
+	var cmd valkey.Completed
 	if count > 0 {
 		cmd = client.B().AclLog().Count(count).Build()
 	} else {
@@ -652,11 +666,11 @@ func ACLLog(ctx context.Context, client Client, count int64) ([]ACLLogEntry, err
 }
 
 // ACLDryRun executes ACL DRYRUN <username> <command> [args...] and evaluates authorization.
-func ACLDryRun(ctx context.Context, client Client, username string, command ...string) (ACLDryRunResult, error) {
+func ACLDryRun(ctx context.Context, client valkey.Client, username string, command ...string) (ACLDryRunResult, error) {
 	if len(command) == 0 {
 		return ACLDryRunResult{}, errors.New("valkey: command is required for ACLDryRun")
 	}
-	var cmd Completed
+	var cmd valkey.Completed
 	if len(command) == 1 {
 		cmd = client.B().AclDryrun().Username(username).Command(command[0]).Build()
 	} else {

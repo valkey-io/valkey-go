@@ -2399,7 +2399,7 @@ func testAdapter(resp3 bool) {
 				dryRunRes, err := dryRun.ACLDryRunResult()
 				Expect(err).NotTo(HaveOccurred())
 				Expect(dryRunRes.Allowed).To(BeTrue())
-				Expect(dryRunRes.DeniedType).To(Equal(valkey.DeniedNone))
+				Expect(dryRunRes.DeniedType).To(Equal(DeniedNone))
 			})
 
 			It("should parse structured ACL rules via AsACLUsers", func() {
@@ -2425,7 +2425,7 @@ func testAdapter(resp3 bool) {
 				dryRunRes, err := dryRunCmd.ACLDryRunResult()
 				Expect(err).NotTo(HaveOccurred())
 				Expect(dryRunRes.Allowed).To(BeTrue())
-				Expect(dryRunRes.DeniedType).To(Equal(valkey.DeniedNone))
+				Expect(dryRunRes.DeniedType).To(Equal(DeniedNone))
 			})
 
 			It("should support ACLUsers, ACLWhoAmI, and ACLGenPass", func() {

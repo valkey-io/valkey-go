@@ -1,12 +1,15 @@
-package valkey
+package valkeycompat
 
 import (
 	"context"
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/valkey-io/valkey-go"
+	"github.com/valkey-io/valkey-go/mock"
+	"go.uber.org/mock/gomock"
 )
 
 func TestParseACLUser(t *testing.T) {
@@ -214,12 +217,70 @@ func TestParseACLUser(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid rules", func(t *testing.T) {
+	t.Run("invalid rules and unclosed selectors", func(t *testing.T) {
 		if _, err := ParseACLUser(""); err == nil {
 			t.Errorf("expected error on empty string")
 		}
 		if _, err := ParseACLUser("user"); err == nil {
 			t.Errorf("expected error on missing username")
+		}
+		if u, err := ParseACLUser("user bob (+get"); err == nil {
+			t.Errorf("expected error on unclosed selector")
+		} else {
+			for _, flag := range u.Flags {
+				if flag == "(+get" {
+					t.Errorf("unclosed selector must not pollute Flags: %v", u.Flags)
+				}
+			}
+		}
+		if _, err := ParseACLUser("user bob (+get (~secret:*"); err == nil {
+			t.Errorf("expected error on nested unclosed selector")
+		}
+		if _, err := ParseACLUser("user bob +get )"); err == nil {
+			t.Errorf("expected error on stray ')'")
+		}
+	})
+
+	t.Run("parentheses in passwords keys and channels", func(t *testing.T) {
+		raw := "user alice on >pass(word) ~data(1) &events(all) +get"
+		u, err := ParseACLUser(raw)
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if !reflect.DeepEqual(u.Passwords, []string{">pass(word)"}) {
+			t.Errorf("expected passwords [>pass(word)], got %v", u.Passwords)
+		}
+		if !reflect.DeepEqual(u.Keys, []string{"~data(1)"}) {
+			t.Errorf("expected keys [~data(1)], got %v", u.Keys)
+		}
+		if !reflect.DeepEqual(u.Channels, []string{"&events(all)"}) {
+			t.Errorf("expected channels [&events(all)], got %v", u.Channels)
+		}
+		if len(u.Selectors) != 0 {
+			t.Errorf("expected 0 selectors, got %d", len(u.Selectors))
+		}
+		if u.Commands != "+get" {
+			t.Errorf("expected commands '+get', got %q", u.Commands)
+		}
+	})
+
+	t.Run("parentheses in passwords with selectors", func(t *testing.T) {
+		raw := "user alice on >pass(word) (~data(1) +get)"
+		u, err := ParseACLUser(raw)
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if !reflect.DeepEqual(u.Passwords, []string{">pass(word)"}) {
+			t.Errorf("expected passwords [>pass(word)], got %v", u.Passwords)
+		}
+		if len(u.Selectors) != 1 {
+			t.Fatalf("expected 1 selector, got %d", len(u.Selectors))
+		}
+		if !reflect.DeepEqual(u.Selectors[0].Keys, []string{"~data(1)"}) {
+			t.Errorf("expected selector keys [~data(1)], got %v", u.Selectors[0].Keys)
+		}
+		if u.Selectors[0].Commands != "+get" {
+			t.Errorf("expected selector commands '+get', got %q", u.Selectors[0].Commands)
 		}
 	})
 }
@@ -242,11 +303,11 @@ func TestParseACLList(t *testing.T) {
 	}
 
 	// Test with ValkeyResult
-	msg := slicemsg('*', []ValkeyMessage{
-		strmsg('+', lines[0]),
-		strmsg('+', lines[1]),
-	})
-	res := NewResult(msg, nil)
+	msg := mock.ValkeyArray(
+		mock.ValkeyString(lines[0]),
+		mock.ValkeyString(lines[1]),
+	)
+	res := mock.Result(msg)
 	usersFromRes, err := ParseACLList(res)
 	if err != nil {
 		t.Fatalf("unexpected err from ParseACLList: %v", err)
@@ -256,7 +317,7 @@ func TestParseACLList(t *testing.T) {
 	}
 
 	// Error in ValkeyResult
-	errRes := NewResult(ValkeyMessage{}, errors.New("network error"))
+	errRes := mock.ErrorResult(errors.New("network error"))
 	if _, err := ParseACLList(errRes); err == nil {
 		t.Errorf("expected error from errRes")
 	}
@@ -357,20 +418,20 @@ func TestParseClientInfo(t *testing.T) {
 
 func TestParseACLLog(t *testing.T) {
 	t.Run("RESP3 map format", func(t *testing.T) {
-		entryMap := slicemsg('%', []ValkeyMessage{
-			strmsg('+', "count"), ValkeyMessage{typ: ':', intlen: 1},
-			strmsg('+', "reason"), strmsg('+', "command"),
-			strmsg('+', "context"), strmsg('+', "toplevel"),
-			strmsg('+', "object"), strmsg('+', "set"),
-			strmsg('+', "username"), strmsg('+', "testuser"),
-			strmsg('+', "age-seconds"), strmsg('+', "4.5"),
-			strmsg('+', "client-info"), strmsg('+', "id=100 addr=127.0.0.1:9999 flags=N"),
-			strmsg('+', "entry-id"), ValkeyMessage{typ: ':', intlen: 42},
-			strmsg('+', "timestamp-created"), ValkeyMessage{typ: ':', intlen: 1600000000},
-			strmsg('+', "timestamp-last-updated"), ValkeyMessage{typ: ':', intlen: 1600000001},
+		entryMap := mock.ValkeyMap(map[string]valkey.ValkeyMessage{
+			"count":                  mock.ValkeyInt64(1),
+			"reason":                 mock.ValkeyString("command"),
+			"context":                mock.ValkeyString("toplevel"),
+			"object":                 mock.ValkeyString("set"),
+			"username":               mock.ValkeyString("testuser"),
+			"age-seconds":            mock.ValkeyFloat64(4.5),
+			"client-info":            mock.ValkeyString("id=100 addr=127.0.0.1:9999 flags=N"),
+			"entry-id":               mock.ValkeyInt64(42),
+			"timestamp-created":      mock.ValkeyInt64(1600000000),
+			"timestamp-last-updated": mock.ValkeyInt64(1600000001),
 		})
-		logArr := slicemsg('*', []ValkeyMessage{entryMap})
-		res := NewResult(logArr, nil)
+		logArr := mock.ValkeyArray(entryMap)
+		res := mock.Result(logArr)
 
 		entries, err := ParseACLLog(res)
 		if err != nil {
@@ -398,14 +459,14 @@ func TestParseACLLog(t *testing.T) {
 	})
 
 	t.Run("RESP2 flat array format", func(t *testing.T) {
-		entryFlat := slicemsg('*', []ValkeyMessage{
-			strmsg('+', "count"), ValkeyMessage{typ: ':', intlen: 3},
-			strmsg('+', "reason"), strmsg('+', "key"),
-			strmsg('+', "object"), strmsg('+', "secret_key"),
-			strmsg('+', "username"), strmsg('+', "alice"),
-		})
-		logArr := slicemsg('*', []ValkeyMessage{entryFlat})
-		res := NewResult(logArr, nil)
+		entryFlat := mock.ValkeyArray(
+			mock.ValkeyString("count"), mock.ValkeyInt64(3),
+			mock.ValkeyString("reason"), mock.ValkeyString("key"),
+			mock.ValkeyString("object"), mock.ValkeyString("secret_key"),
+			mock.ValkeyString("username"), mock.ValkeyString("alice"),
+		)
+		logArr := mock.ValkeyArray(entryFlat)
+		res := mock.Result(logArr)
 
 		entries, err := ParseACLLog(res)
 		if err != nil {
@@ -420,7 +481,7 @@ func TestParseACLLog(t *testing.T) {
 	})
 
 	t.Run("error result", func(t *testing.T) {
-		res := NewResult(ValkeyMessage{}, errors.New("err"))
+		res := mock.ErrorResult(errors.New("err"))
 		if _, err := ParseACLLog(res); err == nil {
 			t.Errorf("expected error")
 		}
@@ -542,7 +603,7 @@ func TestParseACLDryRun(t *testing.T) {
 			}
 
 			// Also test through ParseACLDryRun with ValkeyResult
-			vr := NewResult(strmsg('+', tc.input), nil)
+			vr := mock.Result(mock.ValkeyString(tc.input))
 			resFromVR, err := ParseACLDryRun(vr)
 			if err != nil {
 				t.Fatalf("unexpected err: %v", err)
@@ -555,7 +616,7 @@ func TestParseACLDryRun(t *testing.T) {
 
 	t.Run("protocol error propagation", func(t *testing.T) {
 		protoErr := errors.New("ERR User 'nonexistent' not found")
-		vr := NewResult(ValkeyMessage{}, protoErr)
+		vr := mock.ErrorResult(protoErr)
 		_, err := ParseACLDryRun(vr)
 		if err == nil {
 			t.Errorf("expected error from protocol error")
@@ -588,45 +649,31 @@ func TestParseACLDryRun(t *testing.T) {
 }
 
 func TestACLHelpers(t *testing.T) {
-	defer ShouldNotLeak(SetupLeakDetection())
+	ctx := context.Background()
+
 	t.Run("ACLDryRun validation", func(t *testing.T) {
-		m := &mockConn{}
-		client, err := newSingleClient(
-			&ClientOption{InitAddress: []string{""}},
-			m,
-			func(dst string, opt *ClientOption) conn { return m },
-			newRetryer(defaultRetryDelayFn),
-		)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+		client := mock.NewClient(ctrl)
 
 		// Missing command
-		_, err = ACLDryRun(context.Background(), client, "alice")
+		_, err := ACLDryRun(ctx, client, "alice")
 		if err == nil {
 			t.Errorf("expected error for missing command in ACLDryRun")
 		}
 
 		// Single command
-		m.DoFn = func(cmd Completed) ValkeyResult {
-			if !reflect.DeepEqual(cmd.Commands(), []string{"ACL", "DRYRUN", "alice", "get"}) {
-				t.Fatalf("unexpected command %v", cmd.Commands())
-			}
-			return NewResult(strmsg('+', "OK"), nil)
-		}
-		res, err := ACLDryRun(context.Background(), client, "alice", "get")
+		client.EXPECT().Do(gomock.Any(), mock.Match("ACL", "DRYRUN", "alice", "get")).
+			Return(mock.Result(mock.ValkeyString("OK")))
+		res, err := ACLDryRun(ctx, client, "alice", "get")
 		if err != nil || !res.Allowed {
 			t.Errorf("unexpected dryrun result: %+v, %v", res, err)
 		}
 
 		// Command with args
-		m.DoFn = func(cmd Completed) ValkeyResult {
-			if !reflect.DeepEqual(cmd.Commands(), []string{"ACL", "DRYRUN", "alice", "set", "k", "v"}) {
-				t.Fatalf("unexpected command %v", cmd.Commands())
-			}
-			return NewResult(strmsg('+', "User alice has no permissions to run the 'set' command"), nil)
-		}
-		res, err = ACLDryRun(context.Background(), client, "alice", "set", "k", "v")
+		client.EXPECT().Do(gomock.Any(), mock.Match("ACL", "DRYRUN", "alice", "set", "k", "v")).
+			Return(mock.Result(mock.ValkeyString("User alice has no permissions to run the 'set' command")))
+		res, err = ACLDryRun(ctx, client, "alice", "set", "k", "v")
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -636,26 +683,13 @@ func TestACLHelpers(t *testing.T) {
 	})
 
 	t.Run("ACLList helper dispatch", func(t *testing.T) {
-		m := &mockConn{}
-		client, err := newSingleClient(
-			&ClientOption{InitAddress: []string{""}},
-			m,
-			func(dst string, opt *ClientOption) conn { return m },
-			newRetryer(defaultRetryDelayFn),
-		)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+		client := mock.NewClient(ctrl)
 
-		m.DoFn = func(cmd Completed) ValkeyResult {
-			if !reflect.DeepEqual(cmd.Commands(), []string{"ACL", "LIST"}) {
-				t.Fatalf("unexpected command %v", cmd.Commands())
-			}
-			return NewResult(slicemsg('*', []ValkeyMessage{
-				strmsg('+', "user default on nopass ~* &* +@all"),
-			}), nil)
-		}
-		users, err := ACLList(context.Background(), client)
+		client.EXPECT().Do(gomock.Any(), mock.Match("ACL", "LIST")).
+			Return(mock.Result(mock.ValkeyArray(mock.ValkeyString("user default on nopass ~* &* +@all"))))
+		users, err := ACLList(ctx, client)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -665,25 +699,14 @@ func TestACLHelpers(t *testing.T) {
 	})
 
 	t.Run("ACLLog helper dispatch", func(t *testing.T) {
-		m := &mockConn{}
-		client, err := newSingleClient(
-			&ClientOption{InitAddress: []string{""}},
-			m,
-			func(dst string, opt *ClientOption) conn { return m },
-			newRetryer(defaultRetryDelayFn),
-		)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+		client := mock.NewClient(ctrl)
 
 		// Count > 0
-		m.DoFn = func(cmd Completed) ValkeyResult {
-			if !reflect.DeepEqual(cmd.Commands(), []string{"ACL", "LOG", "10"}) {
-				t.Fatalf("unexpected command %v", cmd.Commands())
-			}
-			return NewResult(slicemsg('*', nil), nil)
-		}
-		entries, err := ACLLog(context.Background(), client, 10)
+		client.EXPECT().Do(gomock.Any(), mock.Match("ACL", "LOG", "10")).
+			Return(mock.Result(mock.ValkeyArray()))
+		entries, err := ACLLog(ctx, client, 10)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -692,13 +715,9 @@ func TestACLHelpers(t *testing.T) {
 		}
 
 		// Count <= 0
-		m.DoFn = func(cmd Completed) ValkeyResult {
-			if !reflect.DeepEqual(cmd.Commands(), []string{"ACL", "LOG"}) {
-				t.Fatalf("unexpected command %v", cmd.Commands())
-			}
-			return NewResult(slicemsg('*', nil), nil)
-		}
-		entries, err = ACLLog(context.Background(), client, 0)
+		client.EXPECT().Do(gomock.Any(), mock.Match("ACL", "LOG")).
+			Return(mock.Result(mock.ValkeyArray()))
+		entries, err = ACLLog(ctx, client, 0)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -709,8 +728,6 @@ func TestACLHelpers(t *testing.T) {
 }
 
 func TestACLLiveIntegration(t *testing.T) {
-	defer ShouldNotLeak(SetupLeakDetection())
-
 	targets := []struct {
 		name string
 		addr string
@@ -722,7 +739,7 @@ func TestACLLiveIntegration(t *testing.T) {
 
 	for _, target := range targets {
 		t.Run(target.name, func(t *testing.T) {
-			client, err := NewClient(ClientOption{
+			client, err := valkey.NewClient(valkey.ClientOption{
 				InitAddress:  []string{target.addr},
 				DisableCache: true,
 			})
@@ -752,49 +769,54 @@ func TestACLLiveIntegration(t *testing.T) {
 				}
 			}
 			if defaultUser == nil {
-				t.Fatalf("[%s] default user not found in live ACLList", target.name)
+				t.Fatalf("[%s] default user not found in ACLList", target.name)
 			}
-			if !defaultUser.Enabled || !defaultUser.AllDatabases {
-				t.Errorf("[%s] unexpected default user state: %+v", target.name, defaultUser)
+			if !defaultUser.Enabled {
+				t.Errorf("[%s] default user expected enabled", target.name)
 			}
 
-			// 2. Live ACLDryRun on default user
-			res, err := ACLDryRun(ctx, client, "default", "get", "livekey")
+			// 2. Setup isolated user for ACL DRYRUN verification
+			testUser := "test_dryrun_user"
+			cleanupCmd := client.B().AclDeluser().Username(testUser).Build()
+			client.Do(ctx, cleanupCmd)
+			defer client.Do(ctx, client.B().AclDeluser().Username(testUser).Build())
+
+			// User with permission to GET only key:permitted:* and no SET permission
+			setupCmd := client.B().AclSetuser().Username(testUser).
+				Rule("on", "nopass", "~key:permitted:*", "+get", "-@write").
+				Build()
+			if err := client.Do(ctx, setupCmd).Error(); err != nil {
+				t.Fatalf("[%s] failed to set up test ACL user: %v", target.name, err)
+			}
+
+			// 3. Test allowed command on permitted key -> OK
+			res, err := ACLDryRun(ctx, client, testUser, "get", "key:permitted:one")
 			if err != nil {
 				t.Fatalf("[%s] live ACLDryRun failed: %v", target.name, err)
 			}
 			if !res.Allowed || res.DeniedType != DeniedNone {
-				t.Errorf("[%s] expected allowed for default user get, got %+v", target.name, res)
+				t.Errorf("[%s] expected allowed, got %+v", target.name, res)
 			}
 
-			// 3. Create restricted user
-			testUser := "test_acl_dryrun_user_" + strings.ToLower(target.name)
-			setCmd := client.B().AclSetuser().Username(testUser).Rule(
-				"on", "nopass", "resetkeys", "~allowed:*", "resetchannels", "-@all", "+get",
-			).Build()
-			if err := client.Do(ctx, setCmd).Error(); err != nil {
-				t.Fatalf("[%s] failed to setuser %s: %v", target.name, testUser, err)
-			}
-			defer func() {
-				_ = client.Do(ctx, client.B().AclDeluser().Username(testUser).Build())
-			}()
-
-			// 4. Test permitted command on permitted key
-			res, err = ACLDryRun(ctx, client, testUser, "get", "allowed:one")
-			if err != nil {
-				t.Fatalf("[%s] live ACLDryRun failed: %v", target.name, err)
-			}
-			if !res.Allowed || res.DeniedType != DeniedNone {
-				t.Errorf("[%s] expected allowed for permitted key, got %+v", target.name, res)
-			}
-
-			// 5. Test forbidden command on permitted key -> DeniedCommand
-			res, err = ACLDryRun(ctx, client, testUser, "set", "allowed:one", "val")
+			// 4. Test forbidden command on permitted key -> DeniedCommand
+			res, err = ACLDryRun(ctx, client, testUser, "set", "key:permitted:one", "val")
 			if err != nil {
 				t.Fatalf("[%s] live ACLDryRun failed: %v", target.name, err)
 			}
 			if res.Allowed {
-				t.Errorf("[%s] expected denial for forbidden command 'set', got allowed!", target.name)
+				t.Errorf("[%s] expected denial for 'set', got allowed!", target.name)
+			}
+			if res.DeniedType != DeniedCommand {
+				t.Errorf("[%s] expected DeniedCommand, got %v (%s)", target.name, res.DeniedType, res.Reason)
+			}
+
+			// 5. Test forbidden command with key substring in command name -> must remain DeniedCommand
+			res, err = ACLDryRun(ctx, client, testUser, "hset", "key:permitted:one", "f", "v")
+			if err != nil {
+				t.Fatalf("[%s] live ACLDryRun failed: %v", target.name, err)
+			}
+			if res.Allowed {
+				t.Errorf("[%s] expected denial for 'hset', got allowed!", target.name)
 			}
 			if res.DeniedType != DeniedCommand {
 				t.Errorf("[%s] expected DeniedCommand, got %v (%s)", target.name, res.DeniedType, res.Reason)

@@ -35,7 +35,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/valkey-io/valkey-go"
 	"github.com/valkey-io/valkey-go/mock"
 )
 
@@ -648,7 +647,7 @@ var _ = Describe("Commands", func() {
 			res, e := cmd.ACLDryRunResult()
 			Expect(e).To(BeNil())
 			Expect(res.Allowed).To(BeTrue())
-			Expect(res.DeniedType).To(Equal(valkey.DeniedNone))
+			Expect(res.DeniedType).To(Equal(DeniedNone))
 			cmd.SetErr(err)
 			_, e = cmd.ACLDryRunResult()
 			Expect(e).To(Equal(err))
@@ -1766,7 +1765,7 @@ func TestACLDryRunResult(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
-		if !res.Allowed || res.DeniedType != valkey.DeniedNone || res.Reason != "OK" {
+		if !res.Allowed || res.DeniedType != DeniedNone || res.Reason != "OK" {
 			t.Errorf("unexpected dryrun result: %+v", res)
 		}
 	})
@@ -1778,7 +1777,7 @@ func TestACLDryRunResult(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
-		if res.Allowed || res.DeniedType != valkey.DeniedCommand {
+		if res.Allowed || res.DeniedType != DeniedCommand {
 			t.Errorf("unexpected dryrun result: %+v", res)
 		}
 	})
@@ -1822,10 +1821,10 @@ func TestStringSliceCmdAsACLUsers(t *testing.T) {
 	})
 }
 
-func TestTypeAliasesAndConstants(t *testing.T) {
-	// Verify backward compatibility of ClientInfo, ACLLogEntry, ClientFlags, and constants
+func TestACLTypesAndConstants(t *testing.T) {
+	// Verify compatibility of ClientInfo, ACLLogEntry, ClientFlags, and constants
 	var flags ClientFlags = ClientSlave | ClientMaster | ClientPubSub
-	if flags&(valkey.ClientSlave) == 0 {
+	if flags&ClientSlave == 0 {
 		t.Errorf("expected ClientSlave bit set")
 	}
 

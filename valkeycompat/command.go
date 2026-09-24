@@ -451,11 +451,11 @@ func (cmd *StringCmd) String() string {
 }
 
 // ACLDryRunResult returns the structured result of an ACL DRYRUN command.
-func (cmd *StringCmd) ACLDryRunResult() (valkey.ACLDryRunResult, error) {
+func (cmd *StringCmd) ACLDryRunResult() (ACLDryRunResult, error) {
 	if cmd.err != nil {
-		return valkey.ACLDryRunResult{}, cmd.err
+		return ACLDryRunResult{}, cmd.err
 	}
-	return valkey.ParseACLDryRunString(cmd.val), nil
+	return ParseACLDryRunString(cmd.val), nil
 }
 
 type BoolCmd struct {
@@ -605,11 +605,11 @@ func newStringSliceCmd(res valkey.ValkeyResult) *StringSliceCmd {
 }
 
 // AsACLUsers decodes raw ACL list results into typed structs.
-func (cmd *StringSliceCmd) AsACLUsers() ([]valkey.ACLUser, error) {
+func (cmd *StringSliceCmd) AsACLUsers() ([]ACLUser, error) {
 	if cmd.err != nil {
 		return nil, cmd.err
 	}
-	return valkey.ParseACLListStrings(cmd.val)
+	return ParseACLListStrings(cmd.val)
 }
 
 type IntSliceCmd struct {
@@ -4847,63 +4847,6 @@ type FTSynDumpResult struct {
 	Synonyms []string
 }
 
-// ClientFlags is redis-server client flags
-type ClientFlags = valkey.ClientFlags
-
-const (
-	ClientSlave               = valkey.ClientSlave
-	ClientMaster              = valkey.ClientMaster
-	ClientMonitor             = valkey.ClientMonitor
-	ClientMulti               = valkey.ClientMulti
-	ClientBlocked             = valkey.ClientBlocked
-	ClientDirtyCAS            = valkey.ClientDirtyCAS
-	ClientCloseAfterReply     = valkey.ClientCloseAfterReply
-	ClientUnBlocked           = valkey.ClientUnBlocked
-	ClientScript              = valkey.ClientScript
-	ClientAsking              = valkey.ClientAsking
-	ClientCloseASAP           = valkey.ClientCloseASAP
-	ClientUnixSocket          = valkey.ClientUnixSocket
-	ClientDirtyExec           = valkey.ClientDirtyExec
-	ClientMasterForceReply    = valkey.ClientMasterForceReply
-	ClientForceAOF            = valkey.ClientForceAOF
-	ClientForceRepl           = valkey.ClientForceRepl
-	ClientPrePSync            = valkey.ClientPrePSync
-	ClientReadOnly            = valkey.ClientReadOnly
-	ClientPubSub              = valkey.ClientPubSub
-	ClientPreventAOFProp      = valkey.ClientPreventAOFProp
-	ClientPreventReplProp     = valkey.ClientPreventReplProp
-	ClientPreventProp         = valkey.ClientPreventProp
-	ClientPendingWrite        = valkey.ClientPendingWrite
-	ClientReplyOff            = valkey.ClientReplyOff
-	ClientReplySkipNext       = valkey.ClientReplySkipNext
-	ClientReplySkip           = valkey.ClientReplySkip
-	ClientLuaDebug            = valkey.ClientLuaDebug
-	ClientLuaDebugSync        = valkey.ClientLuaDebugSync
-	ClientModule              = valkey.ClientModule
-	ClientProtected           = valkey.ClientProtected
-	ClientExecutingCommand    = valkey.ClientExecutingCommand
-	ClientPendingCommand      = valkey.ClientPendingCommand
-	ClientTracking            = valkey.ClientTracking
-	ClientTrackingBrokenRedir = valkey.ClientTrackingBrokenRedir
-	ClientTrackingBCAST       = valkey.ClientTrackingBCAST
-	ClientTrackingOptIn       = valkey.ClientTrackingOptIn
-	ClientTrackingOptOut      = valkey.ClientTrackingOptOut
-	ClientTrackingCaching     = valkey.ClientTrackingCaching
-	ClientTrackingNoLoop      = valkey.ClientTrackingNoLoop
-	ClientInTimeoutTable      = valkey.ClientInTimeoutTable
-	ClientProtocolError       = valkey.ClientProtocolError
-	ClientCloseAfterCommand   = valkey.ClientCloseAfterCommand
-	ClientDenyBlocking        = valkey.ClientDenyBlocking
-	ClientReplRDBOnly         = valkey.ClientReplRDBOnly
-	ClientNoEvict             = valkey.ClientNoEvict
-	ClientAllowOOM            = valkey.ClientAllowOOM
-	ClientNoTouch             = valkey.ClientNoTouch
-	ClientPushing             = valkey.ClientPushing
-)
-
-// ClientInfo is valkey-server ClientInfo
-type ClientInfo = valkey.ClientInfo
-
 type ClientInfoCmd struct {
 	baseCmd[*ClientInfo]
 }
@@ -4927,7 +4870,7 @@ func (cmd *ClientInfoCmd) Result() (*ClientInfo, error) {
 }
 
 func stringToClientInfo(txt string) (*ClientInfo, error) {
-	return valkey.ParseClientInfo(txt)
+	return ParseClientInfo(txt)
 }
 
 // fmt.Sscanf() cannot handle null values
@@ -4946,14 +4889,12 @@ func (cmd *ClientInfoCmd) from(res valkey.ValkeyResult) {
 	cmd.SetVal(info)
 }
 
-type ACLLogEntry = valkey.ACLLogEntry
-
 type ACLLogCmd struct {
 	baseCmd[[]*ACLLogEntry]
 }
 
 func (cmd *ACLLogCmd) from(res valkey.ValkeyResult) {
-	entries, err := valkey.ParseACLLog(res)
+	entries, err := ParseACLLog(res)
 	if err != nil {
 		cmd.SetErr(err)
 		return
