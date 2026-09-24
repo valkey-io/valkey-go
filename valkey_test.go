@@ -304,6 +304,46 @@ func TestFallBackSingleClient(t *testing.T) {
 	<-done
 }
 
+func TestNewClientReturnsUntypedNilOnDialError(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unreachable := ln.Addr().String()
+	ln.Close()
+
+	dialer := net.Dialer{Timeout: time.Second / 10}
+	for name, option := range map[string]ClientOption{
+		"standalone with replicas": {
+			InitAddress:    []string{unreachable},
+			Standalone:     StandaloneOption{ReplicaAddress: []string{unreachable}},
+			SendToReplicas: func(cmd Completed) bool { return cmd.IsReadOnly() },
+			Dialer:         dialer,
+		},
+		"standalone with redirect": {
+			InitAddress: []string{unreachable},
+			Standalone:  StandaloneOption{EnableRedirect: true},
+			Dialer:      dialer,
+		},
+		"sentinel": {
+			InitAddress: []string{unreachable},
+			Sentinel:    SentinelOption{MasterSet: "mymaster"},
+			Dialer:      dialer,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			client, err := NewClient(option)
+			if err == nil {
+				t.Fatal("expected a dial error")
+			}
+			if client != nil {
+				t.Fatalf("expected an untyped nil Client, got %#v", client)
+			}
+		})
+	}
+}
+
 func TestForceSingleClientInitialDialError(t *testing.T) {
 	defer ShouldNotLeak(SetupLeakDetection())
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
