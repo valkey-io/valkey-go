@@ -408,12 +408,9 @@ var _ = Describe("RateLimiter", func() {
 		It("performs partial grant in AllowAtMost", func() {
 			resetTime := time.Now().Add(time.Second).UnixMilli()
 			client.EXPECT().Do(gomock.Any(), gomock.Any()).Return(mock.Result(mock.ValkeyArray(
-				mock.ValkeyInt64(6),
-				mock.ValkeyInt64(resetTime),
-			))).Times(1)
-			client.EXPECT().Do(gomock.Any(), gomock.Any()).Return(mock.Result(mock.ValkeyArray(
 				mock.ValkeyInt64(10),
 				mock.ValkeyInt64(resetTime),
+				mock.ValkeyInt64(4),
 			))).Times(1)
 
 			limiter, err := valkeylimiter.NewRateLimiter(valkeylimiter.RateLimiterOption{
@@ -431,6 +428,32 @@ var _ = Describe("RateLimiter", func() {
 			Expect(got.Allowed).To(BeTrue())
 			Expect(got.Granted).To(Equal(int64(4)))
 			Expect(got.Remaining).To(Equal(int64(0)))
+		})
+
+		It("rejects AllowAtMost when fixed window capacity is exhausted", func() {
+			resetTime := time.Now().Add(time.Second).UnixMilli()
+			client.EXPECT().Do(gomock.Any(), gomock.Any()).Return(mock.Result(mock.ValkeyArray(
+				mock.ValkeyInt64(10),
+				mock.ValkeyInt64(resetTime),
+				mock.ValkeyInt64(0),
+			))).Times(1)
+
+			limiter, err := valkeylimiter.NewRateLimiter(valkeylimiter.RateLimiterOption{
+				ClientBuilder: func(option valkey.ClientOption) (valkey.Client, error) {
+					return client, nil
+				},
+				Limit:     10,
+				Window:    time.Second,
+				Algorithm: valkeylimiter.AlgorithmFixedWindow,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			got, err := limiter.AllowAtMost(context.Background(), "test", 5)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got.Allowed).To(BeFalse())
+			Expect(got.Granted).To(Equal(int64(0)))
+			Expect(got.Remaining).To(Equal(int64(0)))
+			Expect(got.RetryAfter).To(BeNumerically(">", 0))
 		})
 
 		It("works with Dragonfly if available", func() {

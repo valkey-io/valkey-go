@@ -191,37 +191,94 @@ func (l *rateLimiter) Reset(ctx context.Context, identifier string) error {
 }
 
 func (l *rateLimiter) allowAtMostFixedWindow(ctx context.Context, identifier string, n int64, limit int64, window time.Duration) (Result, error) {
-	checkRes, err := l.allowNFixedWindow(ctx, identifier, 0, limit, window)
-	if err != nil {
+	bufs := rateBuffersPool.Get(0, 128)
+	defer rateBuffersPool.Put(bufs)
+
+	now := time.Now().UTC()
+
+	offset := len(bufs.keyBuf)
+	bufs.keyBuf = append(bufs.keyBuf, l.keyPrefix...)
+	bufs.keyBuf = append(bufs.keyBuf, keyDelimOpen...)
+	bufs.keyBuf = append(bufs.keyBuf, identifier...)
+	bufs.keyBuf = append(bufs.keyBuf, keyDelimClose...)
+	key := valkey.BinaryString(bufs.keyBuf[offset:])
+
+	offset = len(bufs.keyBuf)
+	bufs.keyBuf = append(bufs.keyBuf, key...)
+	bufs.keyBuf = append(bufs.keyBuf, ":ex"...)
+	expiresAtKey := valkey.BinaryString(bufs.keyBuf[offset:])
+
+	offset = len(bufs.keyBuf)
+	bufs.keyBuf = strconv.AppendInt(bufs.keyBuf, n, 10)
+	arg1 := valkey.BinaryString(bufs.keyBuf[offset:])
+
+	offset = len(bufs.keyBuf)
+	bufs.keyBuf = strconv.AppendInt(bufs.keyBuf, now.Add(window).UnixMilli(), 10)
+	arg2 := valkey.BinaryString(bufs.keyBuf[offset:])
+
+	offset = len(bufs.keyBuf)
+	bufs.keyBuf = strconv.AppendInt(bufs.keyBuf, now.UnixMilli(), 10)
+	arg3 := valkey.BinaryString(bufs.keyBuf[offset:])
+
+	offset = len(bufs.keyBuf)
+	bufs.keyBuf = strconv.AppendInt(bufs.keyBuf, limit, 10)
+	arg4 := valkey.BinaryString(bufs.keyBuf[offset:])
+
+	resp := rateLimitAllowAtMostScript.Exec(ctx, l.client, []string{key, expiresAtKey}, []string{arg1, arg2, arg3, arg4})
+	if err := resp.Error(); err != nil {
 		return Result{}, err
 	}
-	if checkRes.Remaining <= 0 {
-		return Result{
-			Allowed:    false,
-			Remaining:  0,
-			ResetAtMs:  checkRes.ResetAtMs,
-			RetryAfter: checkRes.RetryAfter,
-			ResetAfter: checkRes.ResetAfter,
-			Granted:    0,
-		}, nil
+
+	arr, err := resp.ToArray()
+	if err != nil || len(arr) != 3 {
+		return Result{}, ErrInvalidResponse
 	}
-	granted := min(n, checkRes.Remaining)
-	if granted <= 0 {
-		return Result{
-			Allowed:    false,
-			Remaining:  checkRes.Remaining,
-			ResetAtMs:  checkRes.ResetAtMs,
-			RetryAfter: checkRes.RetryAfter,
-			ResetAfter: checkRes.ResetAfter,
-			Granted:    0,
-		}, nil
-	}
-	res, err := l.allowNFixedWindow(ctx, identifier, granted, limit, window)
+
+	current, err := arr[0].ToInt64()
 	if err != nil {
-		return Result{}, err
+		return Result{}, ErrInvalidResponse
 	}
-	res.Granted = granted
-	return res, nil
+
+	resetAt, err := arr[1].ToInt64()
+	if err != nil {
+		return Result{}, ErrInvalidResponse
+	}
+
+	granted, err := arr[2].ToInt64()
+	if err != nil {
+		return Result{}, ErrInvalidResponse
+	}
+
+	remaining := max(limit-current, 0)
+	allowed := granted > 0
+	if n == 0 {
+		allowed = current < limit
+	}
+
+	var retryAfter time.Duration
+	if !allowed {
+		diffMs := resetAt - now.UnixMilli()
+		if diffMs > 0 {
+			retryAfter = time.Duration(diffMs) * time.Millisecond
+		}
+	} else {
+		retryAfter = -1
+	}
+
+	var resetAfter time.Duration
+	diffResetMs := resetAt - now.UnixMilli()
+	if diffResetMs > 0 {
+		resetAfter = time.Duration(diffResetMs) * time.Millisecond
+	}
+
+	return Result{
+		Allowed:    allowed,
+		Remaining:  remaining,
+		ResetAtMs:  resetAt,
+		RetryAfter: retryAfter,
+		ResetAfter: resetAfter,
+		Granted:    granted,
+	}, nil
 }
 
 func (l *rateLimiter) allowNFixedWindow(ctx context.Context, identifier string, n int64, limit int64, window time.Duration) (Result, error) {
@@ -430,6 +487,36 @@ local current = redis.call("incrby", rate_limit_key, increment_amount)
 return { current, expires_at }
 `)
 
+var rateLimitAllowAtMostScript = valkey.NewLuaScript(`
+local rate_limit_key = KEYS[1]
+local expires_at_key = KEYS[2]
+local max_amount = tonumber(ARGV[1])
+local next_expires_at = tonumber(ARGV[2])
+local current_time = tonumber(ARGV[3])
+local limit = tonumber(ARGV[4])
+
+local expires_at = tonumber(redis.call("get", expires_at_key))
+if not expires_at or expires_at < current_time then
+  redis.call("set", rate_limit_key, 0, "pxat", next_expires_at + 1000)
+  redis.call("set", expires_at_key, next_expires_at, "pxat", next_expires_at + 1000)
+  expires_at = next_expires_at
+end
+
+local current = tonumber(redis.call("get", rate_limit_key)) or 0
+local remaining = limit - current
+if remaining < 0 then
+  remaining = 0
+end
+
+local granted = 0
+if remaining > 0 and max_amount > 0 then
+  granted = math.min(max_amount, remaining)
+  current = redis.call("incrby", rate_limit_key, granted)
+end
+
+return { current, expires_at, granted }
+`)
+
 // GCRAResult contains the raw numeric and timing results returned by the GCRA Lua engine.
 type GCRAResult struct {
 	Allowed    int64
@@ -560,9 +647,8 @@ end
 tat = math.max(tat, now)
 
 local diff = burst_offset - increment - (tat - now)
-local remaining = diff / emission_interval
 
-if remaining < 0 then
+if diff < 0 then
   local reset_after = tat - now
   local retry_after = diff * -1
   return {
@@ -573,9 +659,10 @@ if remaining < 0 then
   }
 end
 
+local remaining = diff / emission_interval
 local new_tat = tat + increment
 local reset_after = new_tat - now
-if reset_after > 0 then
+if cost > 0 and reset_after > 0 then
   redis.call("SET", rate_limit_key, new_tat, "EX", math.ceil(reset_after))
 end
 local retry_after = -1
@@ -639,7 +726,7 @@ local increment = emission_interval * cost
 local new_tat = tat + increment
 
 local reset_after = new_tat - now
-if reset_after > 0 then
+if cost > 0 and reset_after > 0 then
   redis.call("SET", rate_limit_key, new_tat, "EX", math.ceil(reset_after))
 end
 
