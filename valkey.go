@@ -584,7 +584,7 @@ func NewClient(option ClientOption) (client Client, err error) {
 		}
 		if len(option.InitAddress) == 1 && (err.Error() == valkeyErrMsgCommandNotAllow || strings.Contains(strings.ToUpper(err.Error()), "CLUSTER")) {
 			option.PipelineMultiplex = singleClientMultiplex(option.PipelineMultiplex)
-			client, err = newSingleClient(&option, client.(*clusterClient).single(), makeConn, newRetryer(option.RetryDelay))
+			client, err = toClient(newSingleClient(&option, client.(*clusterClient).single(), makeConn, newRetryer(option.RetryDelay)))
 		} else {
 			client.Close()
 			return nil, err

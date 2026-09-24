@@ -267,6 +267,43 @@ func TestNewClusterClientError(t *testing.T) {
 	})
 }
 
+func TestFallBackSingleClientErrorReturnsUntypedNil(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	done := make(chan struct{})
+	go func() {
+		mock, err := accept(t, ln)
+		if err != nil {
+			return
+		}
+		mock.Expect("READONLY").ReplyString("OK")
+		mock.Expect("CLIENT", "SETINFO", "LIB-NAME", LibName).
+			ReplyError("UNKNOWN COMMAND")
+		mock.Expect("CLIENT", "SETINFO", "LIB-VER", LibVer).
+			ReplyError("UNKNOWN COMMAND")
+		mock.Expect("CLUSTER", "SLOTS").Reply(strmsg('-', "ERR This instance has cluster support disabled"))
+		mock.Close()
+		close(done)
+	}()
+
+	_, port, _ := net.SplitHostPort(ln.Addr().String())
+	client, err := NewClient(ClientOption{
+		InitAddress: []string{"127.0.0.1:" + port},
+		ReplicaOnly: true,
+	})
+	if !errors.Is(err, ErrReplicaOnlyNotSupported) {
+		t.Fatalf("unexpected error %v", err)
+	}
+	if client != nil {
+		t.Fatalf("expected an untyped nil Client, got %#v", client)
+	}
+	<-done
+}
+
 func TestFallBackSingleClient(t *testing.T) {
 	defer ShouldNotLeak(SetupLeakDetection())
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
