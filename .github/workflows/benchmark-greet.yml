@@ -1,0 +1,16 @@
+name: PR Benchmark Greeting
+on:
+  pull_request:
+    types: [opened]
+
+permissions: { pull-requests: write }
+
+jobs:
+  greet:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post Instruction
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body "💡 **Performance Testing:** A reviewer or author can comment \`/benchmark\` on this PR to trigger an automated benchstat comparison against the \`main\` branch." || true
