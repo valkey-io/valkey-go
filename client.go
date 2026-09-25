@@ -19,6 +19,40 @@ type singleClient struct {
 	DisableCache bool
 }
 
+var _ PoolStatsProvider = (*singleClient)(nil)
+
+type poolStatsConn interface {
+	poolStats() NodePoolStats
+}
+
+func connPoolStats(c conn) (NodePoolStats, error) {
+	provider, ok := c.(poolStatsConn)
+	if !ok {
+		return NodePoolStats{}, ErrPoolStatsUnsupported
+	}
+	return provider.poolStats(), nil
+}
+
+func clientPoolStats(nodes map[string]Client) (map[string]NodePoolStats, error) {
+	stats := make(map[string]NodePoolStats, len(nodes))
+	for addr, node := range nodes {
+		provider, ok := node.(PoolStatsProvider)
+		if !ok {
+			return nil, ErrPoolStatsUnsupported
+		}
+		nodeStats, err := provider.PoolStats()
+		if err != nil {
+			return nil, err
+		}
+		stat, ok := nodeStats[addr]
+		if !ok {
+			return nil, ErrPoolStatsUnsupported
+		}
+		stats[addr] = stat
+	}
+	return stats, nil
+}
+
 func newSingleClient(opt *ClientOption, prev conn, connFn connFn, retryer retryHandler) (*singleClient, error) {
 	if len(opt.InitAddress) == 0 {
 		return nil, ErrNoAddr
@@ -244,6 +278,14 @@ func (c *singleClient) Dedicate() (DedicatedClient, func()) {
 
 func (c *singleClient) Nodes() map[string]Client {
 	return map[string]Client{c.conn.Addr(): c}
+}
+
+func (c *singleClient) PoolStats() (map[string]NodePoolStats, error) {
+	stats, err := connPoolStats(c.conn)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]NodePoolStats{c.conn.Addr(): stats}, nil
 }
 
 func (c *singleClient) Mode() ClientMode {

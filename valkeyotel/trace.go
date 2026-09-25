@@ -242,6 +242,8 @@ type otelclient struct {
 	commandMetrics
 }
 
+var _ valkey.PoolStatsProvider = (*otelclient)(nil)
+
 func (o *otelclient) B() valkey.Builder {
 	return o.client.B()
 }
@@ -387,6 +389,14 @@ func (o *otelclient) Nodes() map[string]valkey.Client {
 		}
 	}
 	return nodes
+}
+
+func (o *otelclient) PoolStats() (map[string]valkey.NodePoolStats, error) {
+	provider, ok := o.client.(valkey.PoolStatsProvider)
+	if !ok {
+		return nil, valkey.ErrPoolStatsUnsupported
+	}
+	return provider.PoolStats()
 }
 
 func (o *otelclient) Mode() valkey.ClientMode {
