@@ -313,7 +313,7 @@ func (o *otelclient) DoCache(ctx context.Context, cmd valkey.Cacheable, ttl time
 	resp = o.client.DoCache(ctx, cmd, ttl)
 	o.recordCacheHitMiss(ctx, resp)
 	hitCount, missCount := 0, 0
-	if resp.IsCacheHit() {
+	if resp.NonValkeyError() == nil && resp.IsCacheHit() {
 		hitCount++
 	} else {
 		missCount++
@@ -334,7 +334,7 @@ func (o *otelclient) DoMultiCache(ctx context.Context, multi ...valkey.Cacheable
 	hitCount, missCount := 0, 0
 	for _, resp := range resps {
 		o.recordCacheHitMiss(ctx, resp)
-		if resp.IsCacheHit() {
+		if resp.NonValkeyError() == nil && resp.IsCacheHit() {
 			hitCount++
 		} else {
 			missCount++
