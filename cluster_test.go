@@ -1,17 +1,20 @@
 package valkey
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"reflect"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -6302,11 +6305,11 @@ func TestGetClusterSlotsPreferShards(t *testing.T) {
 		wantCmd      string
 		wantShards   bool
 	}{
-		{version: 8, preferShards: false, wantCmd: "CLUSTER SHARDS", wantShards: true},  // >= 8 always shards
-		{version: 7, preferShards: false, wantCmd: "CLUSTER SLOTS", wantShards: false},  // default keeps 7.x on slots
-		{version: 7, preferShards: true, wantCmd: "CLUSTER SHARDS", wantShards: true},   // opt-in enables shards on 7
-		{version: 6, preferShards: true, wantCmd: "CLUSTER SLOTS", wantShards: false},   // floor: no shards below 7
-		{version: 5, preferShards: true, wantCmd: "CLUSTER SLOTS", wantShards: false},   // RESP2 fallback stays slots
+		{version: 8, preferShards: false, wantCmd: "CLUSTER SHARDS", wantShards: true}, // >= 8 always shards
+		{version: 7, preferShards: false, wantCmd: "CLUSTER SLOTS", wantShards: false}, // default keeps 7.x on slots
+		{version: 7, preferShards: true, wantCmd: "CLUSTER SHARDS", wantShards: true},  // opt-in enables shards on 7
+		{version: 6, preferShards: true, wantCmd: "CLUSTER SLOTS", wantShards: false},  // floor: no shards below 7
+		{version: 5, preferShards: true, wantCmd: "CLUSTER SLOTS", wantShards: false},  // RESP2 fallback stays slots
 	} {
 		t.Run(fmt.Sprintf("v%d_prefer%v", tc.version, tc.preferShards), func(t *testing.T) {
 			var got string
@@ -11686,6 +11689,165 @@ func TestClusterClientRefreshClosesConnConnectedByAZ(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatalf("the conn AZ() connected was dropped without being closed")
+}
+
+func TestCluster_ThunderingHerd_FullJitterRetry(t *testing.T) {
+	const numClients = 50
+
+	t.Run("without jitter (reproduces thundering herd spike)", func(t *testing.T) {
+		defer ShouldNotLeak(SetupLeakDetection())
+
+		var attempts int32
+		var mu sync.Mutex
+		var attemptOffsets []time.Duration
+		var startTime time.Time
+
+		opt := &ClientOption{
+			InitAddress:   []string{"127.0.0.1:7001"},
+			DialerRetries: 0, // No backoff / retries: immediate fail-fast after synchronized spike
+		}
+
+		dialFn := func(ctx context.Context, dst string, o *ClientOption) (net.Conn, error) {
+			atomic.AddInt32(&attempts, 1)
+			offset := time.Since(startTime)
+			mu.Lock()
+			attemptOffsets = append(attemptOffsets, offset)
+			mu.Unlock()
+			return nil, syscall.ECONNREFUSED
+		}
+
+		startBarrier := make(chan struct{})
+		var ready sync.WaitGroup
+		ready.Add(numClients)
+
+		var wg sync.WaitGroup
+		for i := 0; i < numClients; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				m := makeMux("127.0.0.1:7001", opt, dialFn)
+				defer m.Close()
+				ready.Done()
+				<-startBarrier
+				_ = m.Dial()
+			}()
+		}
+		ready.Wait()
+		startTime = time.Now()
+		close(startBarrier)
+		wg.Wait()
+
+		mu.Lock()
+		defer mu.Unlock()
+
+		// Without jitter: all 50 workers hit the server in the very first 10ms window (thundering herd)
+		buckets := make(map[int]int)
+		for _, offset := range attemptOffsets {
+			bucket := int(offset / (10 * time.Millisecond))
+			buckets[bucket]++
+		}
+
+		// Assert thundering herd spike: bucket 0 contains almost all attempts
+		if buckets[0] < int(float64(numClients)*0.8) {
+			t.Fatalf("expected synchronized spike with >= 80%% attempts in first 10ms, got %d/%d", buckets[0], numClients)
+		}
+	})
+
+	t.Run("with full jitter (disperses thundering herd and recovers)", func(t *testing.T) {
+		defer ShouldNotLeak(SetupLeakDetection())
+
+		var mu sync.Mutex
+		var attemptOffsets []time.Duration
+		var startTime time.Time
+
+		opt := &ClientOption{
+			InitAddress:          []string{"127.0.0.1:7001"},
+			DialerRetries:        5,
+			DialerRetryBaseDelay: 20 * time.Millisecond,
+			DialerRetryMaxDelay:  200 * time.Millisecond,
+			DialerRetryBackoff:   fullJitterDelayFn(20*time.Millisecond, 200*time.Millisecond),
+		}
+
+		clientAttempts := make([]int32, numClients)
+
+		makeDialFn := func(clientId int) dialFn {
+			return func(ctx context.Context, dst string, o *ClientOption) (net.Conn, error) {
+				attempt := atomic.AddInt32(&clientAttempts[clientId], 1)
+				offset := time.Since(startTime)
+				mu.Lock()
+				attemptOffsets = append(attemptOffsets, offset)
+				mu.Unlock()
+
+				// Fail each client on its first 2 attempts, succeed on the 3rd
+				if attempt <= 2 {
+					return nil, syscall.ECONNREFUSED
+				}
+
+				// Recovered: complete handshake
+				c1, c2 := net.Pipe()
+				go func() {
+					mock := &valkeyMock{t: t, buf: bufio.NewReader(c2), conn: c2}
+					mock.Expect("HELLO", "3").Reply(slicemsg('%', []ValkeyMessage{
+						strmsg('+', "proto"),
+						{typ: ':', intlen: 3},
+					}))
+					mock.Expect("CLIENT", "TRACKING", "ON", "OPTIN").ReplyString("OK")
+					mock.Expect("CLIENT", "SETINFO", "LIB-NAME", LibName).ReplyError("UNKNOWN COMMAND")
+					mock.Expect("CLIENT", "SETINFO", "LIB-VER", LibVer).ReplyError("UNKNOWN COMMAND")
+					mock.Expect("PING").ReplyString("OK")
+					mock.Close()
+				}()
+				return c1, nil
+			}
+		}
+
+		startBarrier := make(chan struct{})
+		var ready sync.WaitGroup
+		ready.Add(numClients)
+
+		var wg sync.WaitGroup
+		var successCount int32
+		for i := 0; i < numClients; i++ {
+			wg.Add(1)
+			clientId := i
+			go func() {
+				defer wg.Done()
+				m := makeMux("127.0.0.1:7001", opt, makeDialFn(clientId))
+				defer m.Close()
+
+				ready.Done()
+				<-startBarrier
+
+				if err := m.Dial(); err == nil {
+					atomic.AddInt32(&successCount, 1)
+				}
+			}()
+		}
+		ready.Wait()
+		startTime = time.Now()
+		close(startBarrier)
+		wg.Wait()
+
+		if got := atomic.LoadInt32(&successCount); got != numClients {
+			t.Fatalf("expected all %d clients to recover, got %d", numClients, got)
+		}
+
+		mu.Lock()
+		defer mu.Unlock()
+
+		buckets := make(map[int]int)
+		for _, offset := range attemptOffsets {
+			bucket := int(offset / (10 * time.Millisecond))
+			buckets[bucket]++
+		}
+
+		t.Logf("Bucket distribution (10ms buckets): %v", buckets)
+
+		// Assert attempts are dispersed across multiple time windows (at least 5 distinct 10ms buckets)
+		if len(buckets) < 5 {
+			t.Fatalf("expected attempts to be dispersed across at least 5 time buckets, got %d: %v", len(buckets), buckets)
+		}
+	})
 }
 
 // Tests below cover the fix for valkey-io/valkey-go#59: DoMulti / DoMultiCache
