@@ -630,6 +630,28 @@ var _ = Describe("Commands", func() {
 			Expect(err1).To(Equal(err))
 			Expect(cmd.Err()).To(Equal(err))
 		}
+		{
+			cmd := &StringSliceCmd{}
+			cmd.SetVal([]string{"user default on nopass sanitize-payload ~* &* +@all"})
+			users, e := cmd.AsACLUsers()
+			Expect(e).To(BeNil())
+			Expect(users).To(HaveLen(1))
+			Expect(users[0].Username).To(Equal("default"))
+			cmd.SetErr(err)
+			_, e = cmd.AsACLUsers()
+			Expect(e).To(Equal(err))
+		}
+		{
+			cmd := &StringCmd{}
+			cmd.SetVal("OK")
+			res, e := cmd.ACLDryRunResult()
+			Expect(e).To(BeNil())
+			Expect(res.Allowed).To(BeTrue())
+			Expect(res.DeniedType).To(Equal(DeniedNone))
+			cmd.SetErr(err)
+			_, e = cmd.ACLDryRunResult()
+			Expect(e).To(Equal(err))
+		}
 	})
 })
 
@@ -1732,5 +1754,94 @@ func TestCacheHitDurationCmd(t *testing.T) {
 	cmd.SetVal(time.Second)
 	if !cmd.IsCacheHit() {
 		t.Error("Expected IsCacheHit to remain true after SetVal, got false")
+	}
+}
+
+func TestACLDryRunResult(t *testing.T) {
+	t.Run("success OK", func(t *testing.T) {
+		cmd := &StringCmd{}
+		cmd.SetVal("OK")
+		res, err := cmd.ACLDryRunResult()
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if !res.Allowed || res.DeniedType != DeniedNone || res.Reason != "OK" {
+			t.Errorf("unexpected dryrun result: %+v", res)
+		}
+	})
+
+	t.Run("denied command", func(t *testing.T) {
+		cmd := &StringCmd{}
+		cmd.SetVal("User alice has no permissions to run the 'set' command")
+		res, err := cmd.ACLDryRunResult()
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if res.Allowed || res.DeniedType != DeniedCommand {
+			t.Errorf("unexpected dryrun result: %+v", res)
+		}
+	})
+
+	t.Run("propagates error", func(t *testing.T) {
+		cmd := &StringCmd{}
+		cmd.SetErr(errors.New("proto err"))
+		_, err := cmd.ACLDryRunResult()
+		if err == nil {
+			t.Errorf("expected error to propagate")
+		}
+	})
+}
+
+func TestStringSliceCmdAsACLUsers(t *testing.T) {
+	t.Run("success parsing users", func(t *testing.T) {
+		cmd := &StringSliceCmd{}
+		cmd.SetVal([]string{
+			"user default on nopass sanitize-payload ~* &* +@all",
+			"user bob on #abc ~data:* &events:* +get",
+		})
+		users, err := cmd.AsACLUsers()
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		if len(users) != 2 {
+			t.Fatalf("expected 2 users, got %d", len(users))
+		}
+		if users[0].Username != "default" || users[1].Username != "bob" {
+			t.Errorf("unexpected usernames: %v", users)
+		}
+	})
+
+	t.Run("propagates error", func(t *testing.T) {
+		cmd := &StringSliceCmd{}
+		cmd.SetErr(errors.New("cmd err"))
+		_, err := cmd.AsACLUsers()
+		if err == nil {
+			t.Errorf("expected error to propagate")
+		}
+	})
+}
+
+func TestACLTypesAndConstants(t *testing.T) {
+	// Verify compatibility of ClientInfo, ACLLogEntry, ClientFlags, and constants
+	var flags ClientFlags = ClientSlave | ClientMaster | ClientPubSub
+	if flags&ClientSlave == 0 {
+		t.Errorf("expected ClientSlave bit set")
+	}
+
+	info := &ClientInfo{
+		Addr:  "127.0.0.1:1234",
+		Flags: flags,
+	}
+	if info.Addr != "127.0.0.1:1234" {
+		t.Errorf("unexpected addr: %s", info.Addr)
+	}
+
+	entry := &ACLLogEntry{
+		Count:      1,
+		Reason:     "auth",
+		ClientInfo: info,
+	}
+	if entry.Reason != "auth" || entry.ClientInfo.Flags != flags {
+		t.Errorf("unexpected entry: %+v", entry)
 	}
 }

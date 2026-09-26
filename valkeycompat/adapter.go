@@ -443,6 +443,9 @@ type CoreCmdable interface {
 	ACLDelUser(ctx context.Context, username string) *IntCmd
 	ACLLogReset(ctx context.Context) *StatusCmd
 	ACLList(ctx context.Context) *StringSliceCmd
+	ACLUsers(ctx context.Context) *StringSliceCmd
+	ACLWhoAmI(ctx context.Context) *StringCmd
+	ACLGenPass(ctx context.Context, bit int) *StringCmd
 	ACLCat(ctx context.Context) *StringSliceCmd
 	ACLCatArgs(ctx context.Context, options *ACLCatArgs) *StringSliceCmd
 
@@ -3567,7 +3570,12 @@ func (c *Compat) FunctionStats(ctx context.Context) *FunctionStatsCmd {
 }
 
 func (c *Compat) ACLDryRun(ctx context.Context, username string, command ...any) *StringCmd {
-	cmd := c.client.B().AclDryrun().Username(username).Command(command[0].(string)).Arg(argsToSlice(command[1:])...).Build()
+	if len(command) == 0 {
+		cmd := c.client.B().Arbitrary("ACL", "DRYRUN", username).Build()
+		resp := c.client.Do(ctx, cmd)
+		return newStringCmd(resp)
+	}
+	cmd := c.client.B().AclDryrun().Username(username).Command(fmt.Sprint(command[0])).Arg(argsToSlice(command[1:])...).Build()
 	resp := c.client.Do(ctx, cmd)
 	return newStringCmd(resp)
 }
@@ -3587,9 +3595,35 @@ func (c *Compat) ACLCatArgs(ctx context.Context, options *ACLCatArgs) *StringSli
 }
 
 func (c *Compat) ACLLog(ctx context.Context, count int64) *ACLLogCmd {
-	cmd := c.client.B().AclLog().Count(count).Build()
-	resp := c.client.Do(ctx, cmd)
+	var resp valkey.ValkeyResult
+	if count > 0 {
+		resp = c.client.Do(ctx, c.client.B().AclLog().Count(count).Build())
+	} else {
+		resp = c.client.Do(ctx, c.client.B().Arbitrary("ACL", "LOG").Build())
+	}
 	return newACLLogCmd(resp)
+}
+
+func (c *Compat) ACLGenPass(ctx context.Context, bit int) *StringCmd {
+	var resp valkey.ValkeyResult
+	if bit > 0 {
+		resp = c.client.Do(ctx, c.client.B().AclGenpass().Bits(int64(bit)).Build())
+	} else {
+		resp = c.client.Do(ctx, c.client.B().AclGenpass().Build())
+	}
+	return newStringCmd(resp)
+}
+
+func (c *Compat) ACLUsers(ctx context.Context) *StringSliceCmd {
+	cmd := c.client.B().AclUsers().Build()
+	resp := c.client.Do(ctx, cmd)
+	return newStringSliceCmd(resp)
+}
+
+func (c *Compat) ACLWhoAmI(ctx context.Context) *StringCmd {
+	cmd := c.client.B().AclWhoami().Build()
+	resp := c.client.Do(ctx, cmd)
+	return newStringCmd(resp)
 }
 
 func (c *Compat) ACLSetUser(ctx context.Context, username string, rules ...string) *StatusCmd {
