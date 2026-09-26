@@ -111,7 +111,9 @@ retry:
 		p.dialing--
 		if !stopped {
 			p.size--
+			p.cond.L.Unlock()
 			v.Close()
+			p.cond.L.Lock()
 			goto retry
 		}
 		p.cond.L.Unlock()
@@ -138,7 +140,7 @@ func (p *pool) Store(v wire) {
 		p.startTimerIfNeeded()
 		v.ResetTimer()
 	} else {
-		if _, ok := v.(*unreservedWire); !ok {
+		if _, ok := v.(*unreservedWire); !ok && v != p.dead {
 			p.size--
 		}
 		v.Close()

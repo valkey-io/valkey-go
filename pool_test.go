@@ -793,6 +793,45 @@ func TestPoolStats(t *testing.T) {
 		p.Close()
 	})
 
+	t.Run("Expired creation closes outside pool lock", func(t *testing.T) {
+		closeStarted := make(chan struct{})
+		releaseClose := make(chan struct{})
+		attempt := 0
+		p := newTestPool(1, func(context.Context) wire {
+			attempt++
+			if attempt == 1 {
+				return &mockWire{
+					StopTimerFn: func() bool { return false },
+					CloseFn: func() {
+						close(closeStarted)
+						<-releaseClose
+					},
+				}
+			}
+			return &mockWire{}
+		})
+		acquired := make(chan wire, 1)
+		go func() {
+			acquired <- p.Acquire(context.Background())
+		}()
+		<-closeStarted
+
+		statsRead := make(chan struct{})
+		go func() {
+			p.stats()
+			close(statsRead)
+		}()
+		select {
+		case <-statsRead:
+		case <-time.After(time.Second):
+			t.Fatal("pool mutex held while closing expired wire")
+		}
+
+		close(releaseClose)
+		p.Store(<-acquired)
+		p.Close()
+	})
+
 	t.Run("Idle cleanup updates current state", func(t *testing.T) {
 		p := newPool(2, dead, 10*time.Millisecond, 1, func(context.Context) wire { return &mockWire{} })
 		w1 := p.Acquire(context.Background())
@@ -822,12 +861,14 @@ func TestPoolStats(t *testing.T) {
 			t.Fatalf("unexpected stats after borrowed wire returned: %+v", stats)
 		}
 		before := stats
-		if got := p.Acquire(context.Background()); got != dead {
-			t.Fatalf("expected dead wire after close")
+		got := p.Acquire(context.Background())
+		if got != dead {
+			t.Fatalf("expected dead wire after close, got %T with error %v", got, got.Error())
 		}
+		p.Store(got)
 		after := p.stats()
 		if before != after {
-			t.Fatalf("post-close acquire changed stats: before=%+v after=%+v", before, after)
+			t.Fatalf("post-close acquire/store changed stats: before=%+v after=%+v", before, after)
 		}
 	})
 }
