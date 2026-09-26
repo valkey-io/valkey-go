@@ -1,0 +1,129 @@
+name: PR Benchmark Gatekeeper (On-Demand)
+on:
+  issue_comment:
+    types: [created]
+
+permissions: { pull-requests: write, contents: read }
+
+jobs:
+  benchmark:
+    if: github.event.issue.pull_request && startsWith(github.event.comment.body, '/benchmark')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Acknowledge Request
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment ${{ github.event.issue.number }} --repo ${{ github.repository }} --body "⏳ **Benchmark started!** [View progress](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" || true
+      - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@latest
+      - name: Checkout Main Baseline
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: main
+          path: main-code
+      - name: Checkout PR Code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: refs/pull/${{ github.event.issue.number }}/head
+          path: pr-code
+      - name: Start Valkey
+        run: |
+          cd pr-code
+          docker compose up -d valkey
+          count=0
+          until docker compose exec -T valkey valkey-cli ping | grep -q PONG; do
+            if [ $count -gt 30 ]; then
+              echo "Timeout waiting for Valkey"
+              exit 1
+            fi
+            echo "Waiting for Valkey..."
+            sleep 1
+            count=$((count+1))
+          done
+      - name: Run Main Benchmarks
+        run: |
+          cd main-code
+          set -o pipefail
+          go test -bench=. -run=^$ -benchmem -count=10 ./... | tee /tmp/main.txt
+      - name: Run PR Benchmarks
+        run: |
+          cd pr-code
+          set -o pipefail
+          go test -bench=. -run=^$ -benchmem -count=10 ./... | tee /tmp/pr.txt
+      - name: Compare & Post Comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ~/go/bin/benchstat /tmp/main.txt /tmp/pr.txt > /tmp/raw_output.txt
+          
+          # Convert to Markdown using awk
+          awk '
+          BEGIN {
+              print "### ⏱️ Performance (time/op)\n\n| Benchmark | Main | PR | Delta | Note |\n|---|---|---|---|---|"
+          }
+          /^name/ {
+              if ($2 ~ "alloc" || $2 ~ "B/op") {
+                  print "\n### 💾 Memory (allocs/op & B/op)\n\n| Benchmark | Main | PR | Delta | Note |\n|---|---|---|---|---|"
+              }
+              next
+          }
+          NF >= 4 {
+              name = $1; old = $2; new = $3; delta = $4
+              
+              note = ""
+              for(i=5; i<=NF; i++) note = note $i " "
+              sub(/ $/, "", note)
+              
+              color = delta
+              if (delta ~ /^\+/) {
+                  val = delta; sub(/^\+/, "", val); sub(/%$/, "", val)
+                  if (val + 0 > 5.0) color = "🔴 **" delta "**"
+                  else color = "🟠 " delta
+              } else if (delta ~ /^-/) {
+                  color = "🟢 " delta
+              } else if (delta == "~") {
+                  color = "🟡 ~"
+              }
+              printf "| `%s` | %s | %s | %s | _%s_ |\n", name, old, new, color, note
+          }' /tmp/raw_output.txt > /tmp/md_output.txt
+          
+          # Extract severe regressions for the top summary
+          REGRESSIONS=$(grep "🔴" /tmp/md_output.txt || true)
+          
+          if [ -n "$REGRESSIONS" ]; then
+            SUMMARY_TEXT=$(printf "⚠️ **Severe Regressions Detected:**\n\n| Benchmark | Main | PR | Delta | Note |\n|---|---|---|---|---|\n%s" "$REGRESSIONS")
+          else
+            SUMMARY_TEXT="✅ **All benchmarks passed successfully!** No severe regressions (>5%) detected."
+          fi
+          
+          COMMENT=$(cat <<EOF
+          ## 🚀 Valkey-Go Benchmark Results
+          
+          $SUMMARY_TEXT
+          
+          <br>
+          <details>
+          <summary><b>📊 Click here to view all metrics</b></summary>
+          
+          $(cat /tmp/md_output.txt)
+          
+          </details>
+
+          *Triggered by @${{ github.actor }}*
+          EOF
+          )
+          
+          cd pr-code && gh pr comment ${{ github.event.issue.number }} --body "$COMMENT" || true
+          
+          if [ -n "$REGRESSIONS" ]; then
+             echo "Severe regression detected! Failing workflow..."
+             exit 1
+          fi
+      - name: Teardown Valkey
+        if: always()
+        run: |
+          cd pr-code
+          docker compose down -v

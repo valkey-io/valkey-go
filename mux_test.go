@@ -1177,12 +1177,14 @@ func BenchmarkClientSideCaching(b *testing.B) {
 		if err := c.Dial(); err != nil {
 			panic(err)
 		}
+		b.Cleanup(c.Close)
 		b.SetParallelism(100)
 		b.ResetTimer()
 		return c
 	}
 	b.Run("Do", func(b *testing.B) {
 		m := setup(b)
+		defer m.Close()
 		cmd := cmds.NewCompleted([]string{"GET", "a"})
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
@@ -1192,6 +1194,7 @@ func BenchmarkClientSideCaching(b *testing.B) {
 	})
 	b.Run("DoCache", func(b *testing.B) {
 		m := setup(b)
+		defer m.Close()
 		cmd := Cacheable(cmds.NewCompleted([]string{"GET", "a"}))
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
@@ -1201,6 +1204,7 @@ func BenchmarkClientSideCaching(b *testing.B) {
 	})
 	b.Run("DoCacheStaticClientTTL", func(b *testing.B) {
 		m := setup(b)
+		defer m.Close()
 		cmd := Cacheable(cmds.NewCompleted([]string{"GET", "a"})).ToStaticTTL()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
@@ -1224,12 +1228,14 @@ func BenchmarkClientSideCachingMiss(b *testing.B) {
 		if err := c.Dial(); err != nil {
 			panic(err)
 		}
+		b.Cleanup(c.Close)
 		b.SetParallelism(100)
 		b.ResetTimer()
 		return c
 	}
 	b.Run("DoCache", func(b *testing.B) {
 		m := setup(b)
+		defer m.Close()
 		var counter atomic.Uint64
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
@@ -1240,6 +1246,7 @@ func BenchmarkClientSideCachingMiss(b *testing.B) {
 	})
 	b.Run("DoCacheStaticClientTTL", func(b *testing.B) {
 		m := setup(b)
+		defer m.Close()
 		var counter atomic.Uint64
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
@@ -1259,6 +1266,7 @@ func BenchmarkClientSideCachingMiss(b *testing.B) {
 	const batchSize = 5
 	b.Run("DoMultiCacheStandard", func(b *testing.B) {
 		m := setup(b)
+		defer m.Close()
 		var counter atomic.Uint64
 		b.RunParallel(func(pb *testing.PB) {
 			batch := make([]CacheableTTL, batchSize)
@@ -1273,6 +1281,7 @@ func BenchmarkClientSideCachingMiss(b *testing.B) {
 	})
 	b.Run("DoMultiCacheStaticClientTTL", func(b *testing.B) {
 		m := setup(b)
+		defer m.Close()
 		var counter atomic.Uint64
 		b.RunParallel(func(pb *testing.PB) {
 			batch := make([]CacheableTTL, batchSize)
@@ -1287,6 +1296,7 @@ func BenchmarkClientSideCachingMiss(b *testing.B) {
 	})
 	b.Run("DoMultiCacheMixed", func(b *testing.B) {
 		m := setup(b)
+		defer m.Close()
 		var counter atomic.Uint64
 		b.RunParallel(func(pb *testing.PB) {
 			batch := make([]CacheableTTL, batchSize)
