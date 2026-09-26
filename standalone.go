@@ -71,6 +71,8 @@ type standalone struct {
 	enableRedirect bool
 }
 
+var _ PoolStatsProvider = (*standalone)(nil)
+
 func (s *standalone) B() Builder {
 	return s.primary.Load().B()
 }
@@ -303,6 +305,10 @@ func (s *standalone) Nodes() map[string]Client {
 		maps.Copy(nodes, replica.Nodes())
 	}
 	return nodes
+}
+
+func (s *standalone) PoolStats() (map[string]NodePoolStats, error) {
+	return clientPoolStats(s.Nodes())
 }
 
 func (s *standalone) Mode() ClientMode {

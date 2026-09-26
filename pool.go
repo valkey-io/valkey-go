@@ -39,10 +39,21 @@ type pool struct {
 	cap     int
 	down    bool
 	timerOn bool
+
+	dialing      int
+	waiters      int
+	waitCount    uint64
+	waitDuration time.Duration
+	waitCanceled uint64
+}
+
+type unreservedWire struct {
+	wire
 }
 
 func (p *pool) Acquire(ctx context.Context) (v wire) {
 	p.cond.L.Lock()
+	waited := false
 
 	// Set up ctx handling when waiting for an available connection
 	if len(p.list) == 0 && p.size == p.cap && !p.down && ctx.Err() == nil && ctx.Done() != nil {
@@ -58,14 +69,27 @@ func (p *pool) Acquire(ctx context.Context) (v wire) {
 	}
 
 retry:
-	for len(p.list) == 0 && p.size == p.cap && !p.down && ctx.Err() == nil {
-		p.cond.Wait()
+	if len(p.list) == 0 && p.size == p.cap && !p.down && ctx.Err() == nil {
+		if !waited {
+			p.waitCount++
+			waited = true
+		}
+		p.waiters++
+		start := time.Now()
+		for len(p.list) == 0 && p.size == p.cap && !p.down && ctx.Err() == nil {
+			p.cond.Wait()
+		}
+		p.waitDuration += time.Since(start)
+		p.waiters--
 	}
 
 	if ctx.Err() != nil {
+		if waited {
+			p.waitCanceled++
+		}
 		deadPipe := deadFn()
 		deadPipe.error.Store(&errs{error: ctx.Err()})
-		v = deadPipe
+		v = &unreservedWire{wire: deadPipe}
 		p.cond.L.Unlock()
 		return v
 	}
@@ -77,16 +101,22 @@ retry:
 	}
 	if len(p.list) == 0 {
 		p.size++
+		p.dialing++
 		// unlock before start to make a new wire
 		// allowing others to make wires concurrently instead of waiting in line
 		p.cond.L.Unlock()
 		v = p.make(ctx)
-		if !v.StopTimer() {
-			p.cond.L.Lock()
+		stopped := v.StopTimer()
+		p.cond.L.Lock()
+		p.dialing--
+		if !stopped {
 			p.size--
+			p.cond.L.Unlock()
 			v.Close()
+			p.cond.L.Lock()
 			goto retry
 		}
+		p.cond.L.Unlock()
 		return v
 	}
 
@@ -110,7 +140,9 @@ func (p *pool) Store(v wire) {
 		p.startTimerIfNeeded()
 		v.ResetTimer()
 	} else {
-		p.size--
+		if _, ok := v.(*unreservedWire); !ok && v != p.dead {
+			p.size--
+		}
 		v.Close()
 	}
 	p.cond.L.Unlock()
@@ -121,11 +153,31 @@ func (p *pool) Close() {
 	p.cond.L.Lock()
 	p.down = true
 	p.stopTimer()
-	for _, w := range p.list {
+	for i, w := range p.list {
 		w.Close()
+		p.list[i] = nil
 	}
+	p.size -= len(p.list)
+	p.list = p.list[:0]
 	p.cond.L.Unlock()
 	p.cond.Broadcast()
+}
+
+func (p *pool) stats() PoolStats {
+	p.cond.L.Lock()
+	stats := PoolStats{
+		Capacity:     p.cap,
+		Reserved:     p.size,
+		Dialing:      p.dialing,
+		Idle:         len(p.list),
+		Waiters:      p.waiters,
+		Closed:       p.down,
+		WaitCount:    p.waitCount,
+		WaitDuration: p.waitDuration,
+		WaitCanceled: p.waitCanceled,
+	}
+	p.cond.L.Unlock()
+	return stats
 }
 
 func (p *pool) startTimerIfNeeded() {
