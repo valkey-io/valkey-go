@@ -41,6 +41,8 @@ type clusterClient struct {
 	hasLftm      bool
 }
 
+var _ PoolStatsProvider = (*clusterClient)(nil)
+
 // NOTE: connrole and conn must be initialized at the same time
 type connrole struct {
 	conn   conn
@@ -1699,6 +1701,10 @@ func (c *clusterClient) Nodes() map[string]Client {
 	}
 	c.mu.RUnlock()
 	return _nodes
+}
+
+func (c *clusterClient) PoolStats() (map[string]NodePoolStats, error) {
+	return clientPoolStats(c.Nodes())
 }
 
 func (c *clusterClient) Mode() ClientMode {

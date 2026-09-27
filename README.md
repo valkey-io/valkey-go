@@ -114,6 +114,31 @@ client.Do(ctx, cmd)
 
 This allows you to use connection pooling approach by default but opt-in auto pipelining for a subset of requests.
 
+### Blocking Pool Statistics
+
+Clients created by `NewClient` optionally expose current blocking pool statistics without adding methods to the
+`Client` interface:
+
+```go
+provider, ok := client.(valkey.PoolStatsProvider)
+if ok {
+  nodes, err := provider.PoolStats()
+  if err != nil {
+    panic(err)
+  }
+  for addr, node := range nodes {
+    established := node.Blocking.Reserved - node.Blocking.Dialing
+    inUse := established - node.Blocking.Idle
+    fmt.Printf("%s: %d blocking connections in use, %d waiting\n",
+      addr, inUse, node.Blocking.Waiters)
+  }
+}
+```
+
+`Blocking` covers blocking commands and dedicated connections. `Streaming` covers streaming commands and ordinary
+commands when `DisableAutoPipelining` is enabled. `Reserved` includes in-flight connection creation; subtract
+`Dialing` to obtain established connections. Cumulative wait values reset when a node's underlying pools are replaced.
+
 ### Manual Pipelining
 
 Besides auto pipelining, you can also pipeline commands manually with `DoMulti()`:

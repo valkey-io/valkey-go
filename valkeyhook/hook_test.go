@@ -14,6 +14,19 @@ import (
 
 type hook struct{}
 
+type poolStatsClient struct {
+	valkey.Client
+	stats map[string]valkey.NodePoolStats
+}
+
+func (c *poolStatsClient) PoolStats() (map[string]valkey.NodePoolStats, error) {
+	return c.stats, nil
+}
+
+type clientWithoutPoolStats struct {
+	valkey.Client
+}
+
 func (h *hook) Do(client valkey.Client, ctx context.Context, cmd valkey.Completed) (resp valkey.ValkeyResult) {
 	return client.Do(ctx, cmd)
 }
@@ -73,6 +86,27 @@ func (w *wronghook) DoStream(client valkey.Client, ctx context.Context, cmd valk
 
 func (w *wronghook) DoMultiStream(client valkey.Client, ctx context.Context, multi ...valkey.Completed) valkey.MultiValkeyResultStream {
 	panic("implement me")
+}
+
+func TestHookClientPoolStats(t *testing.T) {
+	expected := map[string]valkey.NodePoolStats{
+		"node:6379": {Blocking: valkey.PoolStats{Capacity: 2}},
+	}
+	hooked := WithHook(&poolStatsClient{stats: expected}, &hook{})
+	provider := hooked.(valkey.PoolStatsProvider)
+	got, err := provider.PoolStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["node:6379"].Blocking.Capacity != 2 {
+		t.Fatalf("unexpected stats: %+v", got)
+	}
+
+	hooked = WithHook(&clientWithoutPoolStats{}, &hook{})
+	provider = hooked.(valkey.PoolStatsProvider)
+	if _, err := provider.PoolStats(); !errors.Is(err, valkey.ErrPoolStatsUnsupported) {
+		t.Fatalf("unexpected unsupported error: %v", err)
+	}
 }
 
 func testHooked(t *testing.T, hooked valkey.Client, mocked *mock.Client) {
