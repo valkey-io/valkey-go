@@ -54,6 +54,20 @@ func (h *hook) Receive(client valkey.Client, ctx context.Context, subscribe valk
 	return
 }
 
+func (h *hook) DoStream(client valkey.Client, ctx context.Context, cmd valkey.Completed) (resp valkey.ValkeyResultStream) {
+	// do whatever you want before a client.DoStream
+	resp = client.DoStream(ctx, cmd)
+	// do whatever you want after a client.DoStream
+	return
+}
+
+func (h *hook) DoMultiStream(client valkey.Client, ctx context.Context, multi ...valkey.Completed) (resp valkey.MultiValkeyResultStream) {
+	// do whatever you want before a client.DoMultiStream
+	resp = client.DoMultiStream(ctx, multi...)
+	// do whatever you want after a client.DoMultiStream
+	return
+}
+
 func main() {
 	client, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{"127.0.0.1:6379"}})
 	if err != nil {
