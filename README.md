@@ -489,6 +489,30 @@ client, err := valkey.NewClient(valkey.ClientOption{
     },
 })
 
+// Connect to a standalone valkey with replica failover handling (e.g. cloud
+// vendors in non-cluster mode). InitAddress is the primary endpoint
+// (the cloud DNS layer flips it on failover); ReplicaAddress lists each
+// node's DNS (including primary) so each connection lands on a known node.
+// ReplicaRefreshInterval wires up a background monitor that periodically
+// reconciles the pool — promoting a new primary if needed
+// and dropping replicas that go out of sync.
+client, err := valkey.NewClient(valkey.ClientOption{
+    InitAddress: []string{"primary-endpoint.cluster.cache:6379"},
+    Standalone: valkey.StandaloneOption{
+        ReplicaAddress: []string{
+            "node-001.cluster.cache:6379",
+            "node-002.cluster.cache:6379",
+            "node-003.cluster.cache:6379",
+        },
+        ReplicaRefreshInterval: 30 * time.Second,
+    },
+    SendToReplicas: func(cmd valkey.Completed) bool {
+        return cmd.IsReadOnly()
+    },
+    EnableReplicaAZInfo: true,
+    ReadNodeSelector:    valkey.AZAffinityNodeSelector(podAZ),
+})
+
 // Connect to a valkey cluster
 client, err := valkey.NewClient(valkey.ClientOption{
     InitAddress: []string{"127.0.0.1:7001", "127.0.0.1:7002", "127.0.0.1:7003"},
