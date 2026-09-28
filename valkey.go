@@ -269,6 +269,13 @@ type ClientOption struct {
 	//  if valkey instance is a cluster or a single valkey instance.
 	ForceSingleClient bool
 
+	// RouteByLatency when connecting to Sentinel with SendToReplicas (or ReplicaOnly),
+	// measures network/PING latency to all eligible replicas and selects the one with the lowest latency.
+	// If SendToReplicas is nil and ReplicaOnly is false, the sentinel client sets SendToReplicas
+	// automatically so that read commands can reach replicas.
+	// This option has no effect on the cluster, standalone, or single clients.
+	RouteByLatency bool
+
 	// ReplicaOnly indicates that this client will only try to connect to readonly replicas of valkey setup.
 	ReplicaOnly bool
 
