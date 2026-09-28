@@ -163,6 +163,48 @@ func TestReadI(t *testing.T) {
 	}
 }
 
+func TestReadNextMessageRejectsInvalidLengths(t *testing.T) {
+	tests := map[string]string{
+		"negative blob string":   "$-2\r\n",
+		"negative array":         "*-2\r\n",
+		"negative map":           "%-2\r\n",
+		"negative chunk":         "$?\r\n;-1\r\n",
+		"overflowing length":     "$9223372036854775808\r\n",
+		"overflowing map length": "%4611686018427387904\r\n",
+	}
+
+	for name, input := range tests {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("readNextMessage panicked on malformed length: %v", recovered)
+				}
+			}()
+
+			if _, err := readNextMessage(bufio.NewReader(strings.NewReader(input))); err != errInvalidMessageLength {
+				t.Fatalf("expected invalid message length error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestStreamToRejectsInvalidLengths(t *testing.T) {
+	tests := map[string]string{
+		"negative blob string": "$-2\r\nxx",
+		"negative chunk":       "$?\r\n;-1\r\n",
+		"overflowing length":   "$9223372036854775808\r\n",
+	}
+
+	for name, input := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err, _ := streamTo(bufio.NewReader(strings.NewReader(input)), io.Discard)
+			if err != errInvalidMessageLength {
+				t.Fatalf("expected invalid message length error, got %v", err)
+			}
+		})
+	}
+}
+
 func TestReadBoolean(t *testing.T) {
 	data := "#t\r\n"
 	for i := 1; i <= len(data); i++ {
