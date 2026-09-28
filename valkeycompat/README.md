@@ -211,3 +211,23 @@ func main() {
 * `FTSearch`, `FTAggregate`, `FTCreate`, and `FTDropIndex` related methods.
 
 For more details, please refer to those `TODO` marks in the [./adapter.go](./adapter.go)
+
+---
+
+## Rate Limiting (`go-redis/redis_rate/v10` Parity)
+
+For `go-redis/redis_rate/v10` drop-in parity, see the [`valkeycompatrate`](../valkeycompatrate) package:
+
+```go
+import (
+	"github.com/valkey-io/valkey-go/valkeycompat"
+	"github.com/valkey-io/valkey-go/valkeycompatrate"
+)
+
+rdb := valkeycompat.NewAdapter(client)
+limiter := valkeycompatrate.NewLimiter(rdb)
+res, err := limiter.Allow(ctx, "project:123", valkeycompatrate.PerMinute(10))
+```
+
+See the [`valkeycompatrate` documentation](../valkeycompatrate) for details, bonus APIs (`AllowAtMost`, `Reset`), and full migration reference.
+
