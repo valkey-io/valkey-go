@@ -522,7 +522,7 @@ func BenchmarkLRU(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			key := strconv.Itoa(i)
 			lru.Flight(key, "GET", TTL, time.Now())
-			m := ValkeyMessage{}
+			m := ValkeyMessage{typ: 1}
 			m.setExpireAt(time.Now().Add(PTTL * time.Millisecond).UnixMilli())
 			lru.Update(key, "GET", m)
 		}

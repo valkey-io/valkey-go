@@ -3,6 +3,7 @@ package valkey
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"reflect"
@@ -1703,6 +1704,7 @@ func BenchmarkSingleClient_DoCache(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
+	defer client.Close()
 	keys := make([]string, 10000)
 	for i := range 10000 {
 		keys[i] = strconv.Itoa(i)
@@ -1761,5 +1763,356 @@ func BenchmarkSingleClient_DoCache(b *testing.B) {
 		})
 		b.StopTimer()
 	})
-	client.Close()
+}
+
+func newBenchmarkClient(b *testing.B) Client {
+	client, err := NewClient(ClientOption{
+		InitAddress: []string{"127.0.0.1:6379"},
+		Dialer:      net.Dialer{KeepAlive: -1},
+	})
+	if err != nil {
+		b.Skipf("skipping live Valkey benchmark: %v", err)
+	}
+	b.Cleanup(func() { client.Close() })
+	return client
+}
+
+// BenchmarkClient_Do measures client.Do() auto-pipelining throughput across core Valkey data structures and commands.
+func BenchmarkClient_Do(b *testing.B) {
+	client := newBenchmarkClient(b)
+	ctx := context.Background()
+
+	b.Run("Ping", func(b *testing.B) {
+		cmd := client.B().Ping().Build().Pin()
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				if err := client.Do(ctx, cmd).Error(); err != nil {
+					b.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	})
+
+	// Note: This benchmark builds each command inside the loop with a changing key,
+	// meaning allocations include key construction and command building.
+	// It is not directly comparable to pinned-command benchmarks like Get.
+	b.Run("Set", func(b *testing.B) {
+		val := strings.Repeat("x", 128)
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			i := 0
+			for pb.Next() {
+				cmd := client.B().Set().Key("bench_set_" + strconv.Itoa(i%1000)).Value(val).Build()
+				if err := client.Do(ctx, cmd).Error(); err != nil {
+					b.Errorf("unexpected error: %v", err)
+				}
+				i++
+			}
+		})
+	})
+
+	b.Run("Get", func(b *testing.B) {
+		_ = client.Do(ctx, client.B().Set().Key("bench_get").Value("val").Build())
+		cmd := client.B().Get().Key("bench_get").Build().Pin()
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				if err := client.Do(ctx, cmd).Error(); err != nil {
+					b.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	})
+
+	b.Run("Incr", func(b *testing.B) {
+		cmd := client.B().Incr().Key("bench_incr").Build().Pin()
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				if err := client.Do(ctx, cmd).Error(); err != nil {
+					b.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	})
+
+	b.Run("HSet", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			i := 0
+			for pb.Next() {
+				key := "bench_hset_" + strconv.Itoa(i%1000)
+				cmd := client.B().Hset().Key(key).FieldValue().FieldValue("f1", "v1").FieldValue("f2", "v2").Build()
+				if err := client.Do(ctx, cmd).Error(); err != nil {
+					b.Errorf("unexpected error: %v", err)
+				}
+				i++
+			}
+		})
+	})
+
+	b.Run("HGetAll", func(b *testing.B) {
+		_ = client.Do(ctx, client.B().Hset().Key("bench_hgetall").FieldValue().FieldValue("f1", "v1").FieldValue("f2", "v2").FieldValue("f3", "v3").Build())
+		cmd := client.B().Hgetall().Key("bench_hgetall").Build().Pin()
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				if err := client.Do(ctx, cmd).Error(); err != nil {
+					b.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	})
+
+	b.Run("LPush", func(b *testing.B) {
+		defer client.Do(ctx, client.B().Flushdb().Build()) // Bound list growth
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			i := 0
+			for pb.Next() {
+				key := "bench_lpush_" + strconv.Itoa(i%100)
+				cmd := client.B().Lpush().Key(key).Element("item").Build()
+				if err := client.Do(ctx, cmd).Error(); err != nil {
+					b.Errorf("unexpected error: %v", err)
+				}
+				i++
+			}
+		})
+	})
+
+	b.Run("LRange", func(b *testing.B) {
+		for j := 0; j < 20; j++ {
+			_ = client.Do(ctx, client.B().Lpush().Key("bench_lrange").Element("item").Build())
+		}
+		cmd := client.B().Lrange().Key("bench_lrange").Start(0).Stop(9).Build().Pin()
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				if err := client.Do(ctx, cmd).Error(); err != nil {
+					b.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	})
+
+	b.Run("ZAdd", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			i := 0
+			for pb.Next() {
+				key := "bench_zadd_" + strconv.Itoa(i%100)
+				cmd := client.B().Zadd().Key(key).ScoreMember().ScoreMember(float64(i), "member_"+strconv.Itoa(i%50)).Build()
+				if err := client.Do(ctx, cmd).Error(); err != nil {
+					b.Errorf("unexpected error: %v", err)
+				}
+				i++
+			}
+		})
+	})
+
+	b.Run("ZRange", func(b *testing.B) {
+		for j := 0; j < 20; j++ {
+			_ = client.Do(ctx, client.B().Zadd().Key("bench_zrange").ScoreMember().ScoreMember(float64(j), "m_"+strconv.Itoa(j)).Build())
+		}
+		cmd := client.B().Zrange().Key("bench_zrange").Min("0").Max("10").Build().Pin()
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				if err := client.Do(ctx, cmd).Error(); err != nil {
+					b.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	})
+
+	b.Run("SAdd", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			i := 0
+			for pb.Next() {
+				key := "bench_sadd_" + strconv.Itoa(i%100)
+				cmd := client.B().Sadd().Key(key).Member("m_" + strconv.Itoa(i%50)).Build()
+				if err := client.Do(ctx, cmd).Error(); err != nil {
+					b.Errorf("unexpected error: %v", err)
+				}
+				i++
+			}
+		})
+	})
+
+	b.Run("SIsMember", func(b *testing.B) {
+		_ = client.Do(ctx, client.B().Sadd().Key("bench_sismember").Member("existing_member").Build())
+		cmd := client.B().Sismember().Key("bench_sismember").Member("existing_member").Build().Pin()
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				if err := client.Do(ctx, cmd).Error(); err != nil {
+					b.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	})
+
+}
+
+// BenchmarkClient_Do_Parallelism measures client.Do() throughput across concurrency levels.
+func BenchmarkClient_Do_Parallelism(b *testing.B) {
+	client := newBenchmarkClient(b)
+	ctx := context.Background()
+	cmd := client.B().Get().Key("bench_conc").Build().Pin()
+	_ = client.Do(ctx, client.B().Set().Key("bench_conc").Value("val").Build())
+
+	b.Run("Parallelism=1", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if err := client.Do(ctx, cmd).Error(); err != nil {
+				b.Errorf("unexpected error: %v", err)
+			}
+		}
+	})
+
+	b.Run("Parallelism=8", func(b *testing.B) {
+		b.SetParallelism(8)
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				if err := client.Do(ctx, cmd).Error(); err != nil {
+					b.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	})
+
+	b.Run("Parallelism=64", func(b *testing.B) {
+		b.SetParallelism(64)
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				if err := client.Do(ctx, cmd).Error(); err != nil {
+					b.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	})
+}
+
+// BenchmarkClient_DoMulti measures manual multi-command transaction pipelining throughput using client.DoMulti().
+func BenchmarkClient_DoMulti(b *testing.B) {
+	client := newBenchmarkClient(b)
+	ctx := context.Background()
+
+	// 1. Batch Reads (Pipelined GETs)
+	for _, count := range []int{2, 10, 50} {
+		b.Run(fmt.Sprintf("BatchGet/Count=%d", count), func(b *testing.B) {
+			cmds := make([]Completed, count)
+			for i := 0; i < count; i++ {
+				cmds[i] = client.B().Get().Key("bench_multi_get_" + strconv.Itoa(i)).Build().Pin()
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					resps := client.DoMulti(ctx, cmds...)
+					for _, resp := range resps {
+						if err := resp.Error(); err != nil && !IsValkeyNil(err) {
+							b.Errorf("unexpected error: %v", err)
+						}
+					}
+				}
+			})
+		})
+	}
+
+	// 2. Batch Writes (Pipelined SETs)
+	for _, count := range []int{2, 10, 50} {
+		b.Run(fmt.Sprintf("BatchSet/Count=%d", count), func(b *testing.B) {
+			cmds := make([]Completed, count)
+			val := strings.Repeat("v", 64)
+			for i := 0; i < count; i++ {
+				cmds[i] = client.B().Set().Key("bench_multi_set_" + strconv.Itoa(i)).Value(val).Build().Pin()
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					resps := client.DoMulti(ctx, cmds...)
+					for _, resp := range resps {
+						if err := resp.Error(); err != nil {
+							b.Errorf("unexpected error: %v", err)
+						}
+					}
+				}
+			})
+		})
+	}
+
+	// 3. Canonical Rate-Limiter Pipeline: INCR + EXPIRE
+	b.Run("IncrExpire", func(b *testing.B) {
+		cmd1 := client.B().Incr().Key("bench_multi_ratelimit").Build().Pin()
+		cmd2 := client.B().Expire().Key("bench_multi_ratelimit").Seconds(60).Build().Pin()
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				resps := client.DoMulti(ctx, cmd1, cmd2)
+				for _, resp := range resps {
+					if err := resp.Error(); err != nil {
+						b.Errorf("unexpected error: %v", err)
+					}
+				}
+			}
+		})
+	})
+
+	// 4. Read-Your-Writes Pipeline: SET + GET
+	b.Run("SetGet", func(b *testing.B) {
+		cmd1 := client.B().Set().Key("bench_multi_setget").Value("val").Build().Pin()
+		cmd2 := client.B().Get().Key("bench_multi_setget").Build().Pin()
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				resps := client.DoMulti(ctx, cmd1, cmd2)
+				for _, resp := range resps {
+					if err := resp.Error(); err != nil {
+						b.Errorf("unexpected error: %v", err)
+					}
+				}
+			}
+		})
+	})
+
+	// 5. Capped Queue Worker Pipeline: LPUSH + LTRIM
+	b.Run("LPushLTrim", func(b *testing.B) {
+		cmd1 := client.B().Lpush().Key("bench_multi_queue").Element("event").Build().Pin()
+		cmd2 := client.B().Ltrim().Key("bench_multi_queue").Start(0).Stop(99).Build().Pin()
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				resps := client.DoMulti(ctx, cmd1, cmd2)
+				for _, resp := range resps {
+					if err := resp.Error(); err != nil {
+						b.Errorf("unexpected error: %v", err)
+					}
+				}
+			}
+		})
+	})
 }
