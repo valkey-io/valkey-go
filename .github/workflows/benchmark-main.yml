@@ -1,0 +1,75 @@
+name: Update Benchmark Baseline
+on:
+  push:
+    branches: [ main ]
+    paths: [ '**/*.go', 'go.mod', 'go.sum' ]
+jobs:
+  check-branch:
+    if: vars.DISABLE_BENCHMARKS != 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      exists: ${{ steps.check.outputs.exists }}
+    steps:
+      - name: Check if gh-pages exists
+        id: check
+        run: |
+          if git ls-remote --exit-code --heads https://github.com/${{ github.repository }}.git gh-pages; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  benchmark-main:
+    needs: check-branch
+    if: needs.check-branch.outputs.exists == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.22' }
+      - name: Start Valkey
+        run: |
+          docker compose up -d valkey
+          count=0
+          until docker compose exec -T valkey valkey-cli ping | grep -q PONG; do
+            if [ $count -gt 30 ]; then
+              echo "Timeout waiting for Valkey"
+              exit 1
+            fi
+            echo "Waiting for Valkey..."
+            sleep 1
+            count=$((count+1))
+          done
+      - name: Run Main Benchmarks
+        run: |
+          set -o pipefail
+          go test -bench=. -run=^$ -benchmem -count=10 -timeout 30m ./... | tee out.txt
+      - name: Average Results
+        if: always()
+        run: |
+          awk '/^Benchmark/ {
+            iters[$1] = $2
+            count[$1]++
+            for (i=4; i<=NF; i+=2) {
+              if ($i == "ns/op") time[$1] += $(i-1)
+              if ($i == "B/op") bytes[$1] += $(i-1)
+              if ($i == "allocs/op") allocs[$1] += $(i-1)
+            }
+          } END {
+            for (b in count) printf "%s %d %.2f ns/op %.2f B/op %.2f allocs/op\n", b, iters[b], time[b]/count[b], bytes[b]/count[b], allocs[b]/count[b]
+          }' out.txt > averaged.txt
+      - name: Teardown Valkey
+        if: always()
+        run: docker compose down -v
+      - name: Update gh-pages Baseline
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: 'go'
+          output-file-path: averaged.txt
+          # Note: GITHUB_TOKEN will not trigger a Pages build. Use a custom PAT if you want auto-deployments.
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true

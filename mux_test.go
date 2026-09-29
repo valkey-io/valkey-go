@@ -216,7 +216,6 @@ func TestMuxReuseWire(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 		for range 2 {
 			if err := m.Do(context.Background(), cmds.NewCompleted([]string{"PING"})).Error(); err != nil {
 				t.Fatalf("unexpected error %v", err)
@@ -245,7 +244,6 @@ func TestMuxReuseWire(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 		if err := m.Dial(); err != nil {
 			t.Fatalf("unexpected dial error %v", err)
 		}
@@ -299,7 +297,6 @@ func TestMuxReuseWire(t *testing.T) {
 		})
 		m.usePool = true // switch to spool
 		defer checkClean(t)
-		defer m.Close()
 		if err := m.Dial(); err != nil {
 			t.Fatalf("unexpected dial error %v", err)
 		}
@@ -360,7 +357,6 @@ func TestMuxReuseWire(t *testing.T) {
 		})
 		m.usePool = true // switch to spool
 		defer checkClean(t)
-		defer m.Close()
 		if err := m.Dial(); err != nil {
 			t.Fatalf("unexpected dial error %v", err)
 		}
@@ -417,7 +413,6 @@ func TestMuxReuseWire(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 		if err := m.Dial(); err != nil {
 			t.Fatalf("unexpected dial error %v", err)
 		}
@@ -460,7 +455,6 @@ func TestMuxReuseWire(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 
 		if err := m.Dial(); err != nil {
 			t.Fatalf("unexpected dial error %v", err)
@@ -501,7 +495,6 @@ func TestMuxReuseWire(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 
 		if err := m.Dial(); err != nil {
 			t.Fatalf("unexpected dial error %v", err)
@@ -540,7 +533,6 @@ func TestMuxReuseWire(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 
 		if err := m.Dial(); err != nil {
 			t.Fatalf("unexpected dial error %v", err)
@@ -570,7 +562,6 @@ func TestMuxDelegation(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 		if info := m.Info(); info == nil {
 			t.Fatalf("unexpected info %v", info)
 		} else if infoKey := info["key"]; infoKey.string() != "value" {
@@ -587,7 +578,6 @@ func TestMuxDelegation(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 		if version := m.Version(); version != 7 {
 			t.Fatalf("unexpected version %v", version)
 		}
@@ -602,7 +592,6 @@ func TestMuxDelegation(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 		if az := m.AZ(); az != "az" {
 			t.Fatalf("unexpected az %v", az)
 		}
@@ -618,7 +607,6 @@ func TestMuxDelegation(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 		if err := m.Error(); err != e {
 			t.Fatalf("unexpected err %v", err)
 		}
@@ -644,7 +632,6 @@ func TestMuxDelegation(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 		if err := m.Do(context.Background(), cmds.NewReadOnlyCompleted([]string{"READONLY_COMMAND"})).Error(); !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("unexpected error %v", err)
 		}
@@ -664,7 +651,6 @@ func TestMuxDelegation(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 		if s := m.DoStream(context.Background(), cmds.NewReadOnlyCompleted([]string{"READONLY_COMMAND"})); s.Error().Error() != "READONLY_COMMAND" {
 			t.Fatalf("unexpected error %v", s.Error())
 		}
@@ -687,7 +673,6 @@ func TestMuxDelegation(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 		if err := m.DoMulti(context.Background(), cmds.NewReadOnlyCompleted([]string{"READONLY_COMMAND"})).s[0].Error(); !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("unexpected error %v", err)
 		}
@@ -707,7 +692,6 @@ func TestMuxDelegation(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 		if s := m.DoMultiStream(context.Background(), cmds.NewReadOnlyCompleted([]string{"READONLY_COMMAND"})); s.Error().Error() != "READONLY_COMMAND" {
 			t.Fatalf("unexpected error %v", s.Error())
 		}
@@ -730,7 +714,6 @@ func TestMuxDelegation(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 		if err := m.DoCache(context.Background(), Cacheable(cmds.NewReadOnlyCompleted([]string{"READONLY_COMMAND"})), time.Second).Error(); !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("unexpected error %v", err)
 		}
@@ -758,7 +741,6 @@ func TestMuxDelegation(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 		if err := m.DoMultiCache(context.Background(), CT(Cacheable(cmds.NewReadOnlyCompleted([]string{"READONLY_COMMAND"})), time.Second)).s[0].Error(); !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("unexpected error %v", err)
 		}
@@ -790,7 +772,6 @@ func TestMuxDelegation(t *testing.T) {
 		}
 		m, checkClean := setupMuxWithOption(wires, &ClientOption{PipelineMultiplex: multiplex})
 		defer checkClean(t)
-		defer m.Close()
 
 		for i := range wires {
 			m._pipe(context.Background(), uint16(i))
@@ -832,7 +813,6 @@ func TestMuxDelegation(t *testing.T) {
 		}
 		m, checkClean := setupMuxWithOption(wires, &ClientOption{PipelineMultiplex: multiplex})
 		defer checkClean(t)
-		defer m.Close()
 
 		for i := range wires {
 			m._pipe(context.Background(), uint16(i))
@@ -868,7 +848,6 @@ func TestMuxDelegation(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 		if err := m.Receive(context.Background(), cmds.NewCompleted([]string{"SUBSCRIBE"}), func(message PubSubMessage) {}); !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("unexpected error %v", err)
 		}
@@ -899,7 +878,6 @@ func TestMuxDelegation(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 		if err := m.Dial(); err != nil {
 			t.Fatalf("unexpected dial error %v", err)
 		}
@@ -950,7 +928,6 @@ func TestMuxDelegation(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 		if err := m.Dial(); err != nil {
 			t.Fatalf("unexpected dial error %v", err)
 		}
@@ -987,7 +964,6 @@ func TestMuxDelegation(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 		if err := m.Dial(); err != nil {
 			t.Fatalf("unexpected dial error %v", err)
 		}
@@ -1040,7 +1016,6 @@ func TestMuxDelegation(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 		if err := m.Dial(); err != nil {
 			t.Fatalf("unexpected dial error %v", err)
 		}
@@ -1095,7 +1070,6 @@ func TestMuxDelegation(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 		if err := m.Dial(); err != nil {
 			t.Fatalf("unexpected dial error %v", err)
 		}
@@ -1136,7 +1110,6 @@ func TestMuxRegisterCloseHook(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 		if resp, _ := m.Do(context.Background(), cmds.NewCompleted([]string{"PING"})).ToString(); resp != "PONG1" {
 			t.Fatalf("unexpected response %v", resp)
 		}
@@ -1158,7 +1131,6 @@ func TestMuxRegisterCloseHook(t *testing.T) {
 			},
 		})
 		defer checkClean(t)
-		defer m.Close()
 		if resp, _ := m.Do(context.Background(), cmds.NewCompleted([]string{"PING"})).ToString(); resp != "PONG1" {
 			t.Fatalf("unexpected response %v", resp)
 		}
@@ -1177,6 +1149,7 @@ func BenchmarkClientSideCaching(b *testing.B) {
 		if err := c.Dial(); err != nil {
 			panic(err)
 		}
+		b.Cleanup(c.Close)
 		b.SetParallelism(100)
 		b.ResetTimer()
 		return c
@@ -1224,6 +1197,7 @@ func BenchmarkClientSideCachingMiss(b *testing.B) {
 		if err := c.Dial(); err != nil {
 			panic(err)
 		}
+		b.Cleanup(c.Close)
 		b.SetParallelism(100)
 		b.ResetTimer()
 		return c

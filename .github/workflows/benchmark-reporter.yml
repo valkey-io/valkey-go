@@ -1,0 +1,186 @@
+name: PR Benchmark Reporter
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  benchmark:
+    if: >
+      github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/benchmark') && contains(fromJson('["COLLABORATOR", "MEMBER", "OWNER"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Get PR Information
+        id: pr-info
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUM: ${{ github.event.issue.number }}
+        run: |
+          PR_NUMBER=$PR_NUM
+          # Get base SHA directly to avoid TOCTOU on branch moving
+          BASE_SHA=$(gh pr view $PR_NUMBER --repo ${{ github.repository }} --json baseRefOid -q .baseRefOid)
+          # Use the PR merge commit to test what will actually land
+          HEAD_REF=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid -q .headRefOid)
+          
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "base_ref=$BASE_SHA" >> $GITHUB_OUTPUT
+          echo "head_ref=$HEAD_REF" >> $GITHUB_OUTPUT
+
+      - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@latest
+
+      - name: Checkout Main Baseline
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ steps.pr-info.outputs.base_ref }}
+          path: main-code
+
+      - name: Checkout PR Code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ steps.pr-info.outputs.head_ref }}
+          path: pr-code
+
+      - name: Start Valkey
+        run: |
+          cd pr-code
+          docker compose up -d valkey
+          count=0
+          until docker compose exec -T valkey valkey-cli ping | grep -q PONG; do
+            if [ $count -gt 30 ]; then
+              echo "Timeout waiting for Valkey"
+              exit 1
+            fi
+            sleep 1
+            count=$((count+1))
+          done
+
+      - name: Run Main Benchmarks
+        run: |
+          cd main-code
+          set -o pipefail
+          go test -bench=. -run=^$ -benchmem -count=10 -timeout 30m ./... | tee /tmp/main.txt
+
+      - name: Run PR Benchmarks
+        run: |
+          cd pr-code
+          set -o pipefail
+          go test -bench=. -run=^$ -benchmem -count=10 -timeout 30m ./... | tee /tmp/pr.txt
+
+      - name: Compare Benchmarks
+        run: |
+          ~/go/bin/benchstat -format csv /tmp/main.txt /tmp/pr.txt > /tmp/out.csv
+          
+          awk '
+          function format_time(v) {
+              ns = v * 1e9;
+              if (ns >= 1e6) return sprintf("%.2f ms/op", ns / 1e6);
+              if (ns >= 1e3) return sprintf("%.2f µs/op", ns / 1e3);
+              return sprintf("%.2f ns/op", ns);
+          }
+          BEGIN { FS="," }
+          $2 ~ "/op$" { current_unit = $2; next }
+          current_unit !~ "sec/op|time/op" { next }
+          NF >= 7 && $1 != "" && $1 != "geomean" && $1 !~ /^,/ {
+              if ($2 !~ /^[0-9]/ || $4 !~ /^[0-9]/) next;
+              
+              fullname = $1;
+              split(fullname, parts, "/");
+              cat = parts[1];
+              shortname = substr(fullname, length(cat) + 2);
+              if (shortname == "") { cat = "Ungrouped"; shortname = fullname; }
+              
+              old = $2; new = $4; delta = $6; note = $7;
+              
+              color = delta;
+              if (delta ~ /\+/) {
+                  val = delta; gsub(/[%+]/, "", val); val = val + 0.0;
+                  if (val > 5.0) color = "🔴 **" delta "**"; else color = "🟠 " delta;
+              } else if (delta ~ /-/) color = "🟢 " delta;
+              else if (delta ~ /~/) color = "🟡 ~";
+              
+              fmt_old = format_time(old);
+              fmt_new = format_time(new);
+              
+              row = sprintf("| <span title=\"%s\">`%s`</span> | %s | %s | %s | _%s_ |\n", fullname, shortname, fmt_old, fmt_new, color, note);
+              
+              if (!(cat in groups)) {
+                  groups[cat] = "";
+                  order[++num_cats] = cat;
+              }
+              groups[cat] = groups[cat] row;
+              
+              if (color ~ /🔴/) {
+                  regressions = regressions sprintf("| `%s` | %s | %s | %s | _%s_ |\n", fullname, fmt_old, fmt_new, color, note);
+              }
+          }
+          END {
+              for (i = 1; i <= num_cats; i++) {
+                  c = order[i];
+                  printf "#### 📦 Category: `%s`\n", c >> "/tmp/md_output.txt";
+                  printf "| Benchmark | Main | PR | Delta | Note |\n|---|---|---|---|---|\n" >> "/tmp/md_output.txt";
+                  printf "%s\n", groups[c] >> "/tmp/md_output.txt";
+              }
+              if (regressions != "") {
+                  printf "%s", regressions > "/tmp/regressions.txt";
+              }
+          }' /tmp/out.csv
+          
+          if [ -s /tmp/regressions.txt ]; then
+            SUMMARY_TEXT=$(printf "⚠️ **Severe Regressions Detected:**\n\n| Benchmark | Main | PR | Delta | Note |\n|---|---|---|---|---|\n%s" "$(cat /tmp/regressions.txt)")
+          else
+            SUMMARY_TEXT="✅ **All benchmarks passed successfully!** No severe regressions (>5%) detected."
+          fi
+          
+          cat <<EOM > /tmp/comment.md
+          ## 🚀 Valkey-Go Benchmark Results
+          
+          $SUMMARY_TEXT
+          
+          <br>
+          <details>
+          <summary><b>📊 Click here to view all metrics</b></summary>
+          
+          $(cat /tmp/md_output.txt)
+          
+          </details>
+          
+          *Triggered by @${{ github.actor }}*
+          EOM
+
+      - name: Upload Comment Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-comment
+          path: /tmp/comment.md
+          retention-days: 1
+
+      - name: Teardown Valkey
+        if: always()
+        run: |
+          cd pr-code
+          docker compose down -v || true
+
+  comment:
+    needs: benchmark
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Get PR Information
+        id: pr-info
+        run: |
+          echo "pr_number=${{ github.event.issue.number }}" >> $GITHUB_OUTPUT
+      - name: Download Comment Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-comment
+          path: /tmp
+      - name: Post Comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment ${{ steps.pr-info.outputs.pr_number }} --repo ${{ github.repository }} --body-file /tmp/comment.md || true
