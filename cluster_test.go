@@ -12410,3 +12410,149 @@ func TestClusterRebucketRetriesKeylessConsolidates(t *testing.T) {
 		}
 	}
 }
+var singleNodeSlotsResp = NewResult(slicemsg('*', []ValkeyMessage{
+	slicemsg('*', []ValkeyMessage{
+		{typ: ':', intlen: 0},
+		{typ: ':', intlen: 16383},
+		slicemsg('*', []ValkeyMessage{ // master
+			strmsg('+', "127.0.0.1"),
+			{typ: ':', intlen: 0},
+			strmsg('+', ""),
+		}),
+	}),
+}), nil)
+
+func TestClusterTopologyDebounce(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	var networkCalls int32
+	var inTest int32
+	barrier := make(chan struct{})
+	var closeBarrier sync.Once
+	release := func() { closeBarrier.Do(func() { close(barrier) }) }
+
+	client, err := newClusterClient(
+		&ClientOption{InitAddress: []string{"127.0.0.1:0"}},
+		func(dst string, opt *ClientOption) conn {
+			return &mockConn{
+				DialFn: func() error { return nil },
+				DoFn: func(cmd Completed) ValkeyResult {
+					if cmd.Commands()[0] == "CLUSTER" {
+						atomic.AddInt32(&networkCalls, 1)
+						if atomic.LoadInt32(&inTest) == 1 {
+							<-barrier
+						}
+						return singleNodeSlotsResp
+					}
+					return ValkeyResult{}
+				},
+				VersionFn: func() int { return 7 },
+			}
+		},
+		newRetryer(defaultRetryDelayFn),
+	)
+	if err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	defer release() // Ensure barrier is released on fatal failure
+	defer client.Close()
+	atomic.StoreInt32(&networkCalls, 0)
+	atomic.StoreInt32(&inTest, 1)
+
+	var wg sync.WaitGroup
+	var startWg sync.WaitGroup
+	var completed int32
+	numGoroutines := 100000
+	wg.Add(numGoroutines + 1)
+	startWg.Add(1)
+
+	// Launch flight leader to definitively lock the singleflight
+	leaderErr := make(chan error, 1)
+	go func() {
+		defer wg.Done()
+		leaderErr <- client.refresh(context.Background())
+	}()
+
+	// Wait until the flight leader is actively suppressing
+	timeout := time.After(2 * time.Second)
+	for client.sc.suppressing() == 0 {
+		select {
+		case <-timeout:
+			t.Fatalf("timed out waiting for flight leader")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	for i := 0; i < numGoroutines; i++ {
+		go func(idx int) {
+			defer wg.Done()
+			defer atomic.AddInt32(&completed, 1)
+			startWg.Wait()
+			if idx%2 == 0 {
+				client.refresh(context.Background())
+			} else {
+				client.lazyRefresh()
+			}
+		}(i)
+	}
+
+	startWg.Done() // Release the herd!
+	
+	timeout = time.After(10 * time.Second)
+	for {
+		select {
+		case <-timeout:
+			t.Fatalf("timed out waiting for goroutines to block")
+		default:
+		}
+		// Wait until exactly numGoroutines + 1 (the leader) are accounted for
+		if int(client.sc.suppressing())+int(atomic.LoadInt32(&completed)) >= numGoroutines+1 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	
+	release()
+	wg.Wait()
+
+	if err := <-leaderErr; err != nil {
+		t.Fatalf("leader refresh failed: %v", err)
+	}
+
+	calls := atomic.LoadInt32(&networkCalls)
+	if calls != 1 {
+		t.Fatalf("Expected strictly 1 deduped network call due to topology singleflight debounce, but got %d", calls)
+	}
+}
+
+func BenchmarkClusterTopologyDebounce(b *testing.B) {
+	var networkCalls int32
+	client, _ := newClusterClient(
+		&ClientOption{InitAddress: []string{"127.0.0.1:0"}},
+		func(dst string, opt *ClientOption) conn {
+			return &mockConn{
+				DialFn: func() error { return nil },
+				DoFn: func(cmd Completed) ValkeyResult {
+					if cmd.Commands()[0] == "CLUSTER" {
+						atomic.AddInt32(&networkCalls, 1)
+						time.Sleep(50 * time.Millisecond) // Simulated network latency
+						return singleNodeSlotsResp
+					}
+					// Return MOVED occasionally to force refresh during benchmark
+					return NewErrorResult(errors.New("MOVED 16383 127.0.0.1:6379"))
+				},
+				VersionFn: func() int { return 7 },
+			}
+		},
+		newRetryer(defaultRetryDelayFn),
+	)
+	defer client.Close()
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			client.Do(context.Background(), client.B().Get().Key("k").Build())
+		}
+	})
+}
