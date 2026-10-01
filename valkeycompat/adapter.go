@@ -29,6 +29,7 @@ package valkeycompat
 import (
 	"context"
 	"encoding"
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -258,6 +259,7 @@ type CoreCmdable interface {
 	XGroupDelConsumer(ctx context.Context, stream, group, consumer string) *IntCmd
 	XReadGroup(ctx context.Context, a XReadGroupArgs) *XStreamSliceCmd
 	XAck(ctx context.Context, stream, group string, ids ...string) *IntCmd
+	XNack(ctx context.Context, a *XNackArgs) *IntCmd
 	XPending(ctx context.Context, stream, group string) *XPendingCmd
 	XPendingExt(ctx context.Context, a XPendingExtArgs) *XPendingExtCmd
 	XClaim(ctx context.Context, a XClaimArgs) *XMessageSliceCmd
@@ -2306,6 +2308,49 @@ func (c *Compat) XReadGroup(ctx context.Context, a XReadGroupArgs) *XStreamSlice
 func (c *Compat) XAck(ctx context.Context, stream, group string, ids ...string) *IntCmd {
 	cmd := c.client.B().Xack().Key(stream).Group(group).Id(ids...).Build()
 	resp := c.client.Do(ctx, cmd)
+	return newIntCmd(resp)
+}
+
+func (c *Compat) XNack(ctx context.Context, a *XNackArgs) *IntCmd {
+	if a == nil {
+		cmd := &IntCmd{}
+		cmd.SetErr(errors.New("valkeycompat: XNackArgs cannot be nil"))
+		return cmd
+	}
+
+	buildXnack := func(step cmds.XnackIdsId) valkey.Completed {
+		if a.RetryCount != nil && a.Force {
+			return step.Count(int64(*a.RetryCount)).Force().Build()
+		}
+		if a.RetryCount != nil {
+			return step.Count(int64(*a.RetryCount)).Build()
+		}
+		if a.Force {
+			return step.Force().Build()
+		}
+		return step.Build()
+	}
+
+	var completed valkey.Completed
+	switch strings.ToUpper(a.Mode) {
+	case XNackModeSilent:
+		completed = buildXnack(c.client.B().Xnack().Key(a.Stream).Group(a.Group).Silent().Ids().Numids(int64(len(a.IDs))).Id(a.IDs...))
+	case XNackModeFail:
+		completed = buildXnack(c.client.B().Xnack().Key(a.Stream).Group(a.Group).Fail().Ids().Numids(int64(len(a.IDs))).Id(a.IDs...))
+	case XNackModeFatal:
+		completed = buildXnack(c.client.B().Xnack().Key(a.Stream).Group(a.Group).Fatal().Ids().Numids(int64(len(a.IDs))).Id(a.IDs...))
+	default:
+		arb := c.client.B().Arbitrary("XNACK").Keys(a.Stream).Args(a.Group, a.Mode, "IDS", strconv.Itoa(len(a.IDs))).Args(a.IDs...)
+		if a.RetryCount != nil {
+			arb = arb.Args("RETRYCOUNT", strconv.FormatUint(*a.RetryCount, 10))
+		}
+		if a.Force {
+			arb = arb.Args("FORCE")
+		}
+		completed = arb.Build()
+	}
+
+	resp := c.client.Do(ctx, completed)
 	return newIntCmd(resp)
 }
 
