@@ -537,6 +537,46 @@ func testAdapter(resp3 bool) {
 			Expect(n).To(Equal(int64(2)))
 		})
 
+		It("should DelIfEq", func() {
+			key := "delifeq_test_key"
+			val := "delifeq_test_val"
+
+			// Ensure clean state
+			adapter.Del(ctx, key)
+
+			// 1. Non-existent key should return 0
+			res, err := adapter.DelIfEq(ctx, key, val).Result()
+			if err != nil && (strings.Contains(strings.ToLower(err.Error()), "unknown command") || strings.Contains(strings.ToLower(err.Error()), "err unknown")) {
+				Skip("DELIFEQ is not supported by the test server engine")
+			}
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res).To(Equal(int64(0)))
+
+			// 2. Set key with value
+			err = adapter.Set(ctx, key, val, 0).Err()
+			Expect(err).NotTo(HaveOccurred())
+
+			// 3. Key exists but value does not match: should return 0 and key remains intact
+			res, err = adapter.DelIfEq(ctx, key, "wrong_val").Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res).To(Equal(int64(0)))
+
+			// Verify key still exists
+			getVal, err := adapter.Get(ctx, key).Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(getVal).To(Equal(val))
+
+			// 4. Key exists and value matches: should return 1 and delete key
+			res, err = adapter.DelIfEq(ctx, key, val).Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res).To(Equal(int64(1)))
+
+			// Verify key is deleted
+			exists, err := adapter.Exists(ctx, key).Result()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(exists).To(Equal(int64(0)))
+		})
+
 		It("should Unlink", func() {
 			err := adapter.Set(ctx, "key1", "Hello", 0).Err()
 			Expect(err).NotTo(HaveOccurred())

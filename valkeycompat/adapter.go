@@ -79,6 +79,7 @@ type CoreCmdable interface {
 	Ping(ctx context.Context) *StatusCmd
 	Quit(ctx context.Context) *StatusCmd
 	Del(ctx context.Context, keys ...string) *IntCmd
+	DelIfEq(ctx context.Context, key string, value any) *IntCmd
 	Unlink(ctx context.Context, keys ...string) *IntCmd
 	Dump(ctx context.Context, key string) *StringCmd
 	Exists(ctx context.Context, keys ...string) *IntCmd
@@ -758,6 +759,17 @@ func (c *Compat) Quit(ctx context.Context) *StatusCmd {
 
 func (c *Compat) Del(ctx context.Context, keys ...string) *IntCmd {
 	cmd := c.client.B().Del().Key(keys...).Build()
+	resp := c.client.Do(ctx, cmd)
+	return newIntCmd(resp)
+}
+
+// DelIfEq deletes a key only if its current value equals the specified value.
+// It returns an IntCmd containing:
+//
+//	1 if the key existed and was deleted
+//	0 if the key did not exist or value did not match
+func (c *Compat) DelIfEq(ctx context.Context, key string, value any) *IntCmd {
+	cmd := c.client.B().Delifeq().Key(key).Value(str(value)).Build()
 	resp := c.client.Do(ctx, cmd)
 	return newIntCmd(resp)
 }

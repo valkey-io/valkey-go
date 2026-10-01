@@ -146,6 +146,12 @@ func (c *Pipeline) Del(ctx context.Context, keys ...string) *IntCmd {
 	return ret
 }
 
+func (c *Pipeline) DelIfEq(ctx context.Context, key string, value any) *IntCmd {
+	ret := c.comp.DelIfEq(ctx, key, value)
+	c.rets = append(c.rets, ret)
+	return ret
+}
+
 func (c *Pipeline) Unlink(ctx context.Context, keys ...string) *IntCmd {
 	ret := c.comp.Unlink(ctx, keys...)
 	c.rets = append(c.rets, ret)

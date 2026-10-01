@@ -27,6 +27,7 @@
 package valkeycompat
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -173,6 +174,7 @@ func TestPipeliner(t *testing.T) {
 		p.Ping(ctx)
 		p.Quit(ctx)
 		p.Del(ctx, "1", "2")
+		p.DelIfEq(ctx, "1", "2")
 		p.Unlink(ctx, "1", "2")
 		p.Dump(ctx, "1")
 		p.Exists(ctx, "1", "2")
@@ -667,7 +669,7 @@ func TestPipeliner(t *testing.T) {
 			Args: []any{"1", "2"},
 		})
 
-		if n := len(p.rets); n != 498 {
+		if n := len(p.rets); n != 499 {
 			t.Fatalf("unexpected pipeline calls: %v", n)
 		}
 		for i, cmd := range p.rets {
@@ -675,7 +677,7 @@ func TestPipeliner(t *testing.T) {
 				t.Fatalf("unexpected pipeline placeholder err(%d): %v", i, err)
 			}
 		}
-		if n := len(p.comp.client.(*proxy).cmds); n != 498 {
+		if n := len(p.comp.client.(*proxy).cmds); n != 499 {
 			t.Fatalf("unexpected pipeline commands: %v", n)
 		}
 		var pipeline [][]string
@@ -780,6 +782,91 @@ func TestPipelineLatencyExec(t *testing.T) {
 	}
 }
 
+func TestAdapterDelIfEq(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	m := mock.NewClient(ctrl)
+	adapter := NewAdapter(m)
+
+	ctx := context.Background()
+
+	// 1. Non-existent key returns 0
+	m.EXPECT().Do(ctx, mock.Match("DELIFEQ", "key1", "val1")).Return(mock.Result(mock.ValkeyInt64(0)))
+	res, err := adapter.DelIfEq(ctx, "key1", "val1").Result()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res != 0 {
+		t.Fatalf("expected 0, got %d", res)
+	}
+
+	// 2. Key exists but value does not match returns 0
+	m.EXPECT().Do(ctx, mock.Match("DELIFEQ", "key1", "wrong_val")).Return(mock.Result(mock.ValkeyInt64(0)))
+	res, err = adapter.DelIfEq(ctx, "key1", "wrong_val").Result()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res != 0 {
+		t.Fatalf("expected 0, got %d", res)
+	}
+
+	// 3. Key exists and value matches returns 1
+	m.EXPECT().Do(ctx, mock.Match("DELIFEQ", "key1", "val1")).Return(mock.Result(mock.ValkeyInt64(1)))
+	res, err = adapter.DelIfEq(ctx, "key1", "val1").Result()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res != 1 {
+		t.Fatalf("expected 1, got %d", res)
+	}
+
+	// 4. Server error
+	mockErr := errors.New("server error")
+	m.EXPECT().Do(ctx, mock.Match("DELIFEQ", "key1", "val1")).Return(mock.ErrorResult(mockErr))
+	_, err = adapter.DelIfEq(ctx, "key1", "val1").Result()
+	if !errors.Is(err, mockErr) {
+		t.Fatalf("expected %v, got %v", mockErr, err)
+	}
+}
+
+func TestPipelineDelIfEq(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	m := mock.NewClient(ctrl)
+	p := newPipeline(m)
+
+	ctx := context.Background()
+	delIfEqRes := mock.Result(mock.ValkeyInt64(1))
+	m.EXPECT().DoMulti(gomock.Any(), mock.Match("DELIFEQ", "key1", "val1")).Return([]valkey.ValkeyResult{delIfEqRes})
+
+	cmd := p.DelIfEq(ctx, "key1", "val1")
+	if cmd.Err() != errPipelineNotExecuted {
+		t.Fatalf("expected errPipelineNotExecuted, got %v", cmd.Err())
+	}
+	if p.Len() != 1 {
+		t.Fatalf("expected pipeline len 1, got %d", p.Len())
+	}
+
+	rets, err := p.Exec(ctx)
+	if err != nil {
+		t.Fatalf("unexpected Exec error: %v", err)
+	}
+	if len(rets) != 1 {
+		t.Fatalf("expected 1 rets, got %d", len(rets))
+	}
+	if p.Len() != 0 {
+		t.Fatalf("expected pipeline len 0, got %d", p.Len())
+	}
+	if cmd.Err() != nil {
+		t.Fatalf("unexpected cmd error: %v", cmd.Err())
+	}
+	if cmd.Val() != 1 {
+		t.Fatalf("expected val 1, got %d", cmd.Val())
+	}
+}
+
 var golden = `[
     ["COMMAND"],
     ["COMMAND","LIST"],
@@ -790,6 +877,7 @@ var golden = `[
     ["PING"],
     ["QUIT"],
     ["DEL","1","2"],
+    ["DELIFEQ","1","2"],
     ["UNLINK","1","2"],
     ["DUMP","1"],
     ["EXISTS","1","2"],
