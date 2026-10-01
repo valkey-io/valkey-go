@@ -355,6 +355,7 @@ func TestPipeliner(t *testing.T) {
 		p.XGroupDelConsumer(ctx, "1", "2", "3")
 		p.XReadGroup(ctx, XReadGroupArgs{Group: "group", Consumer: "consumer", Streams: []string{"stream", ">"}})
 		p.XAck(ctx, "1", "2", "3", "4")
+		p.XNack(ctx, &XNackArgs{Stream: "1", Group: "2", Mode: XNackModeSilent, IDs: []string{"3", "4"}})
 		p.XPending(ctx, "1", "2")
 		p.XPendingExt(ctx, XPendingExtArgs{Stream: "stream", Group: "group", Start: "-", End: "+", Count: 10, Consumer: "consumer"})
 		p.XClaim(ctx, XClaimArgs{Stream: "stream", Group: "group", Consumer: "consumer", Messages: []string{"1-0", "2-0", "3-0"}})
@@ -977,6 +978,7 @@ var golden = `[
     ["XGROUP","DELCONSUMER","1","2","3"],
     ["XREADGROUP","GROUP","group","consumer","BLOCK","0","STREAMS","stream","\u003e"],
     ["XACK","1","2","3","4"],
+    ["XNACK","1","2","SILENT","IDS","2","3","4"],
     ["XPENDING","1","2"],
     ["XPENDING","stream","group","-","+","10","consumer"],
     ["XCLAIM","stream","group","consumer","0","1-0","2-0","3-0"],
