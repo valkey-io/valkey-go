@@ -421,6 +421,8 @@ func TestPipeliner(t *testing.T) {
 		p.ShutdownSave(ctx)
 		p.ShutdownNoSave(ctx)
 		p.Time(ctx)
+		p.Wait(ctx, 1, time.Second)
+		p.WaitAOF(ctx, 0, 1, time.Second)
 		p.DebugObject(ctx, "1")
 		p.ReadOnly(ctx)
 		p.ReadWrite(ctx)
@@ -632,7 +634,7 @@ func TestPipeliner(t *testing.T) {
 			Args: []any{"1", "2"},
 		})
 
-		if n := len(p.rets); n != 491 {
+		if n := len(p.rets); n != 493 {
 			t.Fatalf("unexpected pipeline calls: %v", n)
 		}
 		for i, cmd := range p.rets {
@@ -640,7 +642,7 @@ func TestPipeliner(t *testing.T) {
 				t.Fatalf("unexpected pipeline placeholder err(%d): %v", i, err)
 			}
 		}
-		if n := len(p.comp.client.(*proxy).cmds); n != 491 {
+		if n := len(p.comp.client.(*proxy).cmds); n != 493 {
 			t.Fatalf("unexpected pipeline commands: %v", n)
 		}
 		var pipeline [][]string
@@ -956,7 +958,9 @@ var golden = `[
     ["SHUTDOWN"],
     ["SHUTDOWN","SAVE"],
     ["SHUTDOWN","NOSAVE"],
-    ["TIME"],
+	["TIME"],
+	["WAIT","1","1000"],
+	["WAITAOF","0","1","1000"],
     ["DEBUG","OBJECT","1"],
     ["READONLY"],
     ["READWRITE"],
