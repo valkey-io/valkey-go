@@ -1,7 +1,6 @@
 package valkeycompat
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -644,39 +643,5 @@ func ParseACLDryRunString(s string) ACLDryRunResult {
 		Reason:     s,
 		DeniedType: deniedType,
 	}
-}
-
-// ACLList executes ACL LIST and parses the result into []ACLUser.
-func ACLList(ctx context.Context, client valkey.Client) ([]ACLUser, error) {
-	cmd := client.B().AclList().Build()
-	res := client.Do(ctx, cmd)
-	return ParseACLList(res)
-}
-
-// ACLLog executes ACL LOG [count] and parses the entries into []ACLLogEntry.
-func ACLLog(ctx context.Context, client valkey.Client, count int64) ([]ACLLogEntry, error) {
-	var cmd valkey.Completed
-	if count > 0 {
-		cmd = client.B().AclLog().Count(count).Build()
-	} else {
-		cmd = client.B().Arbitrary("ACL", "LOG").Build()
-	}
-	res := client.Do(ctx, cmd)
-	return ParseACLLog(res)
-}
-
-// ACLDryRun executes ACL DRYRUN <username> <command> [args...] and evaluates authorization.
-func ACLDryRun(ctx context.Context, client valkey.Client, username string, command ...string) (ACLDryRunResult, error) {
-	if len(command) == 0 {
-		return ACLDryRunResult{}, errors.New("valkey: command is required for ACLDryRun")
-	}
-	var cmd valkey.Completed
-	if len(command) == 1 {
-		cmd = client.B().AclDryrun().Username(username).Command(command[0]).Build()
-	} else {
-		cmd = client.B().AclDryrun().Username(username).Command(command[0]).Arg(command[1:]...).Build()
-	}
-	res := client.Do(ctx, cmd)
-	return ParseACLDryRun(res)
 }
 

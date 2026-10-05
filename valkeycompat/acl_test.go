@@ -9,7 +9,6 @@ import (
 
 	"github.com/valkey-io/valkey-go"
 	"github.com/valkey-io/valkey-go/mock"
-	"go.uber.org/mock/gomock"
 )
 
 func TestParseACLUser(t *testing.T) {
@@ -648,85 +647,6 @@ func TestParseACLDryRun(t *testing.T) {
 	})
 }
 
-func TestACLHelpers(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("ACLDryRun validation", func(t *testing.T) {
-		ctrl := gomock.NewController(t)
-		defer ctrl.Finish()
-		client := mock.NewClient(ctrl)
-
-		// Missing command
-		_, err := ACLDryRun(ctx, client, "alice")
-		if err == nil {
-			t.Errorf("expected error for missing command in ACLDryRun")
-		}
-
-		// Single command
-		client.EXPECT().Do(gomock.Any(), mock.Match("ACL", "DRYRUN", "alice", "get")).
-			Return(mock.Result(mock.ValkeyString("OK")))
-		res, err := ACLDryRun(ctx, client, "alice", "get")
-		if err != nil || !res.Allowed {
-			t.Errorf("unexpected dryrun result: %+v, %v", res, err)
-		}
-
-		// Command with args
-		client.EXPECT().Do(gomock.Any(), mock.Match("ACL", "DRYRUN", "alice", "set", "k", "v")).
-			Return(mock.Result(mock.ValkeyString("User alice has no permissions to run the 'set' command")))
-		res, err = ACLDryRun(ctx, client, "alice", "set", "k", "v")
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if res.Allowed || res.DeniedType != DeniedCommand {
-			t.Errorf("expected Allowed=false, DeniedCommand, got %+v", res)
-		}
-	})
-
-	t.Run("ACLList helper dispatch", func(t *testing.T) {
-		ctrl := gomock.NewController(t)
-		defer ctrl.Finish()
-		client := mock.NewClient(ctrl)
-
-		client.EXPECT().Do(gomock.Any(), mock.Match("ACL", "LIST")).
-			Return(mock.Result(mock.ValkeyArray(mock.ValkeyString("user default on nopass ~* &* +@all"))))
-		users, err := ACLList(ctx, client)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if len(users) != 1 || users[0].Username != "default" {
-			t.Errorf("unexpected users: %v", users)
-		}
-	})
-
-	t.Run("ACLLog helper dispatch", func(t *testing.T) {
-		ctrl := gomock.NewController(t)
-		defer ctrl.Finish()
-		client := mock.NewClient(ctrl)
-
-		// Count > 0
-		client.EXPECT().Do(gomock.Any(), mock.Match("ACL", "LOG", "10")).
-			Return(mock.Result(mock.ValkeyArray()))
-		entries, err := ACLLog(ctx, client, 10)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if len(entries) != 0 {
-			t.Errorf("expected 0 entries")
-		}
-
-		// Count <= 0
-		client.EXPECT().Do(gomock.Any(), mock.Match("ACL", "LOG")).
-			Return(mock.Result(mock.ValkeyArray()))
-		entries, err = ACLLog(ctx, client, 0)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if len(entries) != 0 {
-			t.Errorf("expected 0 entries")
-		}
-	})
-}
-
 func TestACLLiveIntegration(t *testing.T) {
 	targets := []struct {
 		name string
@@ -748,13 +668,14 @@ func TestACLLiveIntegration(t *testing.T) {
 			}
 			defer client.Close()
 
+			adapter := NewAdapter(client)
 			ctx := context.Background()
 			if err := client.Do(ctx, client.B().Ping().Build()).Error(); err != nil {
 				t.Skipf("skipping %s: server not reachable: %v", target.name, err)
 			}
 
 			// 1. Live ACLList
-			users, err := ACLList(ctx, client)
+			users, err := adapter.ACLList(ctx).AsACLUsers()
 			if err != nil {
 				t.Fatalf("[%s] live ACLList failed: %v", target.name, err)
 			}
@@ -790,7 +711,7 @@ func TestACLLiveIntegration(t *testing.T) {
 			}
 
 			// 3. Test allowed command on permitted key -> OK
-			res, err := ACLDryRun(ctx, client, testUser, "get", "key:permitted:one")
+			res, err := adapter.ACLDryRun(ctx, testUser, "get", "key:permitted:one").ACLDryRunResult()
 			if err != nil {
 				t.Fatalf("[%s] live ACLDryRun failed: %v", target.name, err)
 			}
@@ -799,7 +720,7 @@ func TestACLLiveIntegration(t *testing.T) {
 			}
 
 			// 4. Test forbidden command on permitted key -> DeniedCommand
-			res, err = ACLDryRun(ctx, client, testUser, "set", "key:permitted:one", "val")
+			res, err = adapter.ACLDryRun(ctx, testUser, "set", "key:permitted:one", "val").ACLDryRunResult()
 			if err != nil {
 				t.Fatalf("[%s] live ACLDryRun failed: %v", target.name, err)
 			}
@@ -811,7 +732,7 @@ func TestACLLiveIntegration(t *testing.T) {
 			}
 
 			// 5. Test forbidden command with key substring in command name -> must remain DeniedCommand
-			res, err = ACLDryRun(ctx, client, testUser, "hset", "key:permitted:one", "f", "v")
+			res, err = adapter.ACLDryRun(ctx, testUser, "hset", "key:permitted:one", "f", "v").ACLDryRunResult()
 			if err != nil {
 				t.Fatalf("[%s] live ACLDryRun failed: %v", target.name, err)
 			}
@@ -823,7 +744,7 @@ func TestACLLiveIntegration(t *testing.T) {
 			}
 
 			// 6. Test permitted command on forbidden key -> DeniedKey
-			res, err = ACLDryRun(ctx, client, testUser, "get", "forbidden:one")
+			res, err = adapter.ACLDryRun(ctx, testUser, "get", "forbidden:one").ACLDryRunResult()
 			if err != nil {
 				t.Fatalf("[%s] live ACLDryRun failed: %v", target.name, err)
 			}
@@ -835,7 +756,7 @@ func TestACLLiveIntegration(t *testing.T) {
 			}
 
 			// 7. Test forbidden key with substring 'command' in key name -> must remain DeniedKey
-			res, err = ACLDryRun(ctx, client, testUser, "get", "command_forbidden_key")
+			res, err = adapter.ACLDryRun(ctx, testUser, "get", "command_forbidden_key").ACLDryRunResult()
 			if err != nil {
 				t.Fatalf("[%s] live ACLDryRun failed: %v", target.name, err)
 			}
@@ -850,7 +771,7 @@ func TestACLLiveIntegration(t *testing.T) {
 			attachSelectorCmd := client.B().AclSetuser().Username(testUser).Rule("(~secret:* +get)").Build()
 			if err := client.Do(ctx, attachSelectorCmd).Error(); err == nil {
 				// Server supports selectors (Redis 7+ / Valkey)
-				uList, err := ACLList(ctx, client)
+				uList, err := adapter.ACLList(ctx).AsACLUsers()
 				if err != nil {
 					t.Fatalf("[%s] ACLList after selector attach failed: %v", target.name, err)
 				}
@@ -872,7 +793,7 @@ func TestACLLiveIntegration(t *testing.T) {
 				// 9. Clear selectors
 				clearCmd := client.B().AclSetuser().Username(testUser).Rule("clearselectors").Build()
 				if err := client.Do(ctx, clearCmd).Error(); err == nil {
-					uListAfterClear, _ := ACLList(ctx, client)
+					uListAfterClear, _ := adapter.ACLList(ctx).AsACLUsers()
 					for i := range uListAfterClear {
 						if uListAfterClear[i].Username == testUser {
 							if len(uListAfterClear[i].Selectors) != 0 {
@@ -885,13 +806,13 @@ func TestACLLiveIntegration(t *testing.T) {
 			}
 
 			// 10. Live ACLLog check with count > 0 and count == 0
-			logs10, err := ACLLog(ctx, client, 10)
+			logs10, err := adapter.ACLLog(ctx, 10).Result()
 			if err != nil {
 				t.Fatalf("[%s] live ACLLog(10) failed: %v", target.name, err)
 			}
 			t.Logf("[%s] retrieved %d ACL log entries (count=10)", target.name, len(logs10))
 
-			logs0, err := ACLLog(ctx, client, 0)
+			logs0, err := adapter.ACLLog(ctx, 0).Result()
 			if err != nil {
 				t.Fatalf("[%s] live ACLLog(0) failed: %v", target.name, err)
 			}
