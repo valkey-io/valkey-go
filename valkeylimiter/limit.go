@@ -6,10 +6,10 @@ import "time"
 type Algorithm int
 
 const (
-	// AlgorithmGCRA selects the Generic Cell Rate Algorithm (leaky bucket). Default.
-	AlgorithmGCRA Algorithm = iota
-	// AlgorithmFixedWindow selects the legacy Fixed Window counter algorithm.
-	AlgorithmFixedWindow
+	// AlgorithmFixedWindow selects the legacy Fixed Window counter algorithm. Default.
+	AlgorithmFixedWindow Algorithm = iota
+	// AlgorithmGCRA selects the Generic Cell Rate Algorithm (leaky bucket).
+	AlgorithmGCRA
 )
 
 type RateLimitOption struct {

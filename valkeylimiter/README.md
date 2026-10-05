@@ -3,18 +3,19 @@
 
 `valkeylimiter` is a high-performance, distributed rate limiting module for Valkey and Redis.
 
-By default, it uses the **Generic Cell Rate Algorithm (GCRA)** (leaky bucket) to provide smooth, continuous traffic pacing with burst tolerance, while also providing a fallback **Fixed Window** counter algorithm for legacy compatibility.
+By default, it uses the **Fixed Window** counter algorithm for simplicity and backward compatibility, while also providing the **Generic Cell Rate Algorithm (GCRA)** (leaky bucket) for smooth, continuous traffic pacing with burst tolerance.
 
 ## Features
 
-- **Generic Cell Rate Algorithm (GCRA) by Default**: Eliminates the 2x boundary burst spike ("double-dipping") inherent in fixed-window algorithms, pacing requests evenly over time.
-- **Single-Key Architecture**: Operates on a single Valkey key (`rate:<identifier>`), cutting keyspace overhead in half compared to dual-key fixed-window limiters.
-- **Server-Authoritative Clock**: Time is derived atomically inside Valkey using `redis.call('TIME')`, eliminating synchronization discrepancies caused by client NTP drift.
-- **Valkey Cluster Safe (Zero `CROSSSLOT`)**: Because each operation touches strictly a single key (`KEYS[1]`), GCRA rate limiting never triggers `CROSSSLOT` errors, with or without hash tags (`{...}`).
+- **Fixed Window by Default**: Proven counter-based rate limiting compatible with existing deployments.
+- **Generic Cell Rate Algorithm (GCRA) Support**: Smooth leaky-bucket rate limiting that eliminates boundary burst spikes ("double-dipping") and paces requests evenly over time.
+- **Single-Key Architecture for GCRA**: Operates on a single Valkey key (`valkeylimiter:{<identifier>}`), cutting keyspace overhead in half compared to dual-key fixed-window limiters.
+- **Server-Authoritative Clock**: For GCRA, time is derived atomically inside Valkey using `redis.call('TIME')`, eliminating synchronization discrepancies caused by client NTP drift.
+- **Valkey Cluster Safe (Zero `CROSSSLOT`)**: All operations use cluster hash tags (`{...}`) to ensure multi-key operations and single-key GCRA calls never trigger `CROSSSLOT` errors across cluster nodes.
 - **Partial Allowance (`AllowAtMost`)**: Allows batch jobs or multi-token consumers to acquire "up to" available capacity without failing completely.
 - **Programmatic Reset (`Reset`)**: Programmatically clears rate limiting state for an identifier.
 - **Detailed Timing Diagnostics**: Provides `RetryAfter` (`-1` on success, duration to wait on throttle) and `ResetAfter` (duration until full capacity is restored).
-- **Multi-Strategy Extensibility**: Switch seamlessly between GCRA (`AlgorithmGCRA = 0` default) and legacy Fixed Window (`AlgorithmFixedWindow = 1`).
+- **Multi-Strategy Extensibility**: Seamlessly select between legacy Fixed Window (`AlgorithmFixedWindow = 0` default) and GCRA (`AlgorithmGCRA = 1`).
 - **Zero-Allocation Hot Path**: Leverages pooled buffers (`sync.Pool`) for high-throughput, low-allocation execution.
 
 ## Installation
@@ -27,7 +28,7 @@ go get github.com/valkey-io/valkey-go/valkeylimiter
 
 ## Usage
 
-### Basic Rate Limiting Example (GCRA Default)
+### Basic Rate Limiting Example (Fixed Window Default)
 
 ```go
 package main
@@ -42,7 +43,7 @@ import (
 )
 
 func main() {
-	// Initialize a limiter: 10 requests per minute with default burst capacity of 10
+	// Initialize a limiter: 10 requests per minute (Fixed Window by default)
 	limiter, err := valkeylimiter.NewRateLimiter(valkeylimiter.RateLimiterOption{
 		ClientOption: valkey.ClientOption{InitAddress: []string{"127.0.0.1:6379"}},
 		Limit:        10,
@@ -87,23 +88,30 @@ func main() {
 
 ## Advanced Usage
 
-### 1. Burst Capacity (`Burst` & `WithBurst`)
+### 1. Opting Into Generic Cell Rate Algorithm (GCRA)
 
-GCRA separates the sustained **rate** from the **burst tolerance**. By default, `Burst` equals `Limit`. You can configure a larger burst buffer:
+To use smooth leaky-bucket rate limiting with burst tolerance, specify `Algorithm: valkeylimiter.AlgorithmGCRA`:
 
 ```go
 limiter, err := valkeylimiter.NewRateLimiter(valkeylimiter.RateLimiterOption{
 	ClientOption: valkey.ClientOption{InitAddress: []string{"127.0.0.1:6379"}},
-	Limit:        10,            // 10 req/s sustained
+	Limit:        10,                                 // 10 req/s sustained
 	Window:       time.Second,
-	Burst:        50,            // allows bursts up to 50 tokens
+	Burst:        50,                                 // burst capacity up to 50 tokens
+	Algorithm:    valkeylimiter.AlgorithmGCRA,        // Opt-in GCRA
 })
+```
 
-// Or override burst dynamically per request:
+### 2. Burst Capacity (`Burst` & `WithBurst`)
+
+GCRA separates the sustained **rate** from the **burst tolerance**. By default, `Burst` equals `Limit`. You can configure a larger burst buffer or override it dynamically:
+
+```go
+// Override burst dynamically per request:
 res, err := limiter.Allow(ctx, "user_123", valkeylimiter.WithBurst(100))
 ```
 
-### 2. Partial Token Consumption (`AllowAtMost`)
+### 3. Partial Token Consumption (`AllowAtMost`)
 
 For batch tasks, `AllowAtMost` grants whatever capacity is currently available up to `n` tokens:
 
@@ -117,7 +125,7 @@ if err != nil {
 fmt.Printf("Allowed: %v, Granted: %d, Remaining: %d\n", res.Allowed, res.Granted, res.Remaining)
 ```
 
-### 3. Programmatic State Clearance (`Reset`)
+### 4. Programmatic State Clearance (`Reset`)
 
 Clear rate limiting state immediately for a specific identifier:
 
@@ -128,17 +136,18 @@ if err != nil {
 }
 ```
 
-### 4. Valkey Cluster Usage (Zero `CROSSSLOT`)
+### 5. Valkey Cluster Usage (Zero `CROSSSLOT`)
 
-Because GCRA operates strictly on a single key (`KEYS[1]`), it is inherently safe in Valkey Cluster mode and will never produce `CROSSSLOT` errors. You can also use explicit hash tags for multi-tenant isolation:
+All operations use cluster hash tags (`{...}`) to ensure multi-key operations and single-key GCRA calls never trigger `CROSSSLOT` errors across cluster nodes:
 
 ```go
 limiter, err := valkeylimiter.NewRateLimiter(valkeylimiter.RateLimiterOption{
 	ClientOption: valkey.ClientOption{
 		InitAddress: []string{"127.0.0.1:7010", "127.0.0.1:7011", "127.0.0.1:7012"},
 	},
-	Limit:  100,
-	Window: time.Minute,
+	Limit:     100,
+	Window:    time.Minute,
+	Algorithm: valkeylimiter.AlgorithmGCRA,
 })
 if err != nil {
 	panic(err)
@@ -147,19 +156,6 @@ defer limiter.Close()
 
 // Cluster routes by hash tag {tenant_1}; zero CROSSSLOT errors guaranteed
 res, err := limiter.Allow(ctx, "{tenant_1}:user_42")
-```
-
-### 5. Opting Into Fixed Window Algorithm
-
-If you need the legacy dual-key fixed-window counter:
-
-```go
-limiter, err := valkeylimiter.NewRateLimiter(valkeylimiter.RateLimiterOption{
-	ClientOption: valkey.ClientOption{InitAddress: []string{"127.0.0.1:6379"}},
-	Limit:        100,
-	Window:       time.Minute,
-	Algorithm:    valkeylimiter.AlgorithmFixedWindow, // Opt-in
-})
 ```
 
 ---
@@ -171,11 +167,11 @@ limiter, err := valkeylimiter.NewRateLimiter(valkeylimiter.RateLimiterOption{
 #### `RateLimiterOption`
 - `ClientOption (valkey.ClientOption)`: Valkey client connection options.
 - `ClientBuilder`: Optional custom client constructor.
-- `KeyPrefix (string)`: Key prefix (defaults to `"rate:"` for GCRA, `"valkeylimiter"` for Fixed Window).
+- `KeyPrefix (string)`: Key prefix (defaults to `"valkeylimiter"`).
 - `Limit (int)`: Maximum requests permitted per window.
 - `Window (time.Duration)`: Rate limit window period.
 - `Burst (int)`: Maximum burst capacity (defaults to `Limit`).
-- `Algorithm (Algorithm)`: Rate limit algorithm (`AlgorithmGCRA = 0` default, `AlgorithmFixedWindow = 1`).
+- `Algorithm (Algorithm)`: Rate limit algorithm (`AlgorithmFixedWindow = 0` default, `AlgorithmGCRA = 1`).
 
 #### `Result`
 - `Allowed (bool)`: Whether the request was permitted.
@@ -191,7 +187,7 @@ limiter, err := valkeylimiter.NewRateLimiter(valkeylimiter.RateLimiterOption{
 - `AllowN(ctx context.Context, id string, n int64, opts ...RateLimitOption) (Result, error)`: Consumes `n` tokens (all-or-nothing).
 - `AllowAtMost(ctx context.Context, id string, n int64, opts ...RateLimitOption) (Result, error)`: Consumes up to `n` tokens based on available capacity.
 - `Check(ctx context.Context, id string, opts ...RateLimitOption) (Result, error)`: Peeks at current capacity without consuming tokens.
-- `Reset(ctx context.Context, id string) error`: Clears rate limit state for the identifier.
+- `Reset(ctx context.Context, id string, opts ...RateLimitOption) error`: Clears rate limit state for the identifier.
 - `Limit() int`: Returns the configured default rate limit.
 - `Close()`: Closes the underlying client connection.
 

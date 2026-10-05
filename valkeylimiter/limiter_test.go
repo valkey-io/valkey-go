@@ -32,9 +32,10 @@ func getLiveRateLimiter(limit int, window time.Duration, burst ...int) valkeylim
 			ClientOption: valkey.ClientOption{
 				InitAddress: []string{addr},
 			},
-			Limit:  limit,
-			Window: window,
-			Burst:  b,
+			Limit:     limit,
+			Window:    window,
+			Burst:     b,
+			Algorithm: valkeylimiter.AlgorithmGCRA,
 		})
 		if err == nil {
 			res, err := limiter.Check(context.Background(), "live_probe")
@@ -56,9 +57,10 @@ func getClusterRateLimiter(limit int, window time.Duration, burst ...int) valkey
 		ClientOption: valkey.ClientOption{
 			InitAddress: []string{"127.0.0.1:7010"},
 		},
-		Limit:  limit,
-		Window: window,
-		Burst:  b,
+		Limit:     limit,
+		Window:    window,
+		Burst:     b,
+		Algorithm: valkeylimiter.AlgorithmGCRA,
 	})
 	if err != nil {
 		return nil
@@ -87,6 +89,32 @@ var _ = Describe("RateLimiter", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(limiter).NotTo(BeNil())
+		})
+
+		It("defaults algorithm to Fixed Window and executes fixed window logic", func() {
+			ctrl := gomock.NewController(GinkgoT())
+			defer ctrl.Finish()
+
+			resetTime := time.Now().Add(time.Second).UnixMilli()
+			client := mock.NewClient(ctrl)
+			client.EXPECT().Do(gomock.Any(), gomock.Any()).Return(mock.Result(mock.ValkeyArray(
+				mock.ValkeyInt64(1),
+				mock.ValkeyInt64(resetTime),
+			))).Times(1)
+
+			limiter, err := valkeylimiter.NewRateLimiter(valkeylimiter.RateLimiterOption{
+				ClientBuilder: func(option valkey.ClientOption) (valkey.Client, error) {
+					return client, nil
+				},
+				Limit:  10,
+				Window: time.Second,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			res, err := limiter.Allow(context.Background(), "test-default")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.Allowed).To(BeTrue())
+			Expect(res.Remaining).To(Equal(int64(9)))
 		})
 
 		It("initializes with custom values", func() {
@@ -170,7 +198,7 @@ var _ = Describe("RateLimiter", func() {
 		})
 	})
 
-	Describe("Fixed Window Algorithm (Opt-in)", func() {
+	Describe("Fixed Window Algorithm (Default)", func() {
 		var (
 			ctrl   *gomock.Controller
 			client *mock.Client
@@ -705,7 +733,7 @@ var _ = Describe("RateLimiter", func() {
 			ctrl.Finish()
 		})
 
-		It("defaults to GCRA and allows requests", func() {
+		It("executes GCRA when configured and allows requests", func() {
 			client.EXPECT().Do(gomock.Any(), gomock.Any()).Return(mock.Result(mock.ValkeyArray(
 				mock.ValkeyInt64(1),
 				mock.ValkeyInt64(9),
@@ -717,8 +745,9 @@ var _ = Describe("RateLimiter", func() {
 				ClientBuilder: func(option valkey.ClientOption) (valkey.Client, error) {
 					return client, nil
 				},
-				Limit:  10,
-				Window: time.Second,
+				Limit:     10,
+				Window:    time.Second,
+				Algorithm: valkeylimiter.AlgorithmGCRA,
 			})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -772,8 +801,9 @@ var _ = Describe("RateLimiter", func() {
 				ClientBuilder: func(option valkey.ClientOption) (valkey.Client, error) {
 					return client, nil
 				},
-				Limit:  10,
-				Window: time.Second,
+				Limit:     10,
+				Window:    time.Second,
+				Algorithm: valkeylimiter.AlgorithmGCRA,
 			})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -798,8 +828,9 @@ var _ = Describe("RateLimiter", func() {
 				ClientBuilder: func(option valkey.ClientOption) (valkey.Client, error) {
 					return client, nil
 				},
-				Limit:  10,
-				Window: time.Second,
+				Limit:     10,
+				Window:    time.Second,
+				Algorithm: valkeylimiter.AlgorithmGCRA,
 			})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -818,8 +849,9 @@ var _ = Describe("RateLimiter", func() {
 				ClientBuilder: func(option valkey.ClientOption) (valkey.Client, error) {
 					return client, nil
 				},
-				Limit:  10,
-				Window: time.Second,
+				Limit:     10,
+				Window:    time.Second,
+				Algorithm: valkeylimiter.AlgorithmGCRA,
 			})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -839,8 +871,9 @@ var _ = Describe("RateLimiter", func() {
 				ClientBuilder: func(option valkey.ClientOption) (valkey.Client, error) {
 					return client, nil
 				},
-				Limit:  10,
-				Window: time.Second,
+				Limit:     10,
+				Window:    time.Second,
+				Algorithm: valkeylimiter.AlgorithmGCRA,
 			})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -868,8 +901,9 @@ var _ = Describe("RateLimiter", func() {
 				ClientBuilder: func(option valkey.ClientOption) (valkey.Client, error) {
 					return client, nil
 				},
-				Limit:  10,
-				Window: time.Second,
+				Limit:     10,
+				Window:    time.Second,
+				Algorithm: valkeylimiter.AlgorithmGCRA,
 			})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -884,8 +918,9 @@ var _ = Describe("RateLimiter", func() {
 				ClientBuilder: func(option valkey.ClientOption) (valkey.Client, error) {
 					return client, nil
 				},
-				Limit:  10,
-				Window: time.Second,
+				Limit:     10,
+				Window:    time.Second,
+				Algorithm: valkeylimiter.AlgorithmGCRA,
 			})
 			Expect(err).NotTo(HaveOccurred())
 

@@ -32,7 +32,7 @@ type RateLimiterClient interface {
 	Allow(ctx context.Context, identifier string, options ...RateLimitOption) (Result, error)
 	AllowN(ctx context.Context, identifier string, n int64, options ...RateLimitOption) (Result, error)
 	AllowAtMost(ctx context.Context, identifier string, n int64, options ...RateLimitOption) (Result, error)
-	Reset(ctx context.Context, identifier string) error
+	Reset(ctx context.Context, identifier string, options ...RateLimitOption) error
 	Limit() int
 	Close()
 }
@@ -71,11 +71,7 @@ func NewRateLimiter(option RateLimiterOption) (RateLimiterClient, error) {
 		option.Burst = option.Limit
 	}
 	if option.KeyPrefix == "" {
-		if option.Algorithm == AlgorithmFixedWindow {
-			option.KeyPrefix = PlaceholderPrefix
-		} else {
-			option.KeyPrefix = GCRAPrefix
-		}
+		option.KeyPrefix = PlaceholderPrefix
 	}
 
 	rl := &rateLimiter{
@@ -145,10 +141,10 @@ func (l *rateLimiter) AllowN(ctx context.Context, identifier string, n int64, op
 		return Result{}, ErrInvalidTokens
 	}
 	limit, window, burst, alg := l.resolveOptions(options)
-	if alg == AlgorithmFixedWindow {
-		return l.allowNFixedWindow(ctx, identifier, n, limit, window)
+	if alg == AlgorithmGCRA {
+		return l.allowNGCRA(ctx, identifier, n, limit, window, burst)
 	}
-	return l.allowNGCRA(ctx, identifier, n, limit, window, burst)
+	return l.allowNFixedWindow(ctx, identifier, n, limit, window)
 }
 
 func (l *rateLimiter) AllowAtMost(ctx context.Context, identifier string, n int64, options ...RateLimitOption) (Result, error) {
@@ -156,17 +152,18 @@ func (l *rateLimiter) AllowAtMost(ctx context.Context, identifier string, n int6
 		return Result{}, ErrInvalidTokens
 	}
 	limit, window, burst, alg := l.resolveOptions(options)
-	if alg == AlgorithmFixedWindow {
-		return l.allowAtMostFixedWindow(ctx, identifier, n, limit, window)
+	if alg == AlgorithmGCRA {
+		return l.allowAtMostGCRA(ctx, identifier, n, limit, window, burst)
 	}
-	return l.allowAtMostGCRA(ctx, identifier, n, limit, window, burst)
+	return l.allowAtMostFixedWindow(ctx, identifier, n, limit, window)
 }
 
-func (l *rateLimiter) Reset(ctx context.Context, identifier string) error {
+func (l *rateLimiter) Reset(ctx context.Context, identifier string, options ...RateLimitOption) error {
 	bufs := rateBuffersPool.Get(0, 128)
 	defer rateBuffersPool.Put(bufs)
 
-	if l.defaultRateLimit.algorithm == AlgorithmFixedWindow {
+	_, _, _, alg := l.resolveOptions(options)
+	if alg == AlgorithmGCRA {
 		offset := len(bufs.keyBuf)
 		bufs.keyBuf = append(bufs.keyBuf, l.keyPrefix...)
 		bufs.keyBuf = append(bufs.keyBuf, keyDelimOpen...)
@@ -174,20 +171,22 @@ func (l *rateLimiter) Reset(ctx context.Context, identifier string) error {
 		bufs.keyBuf = append(bufs.keyBuf, keyDelimClose...)
 		key := valkey.BinaryString(bufs.keyBuf[offset:])
 
-		offset = len(bufs.keyBuf)
-		bufs.keyBuf = append(bufs.keyBuf, key...)
-		bufs.keyBuf = append(bufs.keyBuf, ":ex"...)
-		expiresAtKey := valkey.BinaryString(bufs.keyBuf[offset:])
-
-		return l.client.Do(ctx, l.client.B().Del().Key(key, expiresAtKey).Build()).Error()
+		return l.client.Do(ctx, l.client.B().Del().Key(key).Build()).Error()
 	}
 
 	offset := len(bufs.keyBuf)
 	bufs.keyBuf = append(bufs.keyBuf, l.keyPrefix...)
+	bufs.keyBuf = append(bufs.keyBuf, keyDelimOpen...)
 	bufs.keyBuf = append(bufs.keyBuf, identifier...)
+	bufs.keyBuf = append(bufs.keyBuf, keyDelimClose...)
 	key := valkey.BinaryString(bufs.keyBuf[offset:])
 
-	return l.client.Do(ctx, l.client.B().Del().Key(key).Build()).Error()
+	offset = len(bufs.keyBuf)
+	bufs.keyBuf = append(bufs.keyBuf, key...)
+	bufs.keyBuf = append(bufs.keyBuf, ":ex"...)
+	expiresAtKey := valkey.BinaryString(bufs.keyBuf[offset:])
+
+	return l.client.Do(ctx, l.client.B().Del().Key(key, expiresAtKey).Build()).Error()
 }
 
 func (l *rateLimiter) allowAtMostFixedWindow(ctx context.Context, identifier string, n int64, limit int64, window time.Duration) (Result, error) {
@@ -371,7 +370,9 @@ func (l *rateLimiter) allowNGCRA(ctx context.Context, identifier string, n int64
 
 	offset := len(bufs.keyBuf)
 	bufs.keyBuf = append(bufs.keyBuf, l.keyPrefix...)
+	bufs.keyBuf = append(bufs.keyBuf, keyDelimOpen...)
 	bufs.keyBuf = append(bufs.keyBuf, identifier...)
+	bufs.keyBuf = append(bufs.keyBuf, keyDelimClose...)
 	key := valkey.BinaryString(bufs.keyBuf[offset:])
 
 	offset = len(bufs.keyBuf)
@@ -422,7 +423,9 @@ func (l *rateLimiter) allowAtMostGCRA(ctx context.Context, identifier string, n 
 
 	offset := len(bufs.keyBuf)
 	bufs.keyBuf = append(bufs.keyBuf, l.keyPrefix...)
+	bufs.keyBuf = append(bufs.keyBuf, keyDelimOpen...)
 	bufs.keyBuf = append(bufs.keyBuf, identifier...)
+	bufs.keyBuf = append(bufs.keyBuf, keyDelimClose...)
 	key := valkey.BinaryString(bufs.keyBuf[offset:])
 
 	offset = len(bufs.keyBuf)
