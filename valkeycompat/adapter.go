@@ -2318,39 +2318,15 @@ func (c *Compat) XNack(ctx context.Context, a *XNackArgs) *IntCmd {
 		return cmd
 	}
 
-	buildXnack := func(step cmds.XnackIdsId) valkey.Completed {
-		if a.RetryCount != nil && a.Force {
-			return step.Count(int64(*a.RetryCount)).Force().Build()
-		}
-		if a.RetryCount != nil {
-			return step.Count(int64(*a.RetryCount)).Build()
-		}
-		if a.Force {
-			return step.Force().Build()
-		}
-		return step.Build()
+	arb := c.client.B().Arbitrary("XNACK").Keys(a.Stream).Args(a.Group, a.Mode, "IDS", strconv.Itoa(len(a.IDs))).Args(a.IDs...)
+	if a.RetryCount != nil {
+		arb = arb.Args("RETRYCOUNT", strconv.FormatUint(*a.RetryCount, 10))
+	}
+	if a.Force {
+		arb = arb.Args("FORCE")
 	}
 
-	var completed valkey.Completed
-	switch strings.ToUpper(a.Mode) {
-	case XNackModeSilent:
-		completed = buildXnack(c.client.B().Xnack().Key(a.Stream).Group(a.Group).Silent().Ids().Numids(int64(len(a.IDs))).Id(a.IDs...))
-	case XNackModeFail:
-		completed = buildXnack(c.client.B().Xnack().Key(a.Stream).Group(a.Group).Fail().Ids().Numids(int64(len(a.IDs))).Id(a.IDs...))
-	case XNackModeFatal:
-		completed = buildXnack(c.client.B().Xnack().Key(a.Stream).Group(a.Group).Fatal().Ids().Numids(int64(len(a.IDs))).Id(a.IDs...))
-	default:
-		arb := c.client.B().Arbitrary("XNACK").Keys(a.Stream).Args(a.Group, a.Mode, "IDS", strconv.Itoa(len(a.IDs))).Args(a.IDs...)
-		if a.RetryCount != nil {
-			arb = arb.Args("RETRYCOUNT", strconv.FormatUint(*a.RetryCount, 10))
-		}
-		if a.Force {
-			arb = arb.Args("FORCE")
-		}
-		completed = arb.Build()
-	}
-
-	resp := c.client.Do(ctx, completed)
+	resp := c.client.Do(ctx, arb.Build())
 	return newIntCmd(resp)
 }
 
