@@ -1,7 +1,6 @@
 package valkeycompat
 
 import (
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -153,32 +152,6 @@ type ACLDryRunResult struct {
 	DeniedType ACLDeniedReason
 }
 
-// ACLSelector represents an isolated selector block (...) in ACL rules
-type ACLSelector struct {
-	Commands     string
-	Keys         []string
-	Channels     []string
-	Databases    []int
-	AllDatabases bool
-	Raw          string
-}
-
-// ACLUser represents a parsed user definition from ACL LIST
-type ACLUser struct {
-	Username     string
-	Enabled      bool
-	NoPass       bool
-	Passwords    []string
-	Flags        []string
-	Commands     string
-	Keys         []string
-	Channels     []string
-	Databases    []int
-	AllDatabases bool
-	Selectors    []ACLSelector
-	Raw          string
-}
-
 // ParseClientInfo parses raw client connection info strings into *ClientInfo.
 func ParseClientInfo(txt string) (*ClientInfo, error) {
 	info := &ClientInfo{}
@@ -319,236 +292,18 @@ func ParseClientInfo(txt string) (*ClientInfo, error) {
 	return info, nil
 }
 
-func tokenizeACL(raw string) ([]string, error) {
-	var tokens []string
-	raw = strings.TrimSpace(raw)
-	n := len(raw)
-	i := 0
-	for i < n {
-		for i < n && (raw[i] == ' ' || raw[i] == '\t' || raw[i] == '\r' || raw[i] == '\n') {
-			i++
-		}
-		if i >= n {
-			break
-		}
-		if raw[i] == '(' {
-			start := i
-			depth := 1
-			i++
-			for i < n && depth > 0 {
-				if raw[i] == '(' {
-					depth++
-				} else if raw[i] == ')' {
-					depth--
-				}
-				i++
-			}
-			if depth > 0 {
-				return nil, fmt.Errorf("valkey: unclosed selector in ACL rule: %s", raw[start:i])
-			}
-			tokens = append(tokens, raw[start:i])
-		} else {
-			start := i
-			for i < n && !(raw[i] == ' ' || raw[i] == '\t' || raw[i] == '\r' || raw[i] == '\n') {
-				i++
-			}
-			tokens = append(tokens, raw[start:i])
-		}
-	}
-	return tokens, nil
-}
 
-func parseSelector(raw string) ACLSelector {
-	sel := ACLSelector{
-		Raw:          raw,
-		AllDatabases: true,
-	}
-	inner := strings.TrimSpace(raw)
-	if strings.HasPrefix(inner, "(") && strings.HasSuffix(inner, ")") {
-		inner = strings.TrimSpace(inner[1 : len(inner)-1])
-	}
-	tokens := strings.Fields(inner)
-	for _, tok := range tokens {
-		switch {
-		case tok == "allkeys":
-			sel.Keys = []string{"~*"}
-		case tok == "resetkeys":
-			sel.Keys = nil
-		case strings.HasPrefix(tok, "~") || strings.HasPrefix(tok, "%"):
-			sel.Keys = append(sel.Keys, tok)
-		case tok == "allchannels":
-			sel.Channels = []string{"&*"}
-		case tok == "resetchannels":
-			sel.Channels = nil
-		case strings.HasPrefix(tok, "&"):
-			sel.Channels = append(sel.Channels, tok)
-		case tok == "alldbs":
-			sel.AllDatabases = true
-			sel.Databases = nil
-		case tok == "resetdbs":
-			sel.AllDatabases = false
-			sel.Databases = nil
-		case strings.HasPrefix(tok, "db=") || strings.HasPrefix(tok, "db:"):
-			sel.AllDatabases = false
-			val := strings.TrimPrefix(strings.TrimPrefix(tok, "db="), "db:")
-			for _, part := range strings.Split(val, ",") {
-				if db, err := strconv.Atoi(part); err == nil {
-					sel.Databases = append(sel.Databases, db)
-				}
-			}
-		case strings.HasPrefix(tok, "+") || strings.HasPrefix(tok, "-") || tok == "allcommands" || tok == "nocommands":
-			if sel.Commands == "" {
-				sel.Commands = tok
-			} else {
-				sel.Commands += " " + tok
-			}
-		case tok == "reset":
-			sel.Keys = nil
-			sel.Channels = nil
-			sel.Databases = nil
-			sel.AllDatabases = true
-			sel.Commands = "-@all"
-		}
-	}
-	return sel
-}
-
-// ParseACLUser tokenizes and decodes an individual ACL rule DSL string into an ACLUser struct.
-func ParseACLUser(raw string) (ACLUser, error) {
-	tokens, err := tokenizeACL(raw)
-	if err != nil {
-		return ACLUser{}, err
-	}
-	if len(tokens) == 0 {
-		return ACLUser{}, errors.New("valkey: empty ACL rule")
-	}
-
-	user := ACLUser{
-		Raw:          raw,
-		AllDatabases: true,
-	}
-
-	startIdx := 0
-	if tokens[0] == "user" {
-		if len(tokens) < 2 {
-			return ACLUser{}, errors.New("valkey: missing username after 'user'")
-		}
-		user.Username = tokens[1]
-		startIdx = 2
-	}
-
-	for i := startIdx; i < len(tokens); i++ {
-		tok := tokens[i]
-		switch {
-		case tok == "on":
-			user.Enabled = true
-		case tok == "off":
-			user.Enabled = false
-		case tok == "nopass":
-			user.NoPass = true
-			user.Passwords = nil
-		case tok == "resetpass":
-			user.NoPass = false
-			user.Passwords = nil
-		case strings.HasPrefix(tok, ">") || strings.HasPrefix(tok, "#"):
-			user.Passwords = append(user.Passwords, tok)
-		case strings.HasPrefix(tok, "<") || strings.HasPrefix(tok, "!"):
-			// password removal directive
-		case tok == "allkeys":
-			user.Keys = []string{"~*"}
-		case tok == "resetkeys":
-			user.Keys = nil
-		case strings.HasPrefix(tok, "~") || strings.HasPrefix(tok, "%"):
-			user.Keys = append(user.Keys, tok)
-		case tok == "allchannels":
-			user.Channels = []string{"&*"}
-		case tok == "resetchannels":
-			user.Channels = nil
-		case strings.HasPrefix(tok, "&"):
-			user.Channels = append(user.Channels, tok)
-		case tok == "alldbs":
-			user.AllDatabases = true
-			user.Databases = nil
-		case tok == "resetdbs":
-			user.AllDatabases = false
-			user.Databases = nil
-		case strings.HasPrefix(tok, "db=") || strings.HasPrefix(tok, "db:"):
-			user.AllDatabases = false
-			val := strings.TrimPrefix(strings.TrimPrefix(tok, "db="), "db:")
-			for _, part := range strings.Split(val, ",") {
-				if db, err := strconv.Atoi(part); err == nil {
-					user.Databases = append(user.Databases, db)
-				}
-			}
-		case strings.HasPrefix(tok, "+") || strings.HasPrefix(tok, "-") || tok == "allcommands" || tok == "nocommands":
-			if user.Commands == "" {
-				user.Commands = tok
-			} else {
-				user.Commands += " " + tok
-			}
-		case tok == "reset":
-			user.Enabled = false
-			user.NoPass = false
-			user.Passwords = nil
-			user.Keys = nil
-			user.Channels = nil
-			user.Databases = nil
-			user.AllDatabases = true
-			user.Commands = "-@all"
-			user.Selectors = nil
-		case tok == "clearselectors":
-			user.Selectors = nil
-		case strings.HasPrefix(tok, "("):
-			if !strings.HasSuffix(tok, ")") {
-				return ACLUser{}, fmt.Errorf("valkey: unclosed selector in ACL rule: %s", tok)
-			}
-			user.Selectors = append(user.Selectors, parseSelector(tok))
-		case tok == ")":
-			return ACLUser{}, errors.New("valkey: unexpected ')' in ACL rule")
-		default:
-			// Flags such as sanitize-payload, skip-sanitize-payload
-			user.Flags = append(user.Flags, tok)
-		}
-	}
-	return user, nil
-}
-
-// ParseACLListStrings decodes a slice of ACL rule DSL strings into []ACLUser.
-func ParseACLListStrings(lines []string) ([]ACLUser, error) {
-	users := make([]ACLUser, 0, len(lines))
-	for _, line := range lines {
-		user, err := ParseACLUser(line)
-		if err != nil {
-			return nil, err
-		}
-		users = append(users, user)
-	}
-	return users, nil
-}
-
-// ParseACLList decodes a multi-bulk array response from ACL LIST into []ACLUser.
-func ParseACLList(res valkey.ValkeyResult) ([]ACLUser, error) {
-	if err := res.Error(); err != nil {
-		return nil, err
-	}
-	lines, err := res.AsStrSlice()
-	if err != nil {
-		return nil, err
-	}
-	return ParseACLListStrings(lines)
-}
-
-// ParseACLLog decodes nested RESP3 maps or RESP2 flat key-value arrays into []ACLLogEntry.
-func ParseACLLog(res valkey.ValkeyResult) ([]ACLLogEntry, error) {
+// parseACLLog decodes nested RESP3 maps or RESP2 flat key-value arrays into []ACLLogEntry.
+func parseACLLog(res valkey.ValkeyResult) ([]ACLLogEntry, error) {
 	msg, err := res.ToMessage()
 	if err != nil {
 		return nil, err
 	}
-	return ParseACLLogMessage(msg)
+	return parseACLLogMessage(msg)
 }
 
-// ParseACLLogMessage decodes an array ValkeyMessage containing ACL log entries.
-func ParseACLLogMessage(msg valkey.ValkeyMessage) ([]ACLLogEntry, error) {
+// parseACLLogMessage decodes an array ValkeyMessage containing ACL log entries.
+func parseACLLogMessage(msg valkey.ValkeyMessage) ([]ACLLogEntry, error) {
 	arr, err := msg.ToArray()
 	if err != nil {
 		return nil, err
@@ -597,8 +352,8 @@ func ParseACLLogMessage(msg valkey.ValkeyMessage) ([]ACLLogEntry, error) {
 	return logEntries, nil
 }
 
-// ParseACLDryRun converts a raw ValkeyResult from ACL DRYRUN into an ACLDryRunResult.
-func ParseACLDryRun(res valkey.ValkeyResult) (ACLDryRunResult, error) {
+// parseACLDryRun converts a raw ValkeyResult from ACL DRYRUN into an ACLDryRunResult.
+func parseACLDryRun(res valkey.ValkeyResult) (ACLDryRunResult, error) {
 	if err := res.Error(); err != nil {
 		return ACLDryRunResult{}, err
 	}
@@ -606,11 +361,11 @@ func ParseACLDryRun(res valkey.ValkeyResult) (ACLDryRunResult, error) {
 	if err != nil {
 		return ACLDryRunResult{}, err
 	}
-	return ParseACLDryRunString(str), nil
+	return parseACLDryRunString(str), nil
 }
 
-// ParseACLDryRunString parses a dry-run result string and categorizes authorization status.
-func ParseACLDryRunString(s string) ACLDryRunResult {
+// parseACLDryRunString parses a dry-run result string and categorizes authorization status.
+func parseACLDryRunString(s string) ACLDryRunResult {
 	if s == "OK" {
 		return ACLDryRunResult{
 			Allowed:    true,

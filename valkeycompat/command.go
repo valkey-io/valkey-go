@@ -455,7 +455,7 @@ func (cmd *StringCmd) ACLDryRunResult() (ACLDryRunResult, error) {
 	if cmd.err != nil {
 		return ACLDryRunResult{}, cmd.err
 	}
-	return ParseACLDryRunString(cmd.val), nil
+	return parseACLDryRunString(cmd.val), nil
 }
 
 type BoolCmd struct {
@@ -602,14 +602,6 @@ func newStringSliceCmd(res valkey.ValkeyResult) *StringSliceCmd {
 	cmd := &StringSliceCmd{}
 	cmd.from(res)
 	return cmd
-}
-
-// AsACLUsers decodes raw ACL list results into typed structs.
-func (cmd *StringSliceCmd) AsACLUsers() ([]ACLUser, error) {
-	if cmd.err != nil {
-		return nil, cmd.err
-	}
-	return ParseACLListStrings(cmd.val)
 }
 
 type IntSliceCmd struct {
@@ -4894,7 +4886,7 @@ type ACLLogCmd struct {
 }
 
 func (cmd *ACLLogCmd) from(res valkey.ValkeyResult) {
-	entries, err := ParseACLLog(res)
+	entries, err := parseACLLog(res)
 	if err != nil {
 		cmd.SetErr(err)
 		return

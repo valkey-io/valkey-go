@@ -2402,25 +2402,22 @@ func testAdapter(resp3 bool) {
 				Expect(dryRunRes.DeniedType).To(Equal(DeniedNone))
 			})
 
-			It("should parse structured ACL rules via AsACLUsers", func() {
-				users, err := adapter.ACLList(ctx).AsACLUsers()
+			It("should list ACL rules via ACLList", func() {
+				users, err := adapter.ACLList(ctx).Result()
 				Expect(err).NotTo(HaveOccurred())
 				Expect(users).NotTo(BeEmpty())
-				Expect(users[0].Username).To(Equal("default"))
-				Expect(users[0].Enabled).To(BeTrue())
 			})
 
-			It("should work in pipeline with AsACLUsers and ACLDryRunResult", func() {
+			It("should work in pipeline with ACLList and ACLDryRunResult", func() {
 				pipe := adapter.Pipeline()
 				listCmd := pipe.ACLList(ctx)
 				dryRunCmd := pipe.ACLDryRun(ctx, "default", "get", "randomKey")
 				_, err := pipe.Exec(ctx)
 				Expect(err).NotTo(HaveOccurred())
 
-				users, err := listCmd.AsACLUsers()
+				users, err := listCmd.Result()
 				Expect(err).NotTo(HaveOccurred())
 				Expect(users).NotTo(BeEmpty())
-				Expect(users[0].Username).To(Equal("default"))
 
 				dryRunRes, err := dryRunCmd.ACLDryRunResult()
 				Expect(err).NotTo(HaveOccurred())

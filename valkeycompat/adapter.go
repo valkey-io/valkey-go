@@ -3570,14 +3570,12 @@ func (c *Compat) FunctionStats(ctx context.Context) *FunctionStatsCmd {
 }
 
 func (c *Compat) ACLDryRun(ctx context.Context, username string, command ...any) *StringCmd {
-	if len(command) == 0 {
-		cmd := c.client.B().Arbitrary("ACL", "DRYRUN", username).Build()
-		resp := c.client.Do(ctx, cmd)
-		return newStringCmd(resp)
+	args := make([]string, 0, len(command))
+	for _, v := range command {
+		args = append(args, str(v))
 	}
-	cmd := c.client.B().AclDryrun().Username(username).Command(fmt.Sprint(command[0])).Arg(argsToSlice(command[1:])...).Build()
-	resp := c.client.Do(ctx, cmd)
-	return newStringCmd(resp)
+	cmd := c.client.B().Arbitrary("ACL", "DRYRUN", username).Args(args...).Build()
+	return newStringCmd(c.client.Do(ctx, cmd))
 }
 
 type ACLCatArgs struct {

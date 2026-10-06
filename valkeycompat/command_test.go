@@ -631,17 +631,6 @@ var _ = Describe("Commands", func() {
 			Expect(cmd.Err()).To(Equal(err))
 		}
 		{
-			cmd := &StringSliceCmd{}
-			cmd.SetVal([]string{"user default on nopass sanitize-payload ~* &* +@all"})
-			users, e := cmd.AsACLUsers()
-			Expect(e).To(BeNil())
-			Expect(users).To(HaveLen(1))
-			Expect(users[0].Username).To(Equal("default"))
-			cmd.SetErr(err)
-			_, e = cmd.AsACLUsers()
-			Expect(e).To(Equal(err))
-		}
-		{
 			cmd := &StringCmd{}
 			cmd.SetVal("OK")
 			res, e := cmd.ACLDryRunResult()
@@ -1786,35 +1775,6 @@ func TestACLDryRunResult(t *testing.T) {
 		cmd := &StringCmd{}
 		cmd.SetErr(errors.New("proto err"))
 		_, err := cmd.ACLDryRunResult()
-		if err == nil {
-			t.Errorf("expected error to propagate")
-		}
-	})
-}
-
-func TestStringSliceCmdAsACLUsers(t *testing.T) {
-	t.Run("success parsing users", func(t *testing.T) {
-		cmd := &StringSliceCmd{}
-		cmd.SetVal([]string{
-			"user default on nopass sanitize-payload ~* &* +@all",
-			"user bob on #abc ~data:* &events:* +get",
-		})
-		users, err := cmd.AsACLUsers()
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if len(users) != 2 {
-			t.Fatalf("expected 2 users, got %d", len(users))
-		}
-		if users[0].Username != "default" || users[1].Username != "bob" {
-			t.Errorf("unexpected usernames: %v", users)
-		}
-	})
-
-	t.Run("propagates error", func(t *testing.T) {
-		cmd := &StringSliceCmd{}
-		cmd.SetErr(errors.New("cmd err"))
-		_, err := cmd.AsACLUsers()
 		if err == nil {
 			t.Errorf("expected error to propagate")
 		}

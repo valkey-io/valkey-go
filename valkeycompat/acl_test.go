@@ -3,7 +3,7 @@ package valkeycompat
 import (
 	"context"
 	"errors"
-	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,316 +11,8 @@ import (
 	"github.com/valkey-io/valkey-go/mock"
 )
 
-func TestParseACLUser(t *testing.T) {
-	t.Run("default admin rule", func(t *testing.T) {
-		raw := "user default on nopass sanitize-payload ~* &* +@all"
-		u, err := ParseACLUser(raw)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if u.Username != "default" {
-			t.Errorf("expected username default, got %s", u.Username)
-		}
-		if !u.Enabled {
-			t.Errorf("expected enabled true")
-		}
-		if !u.NoPass {
-			t.Errorf("expected nopass true")
-		}
-		if !reflect.DeepEqual(u.Keys, []string{"~*"}) {
-			t.Errorf("expected keys [~*], got %v", u.Keys)
-		}
-		if !reflect.DeepEqual(u.Channels, []string{"&*"}) {
-			t.Errorf("expected channels [&*], got %v", u.Channels)
-		}
-		if u.Commands != "+@all" {
-			t.Errorf("expected commands +@all, got %s", u.Commands)
-		}
-		if !reflect.DeepEqual(u.Flags, []string{"sanitize-payload"}) {
-			t.Errorf("expected flags [sanitize-payload], got %v", u.Flags)
-		}
-		if !u.AllDatabases {
-			t.Errorf("expected all databases true")
-		}
-		if len(u.Selectors) != 0 {
-			t.Errorf("expected no selectors, got %d", len(u.Selectors))
-		}
-		if u.Raw != raw {
-			t.Errorf("expected raw %q, got %q", raw, u.Raw)
-		}
-	})
 
-	t.Run("restricted user with password hash, channels, and selector", func(t *testing.T) {
-		raw := "user alice on #ea71c25a7a602246b4c39824b855678894a96f43bb9b71319c39700a1e045222 ~cached:* resetchannels &events:* -@all +get +set (~secret:* resetchannels -@all +@read)"
-		u, err := ParseACLUser(raw)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if u.Username != "alice" {
-			t.Errorf("expected username alice, got %s", u.Username)
-		}
-		if !u.Enabled {
-			t.Errorf("expected enabled true")
-		}
-		if u.NoPass {
-			t.Errorf("expected nopass false")
-		}
-		if len(u.Passwords) != 1 || u.Passwords[0] != "#ea71c25a7a602246b4c39824b855678894a96f43bb9b71319c39700a1e045222" {
-			t.Errorf("unexpected passwords %v", u.Passwords)
-		}
-		if !reflect.DeepEqual(u.Keys, []string{"~cached:*"}) {
-			t.Errorf("expected keys [~cached:*], got %v", u.Keys)
-		}
-		if !reflect.DeepEqual(u.Channels, []string{"&events:*"}) {
-			t.Errorf("expected channels [&events:*], got %v", u.Channels)
-		}
-		if u.Commands != "-@all +get +set" {
-			t.Errorf("expected commands '-@all +get +set', got %q", u.Commands)
-		}
-		if len(u.Selectors) != 1 {
-			t.Fatalf("expected 1 selector, got %d", len(u.Selectors))
-		}
-		sel := u.Selectors[0]
-		if !reflect.DeepEqual(sel.Keys, []string{"~secret:*"}) {
-			t.Errorf("expected selector keys [~secret:*], got %v", sel.Keys)
-		}
-		if sel.Commands != "-@all +@read" {
-			t.Errorf("expected selector commands '-@all +@read', got %q", sel.Commands)
-		}
-		if len(sel.Channels) != 0 {
-			t.Errorf("expected empty selector channels after resetchannels, got %v", sel.Channels)
-		}
-	})
 
-	t.Run("database scoping and reset directives", func(t *testing.T) {
-		raw := "user bob off resetpass resetkeys resetdbs db=0,1,2"
-		u, err := ParseACLUser(raw)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if u.Username != "bob" {
-			t.Errorf("expected username bob, got %s", u.Username)
-		}
-		if u.Enabled {
-			t.Errorf("expected enabled false")
-		}
-		if u.AllDatabases {
-			t.Errorf("expected all databases false")
-		}
-		if !reflect.DeepEqual(u.Databases, []int{0, 1, 2}) {
-			t.Errorf("expected databases [0, 1, 2], got %v", u.Databases)
-		}
-
-		// Now reset to alldbs
-		rawAllDbs := "user bob on resetdbs alldbs"
-		u2, err := ParseACLUser(rawAllDbs)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if !u2.AllDatabases {
-			t.Errorf("expected all databases true after alldbs")
-		}
-	})
-
-	t.Run("allkeys and allchannels keywords", func(t *testing.T) {
-		raw := "user eve on allkeys allchannels allcommands"
-		u, err := ParseACLUser(raw)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if !reflect.DeepEqual(u.Keys, []string{"~*"}) {
-			t.Errorf("expected keys [~*], got %v", u.Keys)
-		}
-		if !reflect.DeepEqual(u.Channels, []string{"&*"}) {
-			t.Errorf("expected channels [&*], got %v", u.Channels)
-		}
-		if u.Commands != "allcommands" {
-			t.Errorf("expected allcommands, got %q", u.Commands)
-		}
-	})
-
-	t.Run("multiple selector blocks", func(t *testing.T) {
-		raw := "user multi on (~keys1:* +@read) (~keys2:* +@write db=0)"
-		u, err := ParseACLUser(raw)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if len(u.Selectors) != 2 {
-			t.Fatalf("expected 2 selectors, got %d", len(u.Selectors))
-		}
-		if !reflect.DeepEqual(u.Selectors[0].Keys, []string{"~keys1:*"}) {
-			t.Errorf("unexpected selector 0 keys: %v", u.Selectors[0].Keys)
-		}
-		if u.Selectors[0].Commands != "+@read" {
-			t.Errorf("unexpected selector 0 commands: %s", u.Selectors[0].Commands)
-		}
-		if !reflect.DeepEqual(u.Selectors[1].Keys, []string{"~keys2:*"}) {
-			t.Errorf("unexpected selector 1 keys: %v", u.Selectors[1].Keys)
-		}
-		if u.Selectors[1].Commands != "+@write" {
-			t.Errorf("unexpected selector 1 commands: %s", u.Selectors[1].Commands)
-		}
-		if u.Selectors[1].AllDatabases {
-			t.Errorf("expected selector 1 AllDatabases false")
-		}
-		if !reflect.DeepEqual(u.Selectors[1].Databases, []int{0}) {
-			t.Errorf("expected selector 1 databases [0], got %v", u.Selectors[1].Databases)
-		}
-	})
-
-	t.Run("user reset token", func(t *testing.T) {
-		raw := "user resetted on >pass ~* (~sub:* +@read) reset"
-		u, err := ParseACLUser(raw)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if u.Enabled {
-			t.Errorf("expected user off after reset")
-		}
-		if len(u.Passwords) != 0 {
-			t.Errorf("expected no passwords after reset")
-		}
-		if len(u.Keys) != 0 {
-			t.Errorf("expected no keys after reset")
-		}
-		if len(u.Selectors) != 0 {
-			t.Errorf("expected no selectors after reset, got %d", len(u.Selectors))
-		}
-		if u.Commands != "-@all" {
-			t.Errorf("expected commands -@all after reset, got %q", u.Commands)
-		}
-	})
-
-	t.Run("clearselectors directive", func(t *testing.T) {
-		raw := "user alice on (~sub1:* +get) (~sub2:* +set) clearselectors"
-		u, err := ParseACLUser(raw)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if len(u.Selectors) != 0 {
-			t.Errorf("expected 0 selectors after clearselectors, got %d", len(u.Selectors))
-		}
-	})
-
-	t.Run("rule without user prefix", func(t *testing.T) {
-		raw := "on nopass ~* +get"
-		u, err := ParseACLUser(raw)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if !u.Enabled || !u.NoPass {
-			t.Errorf("expected enabled and nopass")
-		}
-		if !reflect.DeepEqual(u.Keys, []string{"~*"}) {
-			t.Errorf("expected keys [~*]")
-		}
-	})
-
-	t.Run("invalid rules and unclosed selectors", func(t *testing.T) {
-		if _, err := ParseACLUser(""); err == nil {
-			t.Errorf("expected error on empty string")
-		}
-		if _, err := ParseACLUser("user"); err == nil {
-			t.Errorf("expected error on missing username")
-		}
-		if u, err := ParseACLUser("user bob (+get"); err == nil {
-			t.Errorf("expected error on unclosed selector")
-		} else {
-			for _, flag := range u.Flags {
-				if flag == "(+get" {
-					t.Errorf("unclosed selector must not pollute Flags: %v", u.Flags)
-				}
-			}
-		}
-		if _, err := ParseACLUser("user bob (+get (~secret:*"); err == nil {
-			t.Errorf("expected error on nested unclosed selector")
-		}
-		if _, err := ParseACLUser("user bob +get )"); err == nil {
-			t.Errorf("expected error on stray ')'")
-		}
-	})
-
-	t.Run("parentheses in passwords keys and channels", func(t *testing.T) {
-		raw := "user alice on >pass(word) ~data(1) &events(all) +get"
-		u, err := ParseACLUser(raw)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if !reflect.DeepEqual(u.Passwords, []string{">pass(word)"}) {
-			t.Errorf("expected passwords [>pass(word)], got %v", u.Passwords)
-		}
-		if !reflect.DeepEqual(u.Keys, []string{"~data(1)"}) {
-			t.Errorf("expected keys [~data(1)], got %v", u.Keys)
-		}
-		if !reflect.DeepEqual(u.Channels, []string{"&events(all)"}) {
-			t.Errorf("expected channels [&events(all)], got %v", u.Channels)
-		}
-		if len(u.Selectors) != 0 {
-			t.Errorf("expected 0 selectors, got %d", len(u.Selectors))
-		}
-		if u.Commands != "+get" {
-			t.Errorf("expected commands '+get', got %q", u.Commands)
-		}
-	})
-
-	t.Run("parentheses in passwords with selectors", func(t *testing.T) {
-		raw := "user alice on >pass(word) (~data(1) +get)"
-		u, err := ParseACLUser(raw)
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if !reflect.DeepEqual(u.Passwords, []string{">pass(word)"}) {
-			t.Errorf("expected passwords [>pass(word)], got %v", u.Passwords)
-		}
-		if len(u.Selectors) != 1 {
-			t.Fatalf("expected 1 selector, got %d", len(u.Selectors))
-		}
-		if !reflect.DeepEqual(u.Selectors[0].Keys, []string{"~data(1)"}) {
-			t.Errorf("expected selector keys [~data(1)], got %v", u.Selectors[0].Keys)
-		}
-		if u.Selectors[0].Commands != "+get" {
-			t.Errorf("expected selector commands '+get', got %q", u.Selectors[0].Commands)
-		}
-	})
-}
-
-func TestParseACLList(t *testing.T) {
-	lines := []string{
-		"user default on nopass sanitize-payload ~* &* +@all",
-		"user alice on #1234 ~cached:* &events:* +get",
-	}
-
-	users, err := ParseACLListStrings(lines)
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if len(users) != 2 {
-		t.Fatalf("expected 2 users, got %d", len(users))
-	}
-	if users[0].Username != "default" || users[1].Username != "alice" {
-		t.Errorf("unexpected usernames: %s, %s", users[0].Username, users[1].Username)
-	}
-
-	// Test with ValkeyResult
-	msg := mock.ValkeyArray(
-		mock.ValkeyString(lines[0]),
-		mock.ValkeyString(lines[1]),
-	)
-	res := mock.Result(msg)
-	usersFromRes, err := ParseACLList(res)
-	if err != nil {
-		t.Fatalf("unexpected err from ParseACLList: %v", err)
-	}
-	if len(usersFromRes) != 2 {
-		t.Fatalf("expected 2 users from res, got %d", len(usersFromRes))
-	}
-
-	// Error in ValkeyResult
-	errRes := mock.ErrorResult(errors.New("network error"))
-	if _, err := ParseACLList(errRes); err == nil {
-		t.Errorf("expected error from errRes")
-	}
-}
 
 func TestParseClientInfo(t *testing.T) {
 	txt := "id=469 addr=127.0.0.1:55958 laddr=127.0.0.1:6379 fd=8 name=myclient age=12 idle=3 flags=SM db=1 sub=2 psub=3 ssub=4 multi=5 watch=6 qbuf=100 qbuf-free=200 argv-mem=18 multi-mem=50 rbs=16384 rbp=16384 obl=1 oll=2 omem=3 tot-mem=17322 events=r cmd=auth user=default redir=-1 resp=3 lib-name=valkey-go lib-ver=1.0 tot-net-in=40 tot-net-out=50 tot-cmds=6"
@@ -432,7 +124,7 @@ func TestParseACLLog(t *testing.T) {
 		logArr := mock.ValkeyArray(entryMap)
 		res := mock.Result(logArr)
 
-		entries, err := ParseACLLog(res)
+		entries, err := parseACLLog(res)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -467,7 +159,7 @@ func TestParseACLLog(t *testing.T) {
 		logArr := mock.ValkeyArray(entryFlat)
 		res := mock.Result(logArr)
 
-		entries, err := ParseACLLog(res)
+		entries, err := parseACLLog(res)
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -481,7 +173,7 @@ func TestParseACLLog(t *testing.T) {
 
 	t.Run("error result", func(t *testing.T) {
 		res := mock.ErrorResult(errors.New("err"))
-		if _, err := ParseACLLog(res); err == nil {
+		if _, err := parseACLLog(res); err == nil {
 			t.Errorf("expected error")
 		}
 	})
@@ -590,7 +282,7 @@ func TestParseACLDryRun(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			res := ParseACLDryRunString(tc.input)
+			res := parseACLDryRunString(tc.input)
 			if res.Allowed != tc.expectedAllow {
 				t.Errorf("expected Allowed %v, got %v", tc.expectedAllow, res.Allowed)
 			}
@@ -601,14 +293,14 @@ func TestParseACLDryRun(t *testing.T) {
 				t.Errorf("expected DeniedType %v, got %v", tc.expectedDenied, res.DeniedType)
 			}
 
-			// Also test through ParseACLDryRun with ValkeyResult
+			// Also test through parseACLDryRun with ValkeyResult
 			vr := mock.Result(mock.ValkeyString(tc.input))
-			resFromVR, err := ParseACLDryRun(vr)
+			resFromVR, err := parseACLDryRun(vr)
 			if err != nil {
 				t.Fatalf("unexpected err: %v", err)
 			}
 			if resFromVR != res {
-				t.Errorf("mismatch between ParseACLDryRunString and ParseACLDryRun: %+v vs %+v", res, resFromVR)
+				t.Errorf("mismatch between parseACLDryRunString and parseACLDryRun: %+v vs %+v", res, resFromVR)
 			}
 		})
 	}
@@ -616,7 +308,7 @@ func TestParseACLDryRun(t *testing.T) {
 	t.Run("protocol error propagation", func(t *testing.T) {
 		protoErr := errors.New("ERR User 'nonexistent' not found")
 		vr := mock.ErrorResult(protoErr)
-		_, err := ParseACLDryRun(vr)
+		_, err := parseACLDryRun(vr)
 		if err == nil {
 			t.Errorf("expected error from protocol error")
 		}
@@ -675,25 +367,22 @@ func TestACLLiveIntegration(t *testing.T) {
 			}
 
 			// 1. Live ACLList
-			users, err := adapter.ACLList(ctx).AsACLUsers()
+			users, err := adapter.ACLList(ctx).Result()
 			if err != nil {
 				t.Fatalf("[%s] live ACLList failed: %v", target.name, err)
 			}
 			if len(users) == 0 {
 				t.Fatalf("[%s] expected at least 1 user in ACLList", target.name)
 			}
-			var defaultUser *ACLUser
-			for i := range users {
-				if users[i].Username == "default" {
-					defaultUser = &users[i]
+			foundDefault := false
+			for _, line := range users {
+				if strings.Contains(line, "default") {
+					foundDefault = true
 					break
 				}
 			}
-			if defaultUser == nil {
+			if !foundDefault {
 				t.Fatalf("[%s] default user not found in ACLList", target.name)
-			}
-			if !defaultUser.Enabled {
-				t.Errorf("[%s] default user expected enabled", target.name)
 			}
 
 			// 2. Setup isolated user for ACL DRYRUN verification
@@ -767,37 +456,33 @@ func TestACLLiveIntegration(t *testing.T) {
 				t.Errorf("[%s] expected DeniedKey (not DeniedCommand) for key with command substring, got %v (%s)", target.name, res.DeniedType, res.Reason)
 			}
 
-			// 8. Attach selector and verify structured parsing
+			// 8. Attach selector and verify ACLList
 			attachSelectorCmd := client.B().AclSetuser().Username(testUser).Rule("(~secret:* +get)").Build()
 			if err := client.Do(ctx, attachSelectorCmd).Error(); err == nil {
 				// Server supports selectors (Redis 7+ / Valkey)
-				uList, err := adapter.ACLList(ctx).AsACLUsers()
+				uList, err := adapter.ACLList(ctx).Result()
 				if err != nil {
 					t.Fatalf("[%s] ACLList after selector attach failed: %v", target.name, err)
 				}
-				var found *ACLUser
-				for i := range uList {
-					if uList[i].Username == testUser {
-						found = &uList[i]
+				found := false
+				for _, line := range uList {
+					if strings.Contains(line, testUser) && strings.Contains(line, "~secret:*") {
+						found = true
 						break
 					}
 				}
-				if found == nil || len(found.Selectors) == 0 {
-					t.Errorf("[%s] expected selector attached for user %s, got %+v", target.name, testUser, found)
-				} else {
-					if !reflect.DeepEqual(found.Selectors[0].Keys, []string{"~secret:*"}) {
-						t.Errorf("[%s] unexpected selector keys: %v", target.name, found.Selectors[0].Keys)
-					}
+				if !found {
+					t.Errorf("[%s] expected selector in ACLList for user %s, got %v", target.name, testUser, uList)
 				}
 
 				// 9. Clear selectors
 				clearCmd := client.B().AclSetuser().Username(testUser).Rule("clearselectors").Build()
 				if err := client.Do(ctx, clearCmd).Error(); err == nil {
-					uListAfterClear, _ := adapter.ACLList(ctx).AsACLUsers()
-					for i := range uListAfterClear {
-						if uListAfterClear[i].Username == testUser {
-							if len(uListAfterClear[i].Selectors) != 0 {
-								t.Errorf("[%s] expected 0 selectors after clearselectors, got %d", target.name, len(uListAfterClear[i].Selectors))
+					uListAfterClear, _ := adapter.ACLList(ctx).Result()
+					for _, line := range uListAfterClear {
+						if strings.Contains(line, testUser) {
+							if strings.Contains(line, "(~secret:*") {
+								t.Errorf("[%s] expected selector removed after clearselectors, got %s", target.name, line)
 							}
 							break
 						}
