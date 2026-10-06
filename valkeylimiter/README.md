@@ -9,7 +9,7 @@ By default, it uses the **Fixed Window** counter algorithm for simplicity and ba
 
 - **Fixed Window by Default**: Proven counter-based rate limiting compatible with existing deployments.
 - **Generic Cell Rate Algorithm (GCRA) Support**: Smooth leaky-bucket rate limiting that eliminates boundary burst spikes ("double-dipping") and paces requests evenly over time.
-- **Single-Key Architecture for GCRA**: Operates on a single Valkey key (`valkeylimiter:{<identifier>}`), cutting keyspace overhead in half compared to dual-key fixed-window limiters.
+- **Single-Key Architecture for GCRA**: Operates on a single Valkey key (`valkeylimiter:gcra:{<identifier>}`), cutting keyspace overhead in half compared to dual-key fixed-window limiters while keeping namespaces isolated to prevent key collision with Fixed Window.
 - **Server-Authoritative Clock**: For GCRA, time is derived atomically inside Valkey using `redis.call('TIME')`, eliminating synchronization discrepancies caused by client NTP drift.
 - **Valkey Cluster Safe (Zero `CROSSSLOT`)**: All operations use cluster hash tags (`{...}`) to ensure multi-key operations and single-key GCRA calls never trigger `CROSSSLOT` errors across cluster nodes.
 - **Partial Allowance (`AllowAtMost`)**: Allows batch jobs or multi-token consumers to acquire "up to" available capacity without failing completely.

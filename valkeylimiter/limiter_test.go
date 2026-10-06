@@ -182,6 +182,9 @@ var _ = Describe("RateLimiter", func() {
 				Limit:        1,
 				Window:       time.Second,
 			})
+			if err != nil {
+				Skip("cannot connect to live Valkey/Redis instance on 127.0.0.1:6379")
+			}
 			Expect(err).NotTo(HaveOccurred())
 			defer limiter.Close()
 		})
@@ -932,6 +935,131 @@ var _ = Describe("RateLimiter", func() {
 
 			err = limiter.Reset(context.Background(), "user-err")
 			Expect(err).To(HaveOccurred())
+		})
+
+		It("isolates key namespaces between Fixed Window and GCRA", func() {
+			// 1. Fixed Window Reset expects DEL valkeylimiter:{user1} valkeylimiter:{user1}:ex
+			client.EXPECT().Do(gomock.Any(), gomock.Cond(func(cmd any) bool {
+				c, ok := cmd.(valkey.Completed)
+				if !ok {
+					return false
+				}
+				cmds := c.Commands()
+				return len(cmds) == 3 && cmds[0] == "DEL" && cmds[1] == "valkeylimiter:{user1}" && cmds[2] == "valkeylimiter:{user1}:ex"
+			})).Return(mock.Result(mock.ValkeyInt64(2))).Times(1)
+
+			fwLimiter, err := valkeylimiter.NewRateLimiter(valkeylimiter.RateLimiterOption{
+				ClientBuilder: func(option valkey.ClientOption) (valkey.Client, error) {
+					return client, nil
+				},
+				Limit:     10,
+				Window:    time.Second,
+				Algorithm: valkeylimiter.AlgorithmFixedWindow,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fwLimiter.Reset(context.Background(), "user1")).To(Succeed())
+
+			// 2. GCRA Reset expects DEL valkeylimiter:gcra:{user1}
+			client.EXPECT().Do(gomock.Any(), gomock.Cond(func(cmd any) bool {
+				c, ok := cmd.(valkey.Completed)
+				if !ok {
+					return false
+				}
+				cmds := c.Commands()
+				return len(cmds) == 2 && cmds[0] == "DEL" && cmds[1] == "valkeylimiter:gcra:{user1}"
+			})).Return(mock.Result(mock.ValkeyInt64(1))).Times(1)
+
+			gcraLimiter, err := valkeylimiter.NewRateLimiter(valkeylimiter.RateLimiterOption{
+				ClientBuilder: func(option valkey.ClientOption) (valkey.Client, error) {
+					return client, nil
+				},
+				Limit:     10,
+				Window:    time.Second,
+				Algorithm: valkeylimiter.AlgorithmGCRA,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(gcraLimiter.Reset(context.Background(), "user1")).To(Succeed())
+		})
+
+		It("preserves custom KeyPrefix with isolated namespaces", func() {
+			// Custom prefix with Fixed Window: custom:{user2} and custom:{user2}:ex
+			client.EXPECT().Do(gomock.Any(), gomock.Cond(func(cmd any) bool {
+				c, ok := cmd.(valkey.Completed)
+				if !ok {
+					return false
+				}
+				cmds := c.Commands()
+				return len(cmds) == 3 && cmds[0] == "DEL" && cmds[1] == "custom:{user2}" && cmds[2] == "custom:{user2}:ex"
+			})).Return(mock.Result(mock.ValkeyInt64(2))).Times(1)
+
+			fwLimiter, err := valkeylimiter.NewRateLimiter(valkeylimiter.RateLimiterOption{
+				ClientBuilder: func(option valkey.ClientOption) (valkey.Client, error) {
+					return client, nil
+				},
+				KeyPrefix: "custom",
+				Limit:     10,
+				Window:    time.Second,
+				Algorithm: valkeylimiter.AlgorithmFixedWindow,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(fwLimiter.Reset(context.Background(), "user2")).To(Succeed())
+
+			// Custom prefix with GCRA: custom:gcra:{user2}
+			client.EXPECT().Do(gomock.Any(), gomock.Cond(func(cmd any) bool {
+				c, ok := cmd.(valkey.Completed)
+				if !ok {
+					return false
+				}
+				cmds := c.Commands()
+				return len(cmds) == 2 && cmds[0] == "DEL" && cmds[1] == "custom:gcra:{user2}"
+			})).Return(mock.Result(mock.ValkeyInt64(1))).Times(1)
+
+			gcraLimiter, err := valkeylimiter.NewRateLimiter(valkeylimiter.RateLimiterOption{
+				ClientBuilder: func(option valkey.ClientOption) (valkey.Client, error) {
+					return client, nil
+				},
+				KeyPrefix: "custom",
+				Limit:     10,
+				Window:    time.Second,
+				Algorithm: valkeylimiter.AlgorithmGCRA,
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(gcraLimiter.Reset(context.Background(), "user2")).To(Succeed())
+		})
+
+		It("switches key namespace dynamically with WithAlgorithm option", func() {
+			limiter, err := valkeylimiter.NewRateLimiter(valkeylimiter.RateLimiterOption{
+				ClientBuilder: func(option valkey.ClientOption) (valkey.Client, error) {
+					return client, nil
+				},
+				Limit:  10,
+				Window: time.Second,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Default is Fixed Window
+			client.EXPECT().Do(gomock.Any(), gomock.Cond(func(cmd any) bool {
+				c, ok := cmd.(valkey.Completed)
+				if !ok {
+					return false
+				}
+				cmds := c.Commands()
+				return len(cmds) == 3 && cmds[0] == "DEL" && cmds[1] == "valkeylimiter:{dynamic}" && cmds[2] == "valkeylimiter:{dynamic}:ex"
+			})).Return(mock.Result(mock.ValkeyInt64(2))).Times(1)
+
+			Expect(limiter.Reset(context.Background(), "dynamic")).To(Succeed())
+
+			// Dynamically override with GCRA
+			client.EXPECT().Do(gomock.Any(), gomock.Cond(func(cmd any) bool {
+				c, ok := cmd.(valkey.Completed)
+				if !ok {
+					return false
+				}
+				cmds := c.Commands()
+				return len(cmds) == 2 && cmds[0] == "DEL" && cmds[1] == "valkeylimiter:gcra:{dynamic}"
+			})).Return(mock.Result(mock.ValkeyInt64(1))).Times(1)
+
+			Expect(limiter.Reset(context.Background(), "dynamic", valkeylimiter.WithAlgorithm(valkeylimiter.AlgorithmGCRA))).To(Succeed())
 		})
 
 		It("executes full lifecycle on live server", func() {

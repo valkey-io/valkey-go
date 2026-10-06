@@ -41,6 +41,7 @@ const (
 	PlaceholderPrefix = "valkeylimiter"
 	GCRAPrefix        = "rate:"
 	keyDelimOpen      = ":{"
+	gcraKeyDelimOpen  = ":gcra:{"
 	keyDelimClose     = "}"
 )
 
@@ -166,7 +167,7 @@ func (l *rateLimiter) Reset(ctx context.Context, identifier string, options ...R
 	if alg == AlgorithmGCRA {
 		offset := len(bufs.keyBuf)
 		bufs.keyBuf = append(bufs.keyBuf, l.keyPrefix...)
-		bufs.keyBuf = append(bufs.keyBuf, keyDelimOpen...)
+		bufs.keyBuf = append(bufs.keyBuf, gcraKeyDelimOpen...)
 		bufs.keyBuf = append(bufs.keyBuf, identifier...)
 		bufs.keyBuf = append(bufs.keyBuf, keyDelimClose...)
 		key := valkey.BinaryString(bufs.keyBuf[offset:])
@@ -370,7 +371,7 @@ func (l *rateLimiter) allowNGCRA(ctx context.Context, identifier string, n int64
 
 	offset := len(bufs.keyBuf)
 	bufs.keyBuf = append(bufs.keyBuf, l.keyPrefix...)
-	bufs.keyBuf = append(bufs.keyBuf, keyDelimOpen...)
+	bufs.keyBuf = append(bufs.keyBuf, gcraKeyDelimOpen...)
 	bufs.keyBuf = append(bufs.keyBuf, identifier...)
 	bufs.keyBuf = append(bufs.keyBuf, keyDelimClose...)
 	key := valkey.BinaryString(bufs.keyBuf[offset:])
@@ -423,7 +424,7 @@ func (l *rateLimiter) allowAtMostGCRA(ctx context.Context, identifier string, n 
 
 	offset := len(bufs.keyBuf)
 	bufs.keyBuf = append(bufs.keyBuf, l.keyPrefix...)
-	bufs.keyBuf = append(bufs.keyBuf, keyDelimOpen...)
+	bufs.keyBuf = append(bufs.keyBuf, gcraKeyDelimOpen...)
 	bufs.keyBuf = append(bufs.keyBuf, identifier...)
 	bufs.keyBuf = append(bufs.keyBuf, keyDelimClose...)
 	key := valkey.BinaryString(bufs.keyBuf[offset:])
