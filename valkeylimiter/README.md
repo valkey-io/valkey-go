@@ -160,46 +160,6 @@ res, err := limiter.Allow(ctx, "{tenant_1}:user_42")
 
 ---
 
-## API Reference
-
-### Structs
-
-#### `RateLimiterOption`
-- `ClientOption (valkey.ClientOption)`: Valkey client connection options.
-- `ClientBuilder`: Optional custom client constructor.
-- `KeyPrefix (string)`: Key prefix (defaults to `"valkeylimiter"`).
-- `Limit (int)`: Maximum requests permitted per window.
-- `Window (time.Duration)`: Rate limit window period.
-- `Burst (int)`: Maximum burst capacity (defaults to `Limit`).
-- `Algorithm (Algorithm)`: Rate limit algorithm (`AlgorithmFixedWindow = 0` default, `AlgorithmGCRA = 1`).
-
-#### `Result`
-- `Allowed (bool)`: Whether the request was permitted.
-- `Granted (int64)`: The number of tokens granted for this request (0 if rejected).
-- `Remaining (int64)`: Tokens remaining in the current window / bucket.
-- `RetryAfter (time.Duration)`: Time caller should wait before retrying (`-1` when `Allowed == true`).
-- `ResetAfter (time.Duration)`: Time until the bucket is completely drained / refilled.
-- `ResetAtMs (int64)`: Unix timestamp in milliseconds for window reset.
-
-### Methods (`RateLimiterClient`)
-
-- `Allow(ctx context.Context, id string, opts ...RateLimitOption) (Result, error)`: Consumes 1 token.
-- `AllowN(ctx context.Context, id string, n int64, opts ...RateLimitOption) (Result, error)`: Consumes `n` tokens (all-or-nothing).
-- `AllowAtMost(ctx context.Context, id string, n int64, opts ...RateLimitOption) (Result, error)`: Consumes up to `n` tokens based on available capacity.
-- `Check(ctx context.Context, id string, opts ...RateLimitOption) (Result, error)`: Peeks at current capacity without consuming tokens.
-- `Reset(ctx context.Context, id string, opts ...RateLimitOption) error`: Clears rate limit state for the identifier.
-- `Limit() int`: Returns the configured default rate limit.
-- `Close()`: Closes the underlying client connection.
-
-### Option Modifiers
-
-- `WithBurst(burst int)`: Overrides the burst capacity for the request.
-- `WithAlgorithm(alg Algorithm)`: Overrides the rate limiting algorithm (`AlgorithmGCRA` or `AlgorithmFixedWindow`).
-- `WithCustomRateLimit(limit int, window time.Duration)`: Overrides both limit and window.
-- `WithCustomRateLimitAndBurst(limit int, window time.Duration, burst int)`: Overrides limit, window, and burst capacity.
-
----
-
 ## Implementation Details
 
 The `valkeylimiter` module executes an atomic Lua script inside Valkey:

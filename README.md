@@ -17,6 +17,7 @@ A fast Golang Valkey client that does auto pipelining and supports server-assist
 - [Distributed Rate Limiting (GCRA & Fixed Window)](./valkeylimiter)
 - [Helpers for writing tests with valkey mock](./mock)
 - [OpenTelemetry integration](./valkeyotel)
+- [Hooks and other integrations](./valkeyhook)
 - [Go-redis like API adapter](./valkeycompat) by [@418Coffee](https://github.com/418Coffee)
 - [Go-redis redis_rate parity adapter](./valkeycompatrate)
 - Pub/Sub, Sharded Pub/Sub, Streams

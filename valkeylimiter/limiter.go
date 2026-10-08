@@ -39,7 +39,6 @@ type RateLimiterClient interface {
 
 const (
 	PlaceholderPrefix = "valkeylimiter"
-	GCRAPrefix        = "rate:"
 	keyDelimOpen      = ":{"
 	gcraKeyDelimOpen  = ":gcra:{"
 	keyDelimClose     = "}"
@@ -116,7 +115,7 @@ func (l *rateLimiter) resolveOptions(options []RateLimitOption) (limit int64, wi
 		if opt.window > 0 {
 			window = opt.window
 		}
-		if opt.hasBurst && opt.burst > 0 {
+		if opt.hasBurst {
 			burst = opt.burst
 		}
 		if opt.hasAlg {
