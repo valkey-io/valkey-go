@@ -1703,6 +1703,7 @@ func BenchmarkSingleClient_DoCache(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
+	defer client.Close()
 	keys := make([]string, 10000)
 	for i := range 10000 {
 		keys[i] = strconv.Itoa(i)
@@ -1761,5 +1762,135 @@ func BenchmarkSingleClient_DoCache(b *testing.B) {
 		})
 		b.StopTimer()
 	})
-	client.Close()
+}
+
+func newBenchmarkClient(b *testing.B) Client {
+	client, err := NewClient(ClientOption{
+		InitAddress: []string{"127.0.0.1:6379"},
+		Dialer:      net.Dialer{KeepAlive: -1},
+	})
+	if err != nil {
+		b.Skipf("skipping live Valkey benchmark: %v", err)
+	}
+	b.Cleanup(func() { client.Close() })
+	return client
+}
+
+// BenchmarkClient_Do measures client.Do() auto-pipelining throughput across core Valkey data structures and commands.
+func BenchmarkClient_Do(b *testing.B) {
+	client := newBenchmarkClient(b)
+	ctx := context.Background()
+
+	b.Run("Set", func(b *testing.B) {
+		val := strings.Repeat("x", 128)
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			i := 0
+			for pb.Next() {
+				cmd := client.B().Set().Key("bench_set_" + strconv.Itoa(i%1000)).Value(val).Build()
+				if err := client.Do(ctx, cmd).Error(); err != nil {
+					b.Errorf("unexpected error: %v", err)
+				}
+				i++
+			}
+		})
+	})
+
+	b.Run("Get", func(b *testing.B) {
+		// Populate the key as suggested by CodeRabbit to measure live GET operations
+		_ = client.Do(ctx, client.B().Set().Key("bench_get").Value("val").Build())
+		cmd := client.B().Get().Key("bench_get").Build().Pin()
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				if err := client.Do(ctx, cmd).Error(); err != nil {
+					b.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	})
+
+	b.Run("BLPOP", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				// Push an item so BLPOP returns immediately, testing the blocking path without deadlocking
+				client.Do(ctx, client.B().Lpush().Key("bench_blpop").Element("item").Build())
+				if err := client.Do(ctx, client.B().Blpop().Key("bench_blpop").Timeout(0).Build()).Error(); err != nil {
+					b.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	})
+}
+
+// BenchmarkClient_Do_Parallelism measures client.Do() throughput across concurrency levels.
+func BenchmarkClient_Do_Parallelism(b *testing.B) {
+	client := newBenchmarkClient(b)
+	ctx := context.Background()
+	cmd := client.B().Get().Key("bench_conc").Build().Pin()
+	_ = client.Do(ctx, client.B().Set().Key("bench_conc").Value("val").Build())
+
+	b.Run("Parallelism=1", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if err := client.Do(ctx, cmd).Error(); err != nil {
+				b.Errorf("unexpected error: %v", err)
+			}
+		}
+	})
+
+	b.Run("Parallelism=8", func(b *testing.B) {
+		b.SetParallelism(8)
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				if err := client.Do(ctx, cmd).Error(); err != nil {
+					b.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	})
+
+	b.Run("Parallelism=64", func(b *testing.B) {
+		b.SetParallelism(64)
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				if err := client.Do(ctx, cmd).Error(); err != nil {
+					b.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	})
+}
+
+// BenchmarkClient_DoMulti measures manual multi-command transaction pipelining throughput using client.DoMulti().
+func BenchmarkClient_DoMulti(b *testing.B) {
+	client := newBenchmarkClient(b)
+	ctx := context.Background()
+
+	b.Run("BatchGet/Count=10", func(b *testing.B) {
+		var cmds []Completed
+		for j := 0; j < 10; j++ {
+			cmds = append(cmds, client.B().Get().Key("bench_mget").Build().Pin())
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				for _, resp := range client.DoMulti(ctx, cmds...) {
+					if err := resp.Error(); err != nil && err != Nil {
+						b.Errorf("unexpected error: %v", err)
+					}
+				}
+			}
+		})
+	})
 }
