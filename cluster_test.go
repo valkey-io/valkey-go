@@ -11574,6 +11574,187 @@ func TestClusterClientRefreshKeepsConnReplacedWhileUnlocked(t *testing.T) {
 	}
 }
 
+// slotsRespFailedOver is slotsResp after a failover: the two nodes swap roles.
+var slotsRespFailedOver = NewResult(slicemsg('*', []ValkeyMessage{
+	slicemsg('*', []ValkeyMessage{
+		{typ: ':', intlen: 0},
+		{typ: ':', intlen: 16383},
+		slicemsg('*', []ValkeyMessage{ // master
+			strmsg('+', "127.0.1.1"),
+			{typ: ':', intlen: 1},
+			strmsg('+', ""),
+		}),
+		slicemsg('*', []ValkeyMessage{ // replica
+			strmsg('+', "127.0.0.1"),
+			{typ: ':', intlen: 0},
+			strmsg('+', ""),
+		}),
+	}),
+}), nil)
+
+func TestClusterClientRefreshRedialsDemotedPrimaryWithReadOnly(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	// After a failover, the demoted primary's conn was dialed without READONLY. If refresh keeps reusing it for
+	// replica reads, the replica answers every read with MOVED and the client never recovers. Refresh must route
+	// replica reads over a conn dialed with READONLY and close the old one.
+	const oldPrimary, oldReplica = "127.0.0.1:0", "127.0.1.1:1"
+
+	var failedOver atomic.Bool
+	var mu sync.Mutex
+	readonly := map[conn]bool{}
+	closedCh := make(chan conn, 8)
+
+	client, err := newClusterClient(
+		&ClientOption{
+			InitAddress:    []string{oldPrimary},
+			SendToReplicas: func(cmd Completed) bool { return cmd.IsReadOnly() },
+		},
+		func(dst string, opt *ClientOption) conn {
+			m := &mockConn{
+				DoFn: func(cmd Completed) ValkeyResult {
+					if failedOver.Load() {
+						return slotsRespFailedOver
+					}
+					return slotsResp
+				},
+				AddrFn: func() string { return dst },
+			}
+			m.CloseFn = func() { closedCh <- m }
+			mu.Lock()
+			readonly[m] = opt.ReplicaOnly
+			mu.Unlock()
+			return m
+		},
+		newRetryer(defaultRetryDelayFn),
+	)
+	if err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	defer client.Close()
+
+	client.mu.RLock()
+	demoted := client.conns[oldPrimary].conn
+	promoted := client.conns[oldReplica].conn
+	client.mu.RUnlock()
+	mu.Lock()
+	if readonly[demoted] || !readonly[promoted] {
+		mu.Unlock()
+		t.Fatal("before failover the primary conn should not be READONLY and the replica conn should be")
+	}
+	mu.Unlock()
+
+	failedOver.Store(true)
+	if err := client.refresh(context.Background()); err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+
+	client.mu.RLock()
+	write := client.wslots[0]
+	reads := client.rslots[0]
+	current := client.conns[oldPrimary].conn
+	client.mu.RUnlock()
+
+	if write != promoted {
+		t.Fatal("writes should go to the promoted replica over its existing conn")
+	}
+	if len(reads) != 1 || reads[0].Addr != oldPrimary {
+		t.Fatalf("reads should go to the demoted primary, got %v", reads)
+	}
+	if reads[0].conn != current || current == demoted {
+		t.Fatal("the demoted primary should be reached over a new conn")
+	}
+	mu.Lock()
+	ro := readonly[current]
+	mu.Unlock()
+	if !ro {
+		t.Fatal("the demoted primary's new conn should be dialed with READONLY")
+	}
+
+	// removes are closed after a 5s delay
+	timeout := time.After(10 * time.Second)
+	for {
+		select {
+		case cc := <-closedCh:
+			if cc == demoted {
+				return
+			}
+		case <-timeout:
+			t.Fatal("the demoted primary's old conn was not closed")
+		}
+	}
+}
+
+// slotsRespMixedRoles has each node as the primary of one shard and a replica of the other.
+var slotsRespMixedRoles = NewResult(slicemsg('*', []ValkeyMessage{
+	slicemsg('*', []ValkeyMessage{
+		{typ: ':', intlen: 0},
+		{typ: ':', intlen: 8191},
+		slicemsg('*', []ValkeyMessage{strmsg('+', "127.0.0.1"), {typ: ':', intlen: 0}, strmsg('+', "")}), // master
+		slicemsg('*', []ValkeyMessage{strmsg('+', "127.0.1.1"), {typ: ':', intlen: 1}, strmsg('+', "")}), // replica
+	}),
+	slicemsg('*', []ValkeyMessage{
+		{typ: ':', intlen: 8192},
+		{typ: ':', intlen: 16383},
+		slicemsg('*', []ValkeyMessage{strmsg('+', "127.0.1.1"), {typ: ':', intlen: 1}, strmsg('+', "")}), // master
+		slicemsg('*', []ValkeyMessage{strmsg('+', "127.0.0.1"), {typ: ':', intlen: 0}, strmsg('+', "")}), // replica
+	}),
+}), nil)
+
+func TestClusterClientRefreshMixedRoleNodeGetsReadOnly(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	// A node that is a replica in any shard serves replica reads, so its single conn must be dialed with READONLY
+	// regardless of the order shards are visited in. Fresh clients vary map iteration order.
+	for i := range 20 {
+		var mu sync.Mutex
+		readonly := map[conn]bool{}
+		client, err := newClusterClient(
+			&ClientOption{
+				InitAddress:    []string{"127.0.0.1:0"},
+				SendToReplicas: func(cmd Completed) bool { return cmd.IsReadOnly() },
+			},
+			func(dst string, opt *ClientOption) conn {
+				m := &mockConn{
+					DoFn:   func(cmd Completed) ValkeyResult { return slotsRespMixedRoles },
+					AddrFn: func() string { return dst },
+				}
+				mu.Lock()
+				readonly[m] = opt.ReplicaOnly
+				mu.Unlock()
+				return m
+			},
+			newRetryer(defaultRetryDelayFn),
+		)
+		if err != nil {
+			t.Fatalf("unexpected err %v", err)
+		}
+		client.mu.RLock()
+		got := map[string]conn{}
+		for _, addr := range []string{"127.0.0.1:0", "127.0.1.1:1"} {
+			got[addr] = client.conns[addr].conn
+		}
+		reads := [][]NodeInfo{client.rslots[0], client.rslots[8192]}
+		client.mu.RUnlock()
+		mu.Lock()
+		for addr, cc := range got {
+			if !readonly[cc] {
+				mu.Unlock()
+				client.Close()
+				t.Fatalf("iteration %d: %s is a replica in one shard but its conn was not dialed with READONLY", i, addr)
+			}
+		}
+		mu.Unlock()
+		for _, r := range reads {
+			if len(r) != 1 || r[0].conn != got[r[0].Addr] {
+				client.Close()
+				t.Fatalf("iteration %d: replica reads should use the conn held in conns, got %v", i, r)
+			}
+		}
+		client.Close()
+	}
+}
+
 var slotsRespWithExtraReplica = NewResult(slicemsg('*', []ValkeyMessage{
 	slicemsg('*', []ValkeyMessage{
 		{typ: ':', intlen: 0},

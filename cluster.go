@@ -46,6 +46,9 @@ type connrole struct {
 	conn   conn
 	hidden bool
 	//replica bool <- this field is removed because a server may have mixed roles at the same time in the future. https://github.com/valkey-io/valkey/issues/1372
+	// readonly records how the conn was dialed, not the server's role: true if it was created with rOpt and so
+	// issued READONLY on connect. A conn without it gets MOVED for every read sent to a replica.
+	readonly bool
 }
 
 var replicaOnlySelector = func(_ uint16, replicas []NodeInfo) int {
@@ -238,14 +241,18 @@ func (c *clusterClient) _refresh() (err error) {
 
 	groups := result.parse(c.opt.TLSConfig != nil)
 	conns := make(map[string]connrole, len(groups))
+	// An addr may be a primary in one shard and a replica in another, so the dial mode must not depend on map order:
+	// with rOpt, an addr listed as a replica anywhere gets a READONLY conn, which also serves its primary role.
 	for master, g := range groups {
-		conns[master] = connrole{conn: c.connFn(master, c.opt)}
-		if c.rOpt != nil {
-			for _, nodeInfo := range g.nodes[1:] {
-				conns[nodeInfo.Addr] = connrole{conn: c.connFn(nodeInfo.Addr, c.rOpt)}
-			}
-		} else {
-			for _, nodeInfo := range g.nodes[1:] {
+		if _, ok := conns[master]; !ok {
+			conns[master] = connrole{conn: c.connFn(master, c.opt)}
+		}
+		for _, nodeInfo := range g.nodes[1:] {
+			cc, ok := conns[nodeInfo.Addr]
+			switch {
+			case c.rOpt != nil && !cc.readonly:
+				conns[nodeInfo.Addr] = connrole{conn: c.connFn(nodeInfo.Addr, c.rOpt), readonly: true}
+			case !ok:
 				conns[nodeInfo.Addr] = connrole{conn: c.connFn(nodeInfo.Addr, c.opt)}
 			}
 		}
@@ -260,10 +267,23 @@ func (c *clusterClient) _refresh() (err error) {
 		}
 	}
 
+	// Reuse the existing conn at each addr, except when the addr now needs READONLY (a primary demoted to a replica)
+	// and the existing conn was dialed without it. Reusing that conn would make every read routed to the replica
+	// return MOVED, and since refresh would keep reusing it, the client would never recover. A conn dialed with
+	// READONLY stays usable after promotion because a primary ignores READONLY.
+	var stale map[conn]struct{}
 	c.mu.RLock()
 	for addr, cc := range c.conns {
 		if fresh, ok := conns[addr]; ok {
+			if fresh.readonly && !cc.readonly {
+				if stale == nil {
+					stale = make(map[conn]struct{}, 1)
+				}
+				stale[cc.conn] = struct{}{}
+				continue
+			}
 			fresh.conn = cc.conn
+			fresh.readonly = cc.readonly
 			conns[addr] = fresh
 		}
 	}
@@ -352,6 +372,11 @@ func (c *clusterClient) _refresh() (err error) {
 			continue
 		}
 		if fresh.conn != cc.conn {
+			if _, ok := stale[cc.conn]; ok {
+				// Replaced above on purpose; close it after in-flight commands drain.
+				removes = append(removes, cc.conn)
+				continue
+			}
 			// Keep the conn redirectOrNew installed here, and close fresh.conn since
 			// the AZ() calls above may have already connected it.
 			if replaced == nil {
@@ -360,6 +385,7 @@ func (c *clusterClient) _refresh() (err error) {
 			replaced[fresh.conn] = cc.conn
 			removes = append(removes, fresh.conn)
 			fresh.conn = cc.conn
+			fresh.readonly = cc.readonly
 			conns[addr] = fresh
 		}
 	}
