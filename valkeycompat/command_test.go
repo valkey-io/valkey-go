@@ -1734,3 +1734,28 @@ func TestCacheHitDurationCmd(t *testing.T) {
 		t.Error("Expected IsCacheHit to remain true after SetVal, got false")
 	}
 }
+
+func TestACLTypesAndConstants(t *testing.T) {
+	// Verify compatibility of ClientInfo, ACLLogEntry, ClientFlags, and constants
+	var flags ClientFlags = ClientSlave | ClientMaster | ClientPubSub
+	if flags&ClientSlave == 0 {
+		t.Errorf("expected ClientSlave bit set")
+	}
+
+	info := &ClientInfo{
+		Addr:  "127.0.0.1:1234",
+		Flags: flags,
+	}
+	if info.Addr != "127.0.0.1:1234" {
+		t.Errorf("unexpected addr: %s", info.Addr)
+	}
+
+	entry := &ACLLogEntry{
+		Count:      1,
+		Reason:     "auth",
+		ClientInfo: info,
+	}
+	if entry.Reason != "auth" || entry.ClientInfo.Flags != flags {
+		t.Errorf("unexpected entry: %+v", entry)
+	}
+}
