@@ -114,6 +114,8 @@ type sentinelClient struct {
 	replica      bool
 }
 
+var _ PoolStatsProvider = (*sentinelClient)(nil)
+
 func (c *sentinelClient) B() Builder {
 	return c.cmd
 }
@@ -358,6 +360,10 @@ func (c *sentinelClient) Nodes() map[string]Client {
 		cc := c.mConn.Load().(conn)
 		return map[string]Client{cc.Addr(): newSingleClientWithConn(cc, c.cmd, c.retry, disableCache, c.retryHandler, false)}
 	}
+}
+
+func (c *sentinelClient) PoolStats() (map[string]NodePoolStats, error) {
+	return clientPoolStats(c.Nodes())
 }
 
 func (c *sentinelClient) Mode() ClientMode {

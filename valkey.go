@@ -89,6 +89,8 @@ var (
 	ErrWrongPipelineMultiplex = errors.New("ClientOption.PipelineMultiplex must not be bigger than MaxPipelineMultiplex")
 	// ErrDedicatedClientRecycled means the caller attempted to use the dedicated client which has been already recycled (after canceled/closed).
 	ErrDedicatedClientRecycled = errors.New("dedicated client should not be used after recycled")
+	// ErrPoolStatsUnsupported means the client does not expose bounded pool statistics.
+	ErrPoolStatsUnsupported = errors.New("pool stats are not supported by this client")
 	// DisableClientSetInfo is the value that can be used for ClientOption.ClientSetInfo to disable making the CLIENT SETINFO command
 	DisableClientSetInfo = make([]string, 0)
 )
@@ -472,6 +474,49 @@ type CoreClient interface {
 	// Close will make further calls to the client be rejected with ErrClosing,
 	// and Close will wait until all pending calls finished.
 	Close()
+}
+
+// PoolStatsProvider is an optional capability implemented by clients created by NewClient.
+// It is separate from Client so custom Client implementations remain source compatible.
+type PoolStatsProvider interface {
+	// PoolStats returns current bounded pool statistics keyed by server address.
+	// Only nodes currently visible to the client are included. Cumulative values reset
+	// when a node's underlying connection pools are replaced.
+	PoolStats() (map[string]NodePoolStats, error)
+}
+
+// NodePoolStats contains the two bounded pools owned by a connection to one server.
+type NodePoolStats struct {
+	// Blocking is used by blocking commands and Dedicated/Dedicate.
+	Blocking PoolStats
+	// Streaming is used by streaming commands and by ordinary commands when
+	// ClientOption.DisableAutoPipelining is enabled.
+	Streaming PoolStats
+}
+
+// PoolStats is a point-in-time snapshot of one bounded connection pool.
+type PoolStats struct {
+	// Capacity is the configured reservation ceiling.
+	Capacity int
+	// Reserved is the number of slots charged against Capacity. It includes
+	// established connections and in-flight connection creation.
+	Reserved int
+	// Dialing is the number of Reserved slots currently creating a connection.
+	Dialing int
+	// Idle is the number of established connections available for reuse.
+	Idle int
+	// Waiters is the number of acquisitions currently waiting for capacity.
+	Waiters int
+	// Closed reports whether the pool has entered its terminal state.
+	Closed bool
+	// WaitCount is the number of acquisitions that have waited for capacity.
+	// An acquisition is counted once even if it wakes and waits again.
+	WaitCount uint64
+	// WaitDuration is the cumulative duration of completed capacity waits.
+	WaitDuration time.Duration
+	// WaitCanceled is the number of waiting acquisitions that returned because
+	// their context was canceled or its deadline elapsed.
+	WaitCanceled uint64
 }
 
 // CommandClient is a public interface that only exposes the B(), Do(), and DoMulti() methods of a client.
