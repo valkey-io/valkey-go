@@ -273,7 +273,7 @@ func (c *clusterClient) _refresh() (err error) {
 	// READONLY stays usable after promotion because a primary ignores READONLY.
 	c.mu.RLock()
 	for addr, cc := range c.conns {
-		if fresh, ok := conns[addr]; ok && !(fresh.readonly && !cc.readonly) {
+		if fresh, ok := conns[addr]; ok && (!fresh.readonly || cc.readonly) {
 			fresh.conn = cc.conn
 			fresh.readonly = cc.readonly
 			conns[addr] = fresh
