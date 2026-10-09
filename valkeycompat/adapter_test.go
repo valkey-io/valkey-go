@@ -2395,11 +2395,6 @@ func testAdapter(resp3 bool) {
 				dryRun := adapter.ACLDryRun(ctx, "default", "get", "randomKey")
 				Expect(dryRun.Err()).NotTo(HaveOccurred())
 				Expect(dryRun.Val()).To(Equal("OK"))
-
-				dryRunRes, err := dryRun.ACLDryRunResult()
-				Expect(err).NotTo(HaveOccurred())
-				Expect(dryRunRes.Allowed).To(BeTrue())
-				Expect(dryRunRes.DeniedType).To(Equal(DeniedNone))
 			})
 
 			It("should list ACL rules via ACLList", func() {
@@ -2408,7 +2403,7 @@ func testAdapter(resp3 bool) {
 				Expect(users).NotTo(BeEmpty())
 			})
 
-			It("should work in pipeline with ACLList and ACLDryRunResult", func() {
+			It("should work in pipeline with ACLList and ACLDryRun", func() {
 				pipe := adapter.Pipeline()
 				listCmd := pipe.ACLList(ctx)
 				dryRunCmd := pipe.ACLDryRun(ctx, "default", "get", "randomKey")
@@ -2419,10 +2414,9 @@ func testAdapter(resp3 bool) {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(users).NotTo(BeEmpty())
 
-				dryRunRes, err := dryRunCmd.ACLDryRunResult()
+				dryRunRes, err := dryRunCmd.Result()
 				Expect(err).NotTo(HaveOccurred())
-				Expect(dryRunRes.Allowed).To(BeTrue())
-				Expect(dryRunRes.DeniedType).To(Equal(DeniedNone))
+				Expect(dryRunRes).To(Equal("OK"))
 			})
 
 			It("should support ACLUsers, ACLWhoAmI, and ACLGenPass", func() {

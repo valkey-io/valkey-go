@@ -630,17 +630,6 @@ var _ = Describe("Commands", func() {
 			Expect(err1).To(Equal(err))
 			Expect(cmd.Err()).To(Equal(err))
 		}
-		{
-			cmd := &StringCmd{}
-			cmd.SetVal("OK")
-			res, e := cmd.ACLDryRunResult()
-			Expect(e).To(BeNil())
-			Expect(res.Allowed).To(BeTrue())
-			Expect(res.DeniedType).To(Equal(DeniedNone))
-			cmd.SetErr(err)
-			_, e = cmd.ACLDryRunResult()
-			Expect(e).To(Equal(err))
-		}
 	})
 })
 
@@ -1744,41 +1733,6 @@ func TestCacheHitDurationCmd(t *testing.T) {
 	if !cmd.IsCacheHit() {
 		t.Error("Expected IsCacheHit to remain true after SetVal, got false")
 	}
-}
-
-func TestACLDryRunResult(t *testing.T) {
-	t.Run("success OK", func(t *testing.T) {
-		cmd := &StringCmd{}
-		cmd.SetVal("OK")
-		res, err := cmd.ACLDryRunResult()
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if !res.Allowed || res.DeniedType != DeniedNone || res.Reason != "OK" {
-			t.Errorf("unexpected dryrun result: %+v", res)
-		}
-	})
-
-	t.Run("denied command", func(t *testing.T) {
-		cmd := &StringCmd{}
-		cmd.SetVal("User alice has no permissions to run the 'set' command")
-		res, err := cmd.ACLDryRunResult()
-		if err != nil {
-			t.Fatalf("unexpected err: %v", err)
-		}
-		if res.Allowed || res.DeniedType != DeniedCommand {
-			t.Errorf("unexpected dryrun result: %+v", res)
-		}
-	})
-
-	t.Run("propagates error", func(t *testing.T) {
-		cmd := &StringCmd{}
-		cmd.SetErr(errors.New("proto err"))
-		_, err := cmd.ACLDryRunResult()
-		if err == nil {
-			t.Errorf("expected error to propagate")
-		}
-	})
 }
 
 func TestACLTypesAndConstants(t *testing.T) {

@@ -450,14 +450,6 @@ func (cmd *StringCmd) String() string {
 	return cmd.val
 }
 
-// ACLDryRunResult returns the structured result of an ACL DRYRUN command.
-func (cmd *StringCmd) ACLDryRunResult() (ACLDryRunResult, error) {
-	if cmd.err != nil {
-		return ACLDryRunResult{}, cmd.err
-	}
-	return parseACLDryRunString(cmd.val), nil
-}
-
 type BoolCmd struct {
 	baseCmd[bool]
 }
@@ -4862,7 +4854,7 @@ func (cmd *ClientInfoCmd) Result() (*ClientInfo, error) {
 }
 
 func stringToClientInfo(txt string) (*ClientInfo, error) {
-	return ParseClientInfo(txt)
+	return parseClientInfo(txt)
 }
 
 // fmt.Sscanf() cannot handle null values
@@ -4891,11 +4883,7 @@ func (cmd *ACLLogCmd) from(res valkey.ValkeyResult) {
 		cmd.SetErr(err)
 		return
 	}
-	logEntries := make([]*ACLLogEntry, len(entries))
-	for i := range entries {
-		logEntries[i] = &entries[i]
-	}
-	cmd.SetVal(logEntries)
+	cmd.SetVal(entries)
 }
 
 func newACLLogCmd(res valkey.ValkeyResult) *ACLLogCmd {

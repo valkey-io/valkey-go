@@ -115,45 +115,8 @@ type ACLLogEntry struct {
 	TimestampLastUpdated int64
 }
 
-// ACLDeniedReason indicates the categorized failure reason of an ACL DRYRUN execution
-type ACLDeniedReason int
-
-const (
-	DeniedNone ACLDeniedReason = iota
-	DeniedCommand
-	DeniedKey
-	DeniedChannel
-	DeniedDatabase
-	DeniedOther
-)
-
-// String returns the string representation of an ACLDeniedReason
-func (r ACLDeniedReason) String() string {
-	switch r {
-	case DeniedNone:
-		return "none"
-	case DeniedCommand:
-		return "command"
-	case DeniedKey:
-		return "key"
-	case DeniedChannel:
-		return "channel"
-	case DeniedDatabase:
-		return "database"
-	default:
-		return "other"
-	}
-}
-
-// ACLDryRunResult contains the structured result of an ACL DRYRUN simulation
-type ACLDryRunResult struct {
-	Allowed    bool
-	Reason     string
-	DeniedType ACLDeniedReason
-}
-
-// ParseClientInfo parses raw client connection info strings into *ClientInfo.
-func ParseClientInfo(txt string) (*ClientInfo, error) {
+// parseClientInfo parses raw client connection info strings into *ClientInfo.
+func parseClientInfo(txt string) (*ClientInfo, error) {
 	info := &ClientInfo{}
 	var err error
 	txt = strings.TrimPrefix(strings.TrimSpace(txt), "txt:")
@@ -292,9 +255,8 @@ func ParseClientInfo(txt string) (*ClientInfo, error) {
 	return info, nil
 }
 
-
-// parseACLLog decodes nested RESP3 maps or RESP2 flat key-value arrays into []ACLLogEntry.
-func parseACLLog(res valkey.ValkeyResult) ([]ACLLogEntry, error) {
+// parseACLLog decodes nested RESP3 maps or RESP2 flat key-value arrays into []*ACLLogEntry.
+func parseACLLog(res valkey.ValkeyResult) ([]*ACLLogEntry, error) {
 	msg, err := res.ToMessage()
 	if err != nil {
 		return nil, err
@@ -303,18 +265,18 @@ func parseACLLog(res valkey.ValkeyResult) ([]ACLLogEntry, error) {
 }
 
 // parseACLLogMessage decodes an array ValkeyMessage containing ACL log entries.
-func parseACLLogMessage(msg valkey.ValkeyMessage) ([]ACLLogEntry, error) {
+func parseACLLogMessage(msg valkey.ValkeyMessage) ([]*ACLLogEntry, error) {
 	arr, err := msg.ToArray()
 	if err != nil {
 		return nil, err
 	}
-	logEntries := make([]ACLLogEntry, 0, len(arr))
+	logEntries := make([]*ACLLogEntry, 0, len(arr))
 	for _, entryMsg := range arr {
 		log, err := entryMsg.AsMap()
 		if err != nil {
 			return nil, err
 		}
-		entry := ACLLogEntry{}
+		entry := &ACLLogEntry{}
 		for key, attr := range log {
 			switch key {
 			case "count":
@@ -332,7 +294,7 @@ func parseACLLogMessage(msg valkey.ValkeyMessage) ([]ACLLogEntry, error) {
 			case "client-info":
 				txt, txtErr := attr.ToString()
 				if txtErr == nil && txt != "" {
-					entry.ClientInfo, err = ParseClientInfo(txt)
+					entry.ClientInfo, err = parseClientInfo(txt)
 				} else {
 					err = txtErr
 				}
@@ -350,53 +312,5 @@ func parseACLLogMessage(msg valkey.ValkeyMessage) ([]ACLLogEntry, error) {
 		logEntries = append(logEntries, entry)
 	}
 	return logEntries, nil
-}
-
-// parseACLDryRun converts a raw ValkeyResult from ACL DRYRUN into an ACLDryRunResult.
-func parseACLDryRun(res valkey.ValkeyResult) (ACLDryRunResult, error) {
-	if err := res.Error(); err != nil {
-		return ACLDryRunResult{}, err
-	}
-	str, err := res.ToString()
-	if err != nil {
-		return ACLDryRunResult{}, err
-	}
-	return parseACLDryRunString(str), nil
-}
-
-// parseACLDryRunString parses a dry-run result string and categorizes authorization status.
-func parseACLDryRunString(s string) ACLDryRunResult {
-	if s == "OK" {
-		return ACLDryRunResult{
-			Allowed:    true,
-			Reason:     "OK",
-			DeniedType: DeniedNone,
-		}
-	}
-
-	lower := strings.ToLower(s)
-	var deniedType ACLDeniedReason
-	switch {
-	case strings.HasSuffix(lower, " key") || strings.Contains(lower, "access a key"):
-		deniedType = DeniedKey
-	case strings.HasSuffix(lower, " channel") || strings.Contains(lower, "access a channel"):
-		deniedType = DeniedChannel
-	case strings.Contains(lower, "database"):
-		deniedType = DeniedDatabase
-	case strings.HasSuffix(lower, " command") || strings.Contains(lower, "to run ") || strings.Contains(lower, "access a command") || strings.Contains(lower, "command"):
-		deniedType = DeniedCommand
-	case strings.Contains(lower, "key"):
-		deniedType = DeniedKey
-	case strings.Contains(lower, "channel"):
-		deniedType = DeniedChannel
-	default:
-		deniedType = DeniedOther
-	}
-
-	return ACLDryRunResult{
-		Allowed:    false,
-		Reason:     s,
-		DeniedType: deniedType,
-	}
 }
 
