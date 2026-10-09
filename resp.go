@@ -14,6 +14,16 @@ import (
 
 var errChunked = errors.New("unbounded valkey message")
 var errOldNull = errors.New("RESP2 null")
+var errInvalidMessageLength = errors.New("received invalid message length")
+
+const maxInt = int(^uint(0) >> 1)
+
+func checkMessageLength(length int64) error {
+	if length < 0 || uint64(length) > uint64(maxInt) {
+		return errInvalidMessageLength
+	}
+	return nil
+}
 
 const (
 	typeBlobString     = byte('$')
@@ -98,6 +108,9 @@ func readBlobString(i *bufio.Reader) (m ValkeyMessage, err error) {
 				m.setString(sb.String())
 				return m, nil
 			}
+			if err = checkMessageLength(length); err != nil {
+				return ValkeyMessage{}, err
+			}
 			sb.Grow(int(length))
 			if _, err = io.CopyN(&sb, i, length); err != nil {
 				return ValkeyMessage{}, err
@@ -138,7 +151,9 @@ func readArray(i *bufio.Reader) (m ValkeyMessage, err error) {
 		if length == -1 {
 			return m, errOldNull
 		}
-		m.array, m.intlen, err = readA(i, length)
+		if err = checkMessageLength(length); err == nil {
+			m.array, m.intlen, err = readA(i, length)
+		}
 	} else if err == errChunked {
 		m.array, m.intlen, err = readE(i)
 	}
@@ -148,7 +163,16 @@ func readArray(i *bufio.Reader) (m ValkeyMessage, err error) {
 func readMap(i *bufio.Reader) (m ValkeyMessage, err error) {
 	length, err := readI(i)
 	if err == nil {
-		m.array, m.intlen, err = readA(i, length*2)
+		if length == -1 {
+			return m, errOldNull
+		}
+		if err = checkMessageLength(length); err == nil {
+			if uint64(length) > uint64(maxInt)/2 {
+				err = errInvalidMessageLength
+			} else {
+				m.array, m.intlen, err = readA(i, length*2)
+			}
+		}
 	} else if err == errChunked {
 		m.array, m.intlen, err = readE(i)
 	}
@@ -188,19 +212,22 @@ func readI(i *bufio.Reader) (v int64, err error) {
 	if bs[0] == '?' {
 		return 0, errChunked
 	}
-	var s = int64(1)
-	if bs[0] == '-' {
-		s = -1
-		bs = bs[1:]
+	n := len(bs) - 2
+	digits := bs[:n]
+	if digits[0] == '-' {
+		digits = digits[1:]
 	}
-	for _, c := range bs[:len(bs)-2] {
+	for _, c := range digits {
 		if d := int64(c - '0'); d >= 0 && d <= 9 {
-			v = v*10 + d
+			continue
 		} else {
 			return 0, errors.New(unexpectedNumByte + strconv.Itoa(int(c)))
 		}
 	}
-	return v * s, nil
+	if v, err = strconv.ParseInt(unsafe.String(unsafe.SliceData(bs), n), 10, 64); err != nil {
+		return 0, errInvalidMessageLength
+	}
+	return v, nil
 }
 
 func readB(i *bufio.Reader) (*byte, int64, error) {
@@ -210,6 +237,9 @@ func readB(i *bufio.Reader) (*byte, int64, error) {
 	}
 	if length == -1 {
 		return nil, 0, errOldNull
+	}
+	if err = checkMessageLength(length); err != nil {
+		return nil, 0, err
 	}
 	bs := make([]byte, length)
 	if _, err = io.ReadFull(i, bs); err != nil {
@@ -236,6 +266,9 @@ func readE(i *bufio.Reader) (*ValkeyMessage, int64, error) {
 }
 
 func readA(i *bufio.Reader, length int64) (*ValkeyMessage, int64, error) {
+	if err := checkMessageLength(length); err != nil {
+		return nil, 0, err
+	}
 	var err error
 
 	msgs := make([]ValkeyMessage, length)
@@ -324,8 +357,14 @@ next:
 			}
 			return n, err, clean
 		}
-		if n == -1 {
+		if n == -1 && typ != typeChunk {
 			return 0, Nil, true
+		}
+		if err = checkMessageLength(n); err != nil {
+			return 0, err, false
+		}
+		if n > math.MaxInt64-2 {
+			return 0, errInvalidMessageLength, false
 		}
 		full := n + 2
 		if n != 0 {
