@@ -271,17 +271,9 @@ func (c *clusterClient) _refresh() (err error) {
 	// and the existing conn was dialed without it. Reusing that conn would make every read routed to the replica
 	// return MOVED, and since refresh would keep reusing it, the client would never recover. A conn dialed with
 	// READONLY stays usable after promotion because a primary ignores READONLY.
-	var stale map[conn]struct{}
 	c.mu.RLock()
 	for addr, cc := range c.conns {
-		if fresh, ok := conns[addr]; ok {
-			if fresh.readonly && !cc.readonly {
-				if stale == nil {
-					stale = make(map[conn]struct{}, 1)
-				}
-				stale[cc.conn] = struct{}{}
-				continue
-			}
+		if fresh, ok := conns[addr]; ok && !(fresh.readonly && !cc.readonly) {
 			fresh.conn = cc.conn
 			fresh.readonly = cc.readonly
 			conns[addr] = fresh
@@ -372,8 +364,9 @@ func (c *clusterClient) _refresh() (err error) {
 			continue
 		}
 		if fresh.conn != cc.conn {
-			if _, ok := stale[cc.conn]; ok {
-				// Replaced above on purpose; close it after in-flight commands drain.
+			if fresh.readonly && !cc.readonly {
+				// Either the conn replaced above, or one redirectOrNew installed while the lock was released; both
+				// were dialed without READONLY. Keep fresh and close cc after in-flight commands drain.
 				removes = append(removes, cc.conn)
 				continue
 			}

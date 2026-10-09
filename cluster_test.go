@@ -11685,6 +11685,106 @@ func TestClusterClientRefreshRedialsDemotedPrimaryWithReadOnly(t *testing.T) {
 	}
 }
 
+func TestClusterClientRefreshKeepsReadOnlyConnOverRedirectWhileUnlocked(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	// A MOVED to the demoted primary's addr can make redirectOrNew install a new conn there, dialed without
+	// READONLY, while _refresh has released the lock. Reconciliation must keep the READONLY conn for replica reads
+	// and close the redirect's conn, not the other way round.
+	const oldPrimary = "127.0.0.1:0"
+
+	var clientp atomic.Pointer[clusterClient]
+	var failedOver atomic.Bool
+	var once sync.Once
+	var redirected atomic.Value
+	var mu sync.Mutex
+	readonly := map[conn]bool{}
+	closedCh := make(chan conn, 8)
+
+	client, err := newClusterClient(
+		&ClientOption{
+			InitAddress:         []string{oldPrimary},
+			SendToReplicas:      func(cmd Completed) bool { return cmd.IsReadOnly() },
+			EnableReplicaAZInfo: true,
+		},
+		func(dst string, opt *ClientOption) conn {
+			m := &mockConn{
+				DoFn: func(cmd Completed) ValkeyResult {
+					if failedOver.Load() {
+						return slotsRespFailedOver
+					}
+					return slotsResp
+				},
+				AddrFn: func() string { return dst },
+				AZFn: func() string {
+					// AZ() runs after _refresh released the read lock and before it takes the write lock.
+					if c := clientp.Load(); c != nil && failedOver.Load() {
+						once.Do(func() {
+							c.mu.RLock()
+							prev := c.conns[oldPrimary].conn
+							c.mu.RUnlock()
+							redirected.Store(c.redirectOrNew(oldPrimary, prev, 0, RedirectMove))
+						})
+					}
+					return "us-west-1a"
+				},
+			}
+			m.CloseFn = func() { closedCh <- m }
+			mu.Lock()
+			readonly[m] = opt.ReplicaOnly
+			mu.Unlock()
+			return m
+		},
+		newRetryer(defaultRetryDelayFn),
+	)
+	if err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	defer client.Close()
+	clientp.Store(client)
+
+	failedOver.Store(true)
+	if err := client.refresh(context.Background()); err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+
+	want, _ := redirected.Load().(conn)
+	if want == nil {
+		t.Fatal("redirectOrNew was not called")
+	}
+
+	client.mu.RLock()
+	current := client.conns[oldPrimary].conn
+	reads := client.rslots[0]
+	client.mu.RUnlock()
+
+	mu.Lock()
+	ro, redirectRO := readonly[current], readonly[want]
+	mu.Unlock()
+	if redirectRO {
+		t.Fatal("redirectOrNew should have dialed without READONLY")
+	}
+	if current == want || !ro {
+		t.Fatal("conns should keep the READONLY conn, not the one redirectOrNew installed")
+	}
+	if len(reads) != 1 || reads[0].conn != current {
+		t.Fatalf("replica reads should use the READONLY conn, got %v", reads)
+	}
+
+	// removes are closed after a 5s delay
+	timeout := time.After(10 * time.Second)
+	for {
+		select {
+		case cc := <-closedCh:
+			if cc == want {
+				return
+			}
+		case <-timeout:
+			t.Fatal("the conn redirectOrNew installed was not closed")
+		}
+	}
+}
+
 // slotsRespMixedRoles has each node as the primary of one shard and a replica of the other.
 var slotsRespMixedRoles = NewResult(slicemsg('*', []ValkeyMessage{
 	slicemsg('*', []ValkeyMessage{
@@ -11777,12 +11877,14 @@ var slotsRespWithExtraReplica = NewResult(slicemsg('*', []ValkeyMessage{
 	}),
 }), nil)
 
-func TestClusterClientRefreshClosesConnConnectedByAZ(t *testing.T) {
+func TestClusterClientRefreshKeepsReadOnlyConnForAddedReplica(t *testing.T) {
 	defer ShouldNotLeak(SetupLeakDetection())
 
-	// For a node that only appears in the refreshed topology, _refresh carries a conn of
-	// its own and AZ() connects it. If redirectOrNew installs another conn at that addr
-	// while the lock is released, the connected one has to be closed, not just dropped.
+	// For a replica that only appears in the refreshed topology, _refresh carries a READONLY conn of
+	// its own and AZ() connects it. If redirectOrNew installs another conn at that addr while the
+	// lock is released, that conn was dialed without READONLY and cannot serve replica reads, so
+	// _refresh keeps its own conn and the redirect's conn has to be closed, not just dropped.
+	// (For a primary addr the redirect's conn wins; see TestClusterClientRefreshKeepsConnReplacedWhileUnlocked.)
 	const added = "127.0.0.2:2"
 
 	var clientp atomic.Pointer[clusterClient]
@@ -11848,25 +11950,26 @@ func TestClusterClientRefreshClosesConnConnectedByAZ(t *testing.T) {
 		t.Fatalf("expected _refresh and redirectOrNew to make a conn each for %s, got %d", added, len(made))
 	}
 
+	refreshed, redirected := made[0], made[len(made)-1]
 	client.mu.RLock()
 	got := client.conns[added].conn
 	client.mu.RUnlock()
-	if got != made[len(made)-1] {
-		t.Fatalf("conns[%s] should hold the conn redirectOrNew installed", added)
+	if got != refreshed {
+		t.Fatalf("conns[%s] should hold the READONLY conn _refresh made, not the one redirectOrNew installed", added)
 	}
 
 	// removes are closed after a 5s delay
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		mu.Lock()
-		done := closed[made[0]]
+		done := closed[redirected]
 		mu.Unlock()
 		if done {
 			return
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	t.Fatalf("the conn AZ() connected was dropped without being closed")
+	t.Fatalf("the conn redirectOrNew installed was dropped without being closed")
 }
 
 // Tests below cover the fix for valkey-io/valkey-go#59: DoMulti / DoMultiCache
