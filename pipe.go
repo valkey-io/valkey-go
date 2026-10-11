@@ -80,9 +80,9 @@ type pipe struct {
 	nsubs           *subs // pubsub  message subscriptions
 	psubs           *subs // pubsub pmessage subscriptions
 	r2p             *r2p
-	pingTimer       *time.Timer // timer for background ping
-	authTimer       *time.Timer // timer for refreshing dynamic auth credentials, written once in _newPipe
-	lftmTimer       *time.Timer // lifetime timer
+	pingTimer       *time.Timer                // timer for background ping
+	authTimer       *time.Timer                // timer for refreshing dynamic auth credentials, written once in _newPipe
+	lftmTimer       atomic.Pointer[time.Timer] // lifetime timer
 	info            map[string]ValkeyMessage
 	authRefreshAt   atomic.Pointer[time.Time]
 	timeout         time.Duration
@@ -402,7 +402,12 @@ func _newPipe(ctx context.Context, connFn func(context.Context) (net.Conn, error
 	}
 	if option.ConnLifetime > 0 {
 		p.lftm = option.ConnLifetime
-		p.lftmTimer = time.AfterFunc(option.ConnLifetime, p.expired)
+		p.lftmTimer.Store(time.AfterFunc(option.ConnLifetime, p.expired))
+		// Expiry or another terminal path can run before the timer is published.
+		// Stop it here as well if cleanup already observed an empty pointer.
+		if p.Error() != nil {
+			p.stopLifetimeTimer()
+		}
 	}
 	return p, nil
 }
@@ -444,6 +449,7 @@ func (p *pipe) startBackground(skipReadWrite bool) {
 
 func (p *pipe) _exit(err error) {
 	p.error.CompareAndSwap(nil, &errs{error: err})
+	p.stopLifetimeTimer()
 	atomic.CompareAndSwapInt32(&p.state, 1, 2) // stop accepting new requests
 	_ = p.conn.Close()                         // force both read & write goroutine to exit
 	p.clhks.Load().(func(error))(err)
@@ -1927,6 +1933,7 @@ func (p *pipe) Error() error {
 
 func (p *pipe) Close() {
 	p.error.CompareAndSwap(nil, errClosing)
+	p.stopLifetimeTimer()
 	block := atomic.AddInt32(&p.blcksig, 1)
 	waits := p.incrWaits()
 	stopping1 := atomic.CompareAndSwapInt32(&p.state, 0, 2)
@@ -1975,11 +1982,15 @@ func (p *pipe) Close() {
 	}
 }
 
-func (p *pipe) StopTimer() bool {
-	stopped := true
-	if p.lftmTimer != nil {
-		stopped = p.lftmTimer.Stop()
+func (p *pipe) stopLifetimeTimer() bool {
+	if timer := p.lftmTimer.Load(); timer != nil {
+		return timer.Stop()
 	}
+	return true
+}
+
+func (p *pipe) StopTimer() bool {
+	stopped := p.stopLifetimeTimer()
 	if p.authTimer != nil {
 		stopped = p.authTimer.Stop() && stopped
 	}
@@ -1991,8 +2002,12 @@ func (p *pipe) ResetTimer() bool {
 		return true
 	}
 	reset := true
-	if p.lftmTimer != nil {
-		reset = p.lftmTimer.Reset(p.lftm)
+	if timer := p.lftmTimer.Load(); timer != nil {
+		reset = timer.Reset(p.lftm)
+		// Close can race the initial error check and stop before this Reset.
+		if p.Error() != nil {
+			timer.Stop()
+		}
 	}
 	if p.authTimer != nil {
 		if at := p.authRefreshAt.Load(); at != nil && !at.IsZero() {
