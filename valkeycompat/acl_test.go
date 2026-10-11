@@ -11,9 +11,6 @@ import (
 	"github.com/valkey-io/valkey-go/mock"
 )
 
-
-
-
 func TestParseClientInfo(t *testing.T) {
 	txt := "id=469 addr=127.0.0.1:55958 laddr=127.0.0.1:6379 fd=8 name=myclient age=12 idle=3 flags=SM db=1 sub=2 psub=3 ssub=4 multi=5 watch=6 qbuf=100 qbuf-free=200 argv-mem=18 multi-mem=50 rbs=16384 rbp=16384 obl=1 oll=2 omem=3 tot-mem=17322 events=r cmd=auth user=default redir=-1 resp=3 lib-name=valkey-go lib-ver=1.0 tot-net-in=40 tot-net-out=50 tot-cmds=6"
 	info, err := parseClientInfo(txt)
@@ -350,4 +347,3 @@ func TestACLLiveIntegration(t *testing.T) {
 		})
 	}
 }
-
