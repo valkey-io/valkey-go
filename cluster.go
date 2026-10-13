@@ -38,6 +38,9 @@ type clusterClient struct {
 	cmd          Builder
 	retry        bool
 	hasLftm      bool
+	migDone      chan struct{}           // closed when the slot migration monitor exits; nil if it is not enabled
+	migMoved     chan slotMigrationMoved // MOVED replies, for the slot migration monitor; nil if it is not enabled
+	refreshMu    sync.Mutex              // held by _refreshFrom from its topology reply, AZ lookups included, until its maps are installed
 }
 
 // NOTE: connrole and conn must be initialized at the same time
@@ -111,6 +114,12 @@ func newClusterClient(opt *ClientOption, connFn connFn, retryer retryHandler) (*
 		go client.runClusterTopologyRefreshment()
 	} else if opt.ClusterOption.ShardsRefreshInterval < 0 {
 		return nil, ErrInvalidShardsRefreshInterval
+	}
+
+	if opt.ClusterOption.SlotMigrationAwareness {
+		client.migDone = make(chan struct{})
+		client.migMoved = make(chan slotMigrationMoved, slotMigrationWakeBuffer)
+		go newSlotMigrationMonitor(client).run(client.migDone)
 	}
 
 	return client, nil
@@ -232,11 +241,22 @@ func getClusterSlots(c conn, timeout time.Duration, preferShards bool) clustersl
 }
 
 func (c *clusterClient) _refresh() (err error) {
+	return c._refreshFrom(c.clusterRefreshConns())
+}
+
+// _refreshFrom rebuilds the slot maps from the first non-empty CLUSTER SLOTS/SHARDS reply among pending.
+// The slot migration monitor calls it directly, not through sc, so two refreshes can overlap. refreshMu makes
+// each of them read the connections and install its maps with no other refresh in between; otherwise a refresh
+// could put back a connection that the other one has just removed and is about to close. A refresh that
+// completes after Close installs nothing and closes the connections it created.
+func (c *clusterClient) _refreshFrom(pending []conn) (err error) {
 	batchDelay := c.clusterRefreshBatchDelay()
-	result, err := c.refreshConns(c.clusterRefreshConns(), batchDelay)
+	result, err := c.refreshConns(pending, batchDelay)
 	if err != nil {
 		return err
 	}
+	c.refreshMu.Lock()
+	defer c.refreshMu.Unlock()
 
 	groups := result.parse(c.opt.TLSConfig != nil)
 	conns := make(map[string]connrole, len(groups))
@@ -339,6 +359,17 @@ func (c *clusterClient) _refresh() (err error) {
 	var replaced map[conn]conn
 
 	c.mu.Lock()
+	if atomic.LoadUint32(&c.stop) != 0 {
+		// Close has closed the connections in c.conns. Install nothing, and close the ones this refresh created,
+		// which the AZ() calls above may have connected.
+		for addr, fresh := range conns {
+			if cc, ok := c.conns[addr]; !ok || cc.conn != fresh.conn {
+				go fresh.conn.Close()
+			}
+		}
+		c.mu.Unlock()
+		return ErrClosing
+	}
 	// redirectOrNew may have changed c.conns while the lock was released above.
 	// Reconcile here, otherwise the conns it added are dropped without being closed.
 	for addr, cc := range c.conns {
@@ -614,8 +645,21 @@ func (c *clusterClient) pick(ctx context.Context, slot uint16, toReplica bool) (
 func (c *clusterClient) redirectOrNew(addr string, prev conn, slot uint16, mode RedirectMode) conn {
 	c.mu.RLock()
 	cc := c.conns[addr]
+	// With ReplicaOnly the slot map points to replicas, not to the primary named by MOVED, so it is left to the
+	// regular refresh.
+	stale := !c.replicaOnly() && mode == RedirectMove && slot != cmds.InitSlot && cc.conn != nil && c.wslots[slot] != cc.conn
 	c.mu.RUnlock()
 	if cc.conn != nil && prev != cc.conn {
+		if stale {
+			// MOVED is authoritative for the slot. Remember the new owner, as the branches below do,
+			// so the following commands for the slot go there directly instead of being redirected
+			// again until the next topology refresh.
+			c.mu.Lock()
+			if c.conns[addr].conn == cc.conn {
+				c.routeMoved(slot, addr, cc.conn)
+			}
+			c.mu.Unlock()
+		}
 		return cc.conn
 	}
 	c.mu.Lock()
@@ -624,7 +668,7 @@ func (c *clusterClient) redirectOrNew(addr string, prev conn, slot uint16, mode 
 		cc = connrole{conn: p}
 		c.conns[addr] = cc
 		if mode == RedirectMove && slot != cmds.InitSlot {
-			c.wslots[slot] = p
+			c.routeMoved(slot, addr, p)
 		}
 	} else if prev == cc.conn {
 		// try reconnection if the MOVED redirects to the same host,
@@ -638,11 +682,28 @@ func (c *clusterClient) redirectOrNew(addr string, prev conn, slot uint16, mode 
 		cc = connrole{conn: p}
 		c.conns[addr] = cc
 		if mode == RedirectMove && slot != cmds.InitSlot { // MOVED should always point to the primary.
-			c.wslots[slot] = p
+			c.routeMoved(slot, addr, p)
 		}
 	}
 	c.mu.Unlock()
 	return cc.conn
+}
+
+// routeMoved routes slot to cc, the primary at addr named by a MOVED reply, until the next topology refresh. When
+// reads are sent to replicas, they follow it too: the replicas of the slot's previous owner no longer serve the slot,
+// and those of the new owner are only known after the refresh. c.mu must be held.
+func (c *clusterClient) routeMoved(slot uint16, addr string, cc conn) {
+	c.wslots[slot] = cc
+	if c.rslots != nil && c.opt.SendToReplicas != nil {
+		c.rslots[slot] = nodes{{Addr: addr, conn: cc}}
+	}
+}
+
+// replicaOnly reports whether the client was configured with ReplicaOnly, so that its slot map points to replicas.
+// A client with SendToReplicas also has ReplicaOnly set in c.opt, to dial every connection with READONLY, but its slot
+// map points to primaries.
+func (c *clusterClient) replicaOnly() bool {
+	return c.opt.ReplicaOnly && c.opt.SendToReplicas == nil
 }
 
 func (c *clusterClient) B() Builder {
@@ -1723,6 +1784,10 @@ func (c *clusterClient) Close() {
 		go cc.conn.Close()
 	}
 	c.mu.RUnlock()
+
+	if c.migDone != nil {
+		<-c.migDone // closing stopCh stops the monitor without waiting for its in-flight requests
+	}
 }
 
 func (c *clusterClient) shouldRefreshRetry(err error, ctx context.Context) (addr string, mode RedirectMode) {
@@ -1730,6 +1795,9 @@ func (c *clusterClient) shouldRefreshRetry(err error, ctx context.Context) (addr
 		if err, ok := err.(*ValkeyError); ok {
 			if addr, ok = err.IsMoved(); ok {
 				mode = RedirectMove
+				if c.migMoved != nil {
+					c.handOffMoved(err, addr)
+				}
 			} else if addr, ok = err.IsAsk(); ok {
 				mode = RedirectAsk
 			} else if err.IsClusterDown() || err.IsTryAgain() || err.IsLoading() {
