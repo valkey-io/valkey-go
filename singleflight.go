@@ -10,8 +10,10 @@ import (
 // before ch is closed, so any goroutine that observed the close may read err
 // without further synchronization.
 type flight struct {
-	err error
-	ch  chan struct{}
+	err   error
+	ch    chan struct{}
+	wake  chan struct{} // only set by DelayDo; closed by Expedite to end the delay early
+	woken bool          // guarded by call.mu
 }
 
 type call struct {
@@ -55,20 +57,39 @@ func (c *call) Do(ctx context.Context, fn func() error) error {
 }
 
 // DelayDo sleeps for delay then runs fn, deduping concurrent callers via singleflight.
+// The sleep can be cut short by Expedite.
 func (c *call) DelayDo(delay time.Duration, fn func() error) {
 	c.mu.Lock()
 	if c.fl != nil {
 		c.mu.Unlock()
 		return
 	}
-	fl := &flight{ch: make(chan struct{})}
+	fl := &flight{ch: make(chan struct{}), wake: make(chan struct{})}
 	c.fl = fl
 	c.cn++
 	c.mu.Unlock()
 	go func(delay time.Duration, fl *flight, fn func() error) {
-		time.Sleep(delay)
+		if delay > 0 {
+			timer := time.NewTimer(delay)
+			select {
+			case <-timer.C:
+			case <-fl.wake:
+				timer.Stop()
+			}
+		}
 		c.do(fl, fn)
 	}(delay, fl, fn)
+}
+
+// Expedite makes a pending DelayDo flight that is still sleeping run fn immediately.
+// It is a no-op when there is no pending flight or the flight was started by Do.
+func (c *call) Expedite() {
+	c.mu.Lock()
+	if fl := c.fl; fl != nil && fl.wake != nil && !fl.woken {
+		fl.woken = true
+		close(fl.wake)
+	}
+	c.mu.Unlock()
 }
 
 func (c *call) do(fl *flight, fn func() error) error {

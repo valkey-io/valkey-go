@@ -78,6 +78,11 @@ var (
 		cs: newCommandSlice([]string{"CLUSTER", "SHARDS"}),
 		cf: pipeTag,
 	}
+	// GetSlotMigrationsCmd is predefined CLUSTER GETSLOTMIGRATIONS (Valkey 9.0+)
+	GetSlotMigrationsCmd = Completed{
+		cs: newCommandSlice([]string{"CLUSTER", "GETSLOTMIGRATIONS"}),
+		cf: pipeTag,
+	}
 	// AskingCmd is predefined CLUSTER ASKING
 	AskingCmd = Completed{
 		cs: newCommandSlice([]string{"ASKING"}),

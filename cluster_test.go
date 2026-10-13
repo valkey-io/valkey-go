@@ -12428,3 +12428,114 @@ func TestClusterRebucketRetriesKeylessConsolidates(t *testing.T) {
 		}
 	}
 }
+
+func newMovedTestClient(t *testing.T, owner, target *mockConn, release chan struct{}) *clusterClient {
+	t.Helper()
+	var refreshed int32
+	topology := func(cmd Completed) ValkeyResult {
+		// the first refresh builds the slot map; later (lazy) refreshes are held until the test
+		// is done so they cannot overwrite the slot map while the test inspects it.
+		if atomic.AddInt32(&refreshed, 1) > 1 {
+			<-release
+		}
+		return slotsMultiResp
+	}
+	owner.DoOverride = map[string]func(cmd Completed) ValkeyResult{"CLUSTER SLOTS": topology}
+	target.DoOverride = map[string]func(cmd Completed) ValkeyResult{"CLUSTER SLOTS": topology}
+	other := &mockConn{DoOverride: map[string]func(cmd Completed) ValkeyResult{"CLUSTER SLOTS": topology}}
+	client, err := newClusterClient(
+		&ClientOption{InitAddress: []string{"127.0.0.1:0"}},
+		func(dst string, opt *ClientOption) conn {
+			switch dst {
+			case "127.0.0.1:0":
+				return owner
+			case "127.0.2.1:0":
+				return target
+			}
+			return other
+		},
+		newRetryer(defaultRetryDelayFn),
+	)
+	if err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	t.Cleanup(func() {
+		close(release)
+		client.Close()
+	})
+	return client
+}
+
+func TestClusterClientMovedToExistingConnUpdatesSlot(t *testing.T) {
+	var ownerCalls, targetCalls int32
+	owner := &mockConn{DoFn: func(cmd Completed) ValkeyResult {
+		atomic.AddInt32(&ownerCalls, 1)
+		return NewResult(strmsg('-', "MOVED 5061 127.0.2.1:0"), nil)
+	}}
+	target := &mockConn{DoFn: func(cmd Completed) ValkeyResult {
+		atomic.AddInt32(&targetCalls, 1)
+		return NewResult(strmsg('+', "OK"), nil)
+	}}
+	client := newMovedTestClient(t, owner, target, make(chan struct{}))
+
+	get := client.B().Get().Key("bar").Build()
+	if get.Slot() != 5061 {
+		t.Fatalf("test key must hash to slot 5061, got %d", get.Slot())
+	}
+	if client._pick(5061, false) != owner {
+		t.Fatal("slot 5061 should start on 127.0.0.1:0")
+	}
+
+	// the first command is redirected; the conn to the new owner already exists
+	if v, err := client.Do(context.Background(), get).ToString(); err != nil || v != "OK" {
+		t.Fatalf("unexpected %v %v", v, err)
+	}
+	if client._pick(5061, false) != target {
+		t.Fatal("MOVED to an existing conn should update the slot owner")
+	}
+	if client._pick(5062, false) != owner {
+		t.Fatal("other slots must keep their owner")
+	}
+
+	// the following commands go to the new owner directly
+	for i := 0; i < 10; i++ {
+		if v, err := client.Do(context.Background(), client.B().Get().Key("bar").Build()).ToString(); err != nil || v != "OK" {
+			t.Fatalf("unexpected %v %v", v, err)
+		}
+	}
+	if n := atomic.LoadInt32(&ownerCalls); n != 1 {
+		t.Fatalf("old owner should be asked once, got %d", n)
+	}
+	if n := atomic.LoadInt32(&targetCalls); n != 11 {
+		t.Fatalf("new owner should serve all 11 commands, got %d", n)
+	}
+
+	// with ReplicaOnly the slot map points to replicas, so MOVED, which names the primary, must not replace them
+	client.opt.ReplicaOnly = true
+	client.mu.Lock()
+	client.wslots[5061] = owner
+	client.mu.Unlock()
+	if v, err := client.Do(context.Background(), client.B().Get().Key("bar").Build()).ToString(); err != nil || v != "OK" {
+		t.Fatalf("unexpected %v %v", v, err)
+	}
+	if client._pick(5061, false) != owner {
+		t.Fatal("with ReplicaOnly, MOVED must not replace the replica route of the slot")
+	}
+}
+
+func TestClusterClientAskToExistingConnKeepsSlot(t *testing.T) {
+	owner := &mockConn{DoFn: func(cmd Completed) ValkeyResult {
+		return NewResult(strmsg('-', "ASK 5061 127.0.2.1:0"), nil)
+	}}
+	target := &mockConn{DoMultiFn: func(multi ...Completed) *valkeyresults {
+		return &valkeyresults{s: []ValkeyResult{NewResult(strmsg('+', "OK"), nil), NewResult(strmsg('+', "OK"), nil)}}
+	}}
+	client := newMovedTestClient(t, owner, target, make(chan struct{}))
+
+	if v, err := client.Do(context.Background(), client.B().Get().Key("bar").Build()).ToString(); err != nil || v != "OK" {
+		t.Fatalf("unexpected %v %v", v, err)
+	}
+	if client._pick(5061, false) != owner {
+		t.Fatal("ASK is temporary and must not change the slot owner")
+	}
+}
