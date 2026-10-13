@@ -90,6 +90,12 @@ func newClusterClient(opt *ClientOption, connFn connFn, retryer retryHandler) (*
 	}
 
 	client.connFn = func(dst string, opt *ClientOption) conn {
+		// With SendToReplicas, every conn issues READONLY on connect, not only those to current replicas. Roles change
+		// on failover while conns are reused across refreshes, so a demoted primary's conn must already accept reads
+		// routed to it as a replica. A primary ignores READONLY.
+		if client.rOpt != nil {
+			opt = client.rOpt
+		}
 		cc := connFn(dst, opt)
 		cc.SetOnCloseHook(func(err error) {
 			client.lazyRefresh()
@@ -240,14 +246,8 @@ func (c *clusterClient) _refresh() (err error) {
 	conns := make(map[string]connrole, len(groups))
 	for master, g := range groups {
 		conns[master] = connrole{conn: c.connFn(master, c.opt)}
-		if c.rOpt != nil {
-			for _, nodeInfo := range g.nodes[1:] {
-				conns[nodeInfo.Addr] = connrole{conn: c.connFn(nodeInfo.Addr, c.rOpt)}
-			}
-		} else {
-			for _, nodeInfo := range g.nodes[1:] {
-				conns[nodeInfo.Addr] = connrole{conn: c.connFn(nodeInfo.Addr, c.opt)}
-			}
+		for _, nodeInfo := range g.nodes[1:] {
+			conns[nodeInfo.Addr] = connrole{conn: c.connFn(nodeInfo.Addr, c.opt)}
 		}
 	}
 	// make sure InitAddress always be present
