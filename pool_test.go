@@ -656,3 +656,229 @@ func TestPoolWithCtxTimeout(t *testing.T) {
 		wg.Wait()
 	})
 }
+
+func TestPoolStats(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	newTestPool := func(size int, makeFn func(context.Context) wire) *pool {
+		return newPool(size, dead, 0, 0, makeFn)
+	}
+	waitFor := func(t *testing.T, p *pool, fn func(PoolStats) bool) PoolStats {
+		t.Helper()
+		deadline := time.Now().Add(time.Second)
+		for {
+			stats := p.stats()
+			if fn(stats) {
+				return stats
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for pool stats condition: %+v", stats)
+			}
+			runtime.Gosched()
+		}
+	}
+
+	t.Run("Reservation and dialing", func(t *testing.T) {
+		started := make(chan struct{})
+		release := make(chan struct{})
+		p := newTestPool(1, func(context.Context) wire {
+			close(started)
+			<-release
+			return &mockWire{}
+		})
+		acquired := make(chan wire, 1)
+		go func() {
+			acquired <- p.Acquire(context.Background())
+		}()
+		<-started
+		stats := p.stats()
+		if stats.Capacity != 1 || stats.Reserved != 1 || stats.Dialing != 1 || stats.Idle != 0 {
+			t.Fatalf("unexpected dialing stats: %+v", stats)
+		}
+		close(release)
+		w := <-acquired
+		stats = p.stats()
+		if stats.Reserved != 1 || stats.Dialing != 0 || stats.Idle != 0 {
+			t.Fatalf("unexpected acquired stats: %+v", stats)
+		}
+		p.Store(w)
+		p.Close()
+	})
+
+	t.Run("Wait counted once across wakeups", func(t *testing.T) {
+		p := newTestPool(2, func(context.Context) wire { return &mockWire{} })
+		w1 := p.Acquire(context.Background())
+		w2 := p.Acquire(context.Background())
+		acquired := make(chan wire, 1)
+		go func() {
+			acquired <- p.Acquire(context.Background())
+		}()
+
+		waitFor(t, p, func(stats PoolStats) bool {
+			return stats.Waiters == 1
+		})
+		for range 3 {
+			p.cond.Broadcast()
+			runtime.Gosched()
+		}
+		stats := p.stats()
+		if stats.WaitCount != 1 || stats.Waiters != 1 {
+			t.Fatalf("unexpected waiting stats after wakeups: %+v", stats)
+		}
+
+		p.Store(w1)
+		w3 := <-acquired
+		stats = p.stats()
+		if stats.WaitCount != 1 || stats.Waiters != 0 || stats.WaitDuration <= 0 {
+			t.Fatalf("unexpected completed wait stats: %+v", stats)
+		}
+		p.Store(w2)
+		p.Store(w3)
+		p.Close()
+	})
+
+	t.Run("Canceled wait", func(t *testing.T) {
+		p := newTestPool(1, func(context.Context) wire { return &mockWire{} })
+		w := p.Acquire(context.Background())
+		ctx, cancel := context.WithCancel(context.Background())
+		acquired := make(chan wire, 1)
+		go func() {
+			acquired <- p.Acquire(ctx)
+		}()
+		waitFor(t, p, func(stats PoolStats) bool {
+			return stats.Waiters == 1
+		})
+		cancel()
+		canceled := <-acquired
+		if err := canceled.Error(); !errors.Is(err, context.Canceled) {
+			t.Fatalf("unexpected canceled acquire error: %v", err)
+		}
+		p.Store(canceled)
+		stats := p.stats()
+		if stats.Reserved != 1 || stats.WaitCount != 1 || stats.WaitCanceled != 1 || stats.Waiters != 0 || stats.WaitDuration <= 0 {
+			t.Fatalf("unexpected canceled wait stats: %+v", stats)
+		}
+		p.Store(w)
+		p.Close()
+	})
+
+	t.Run("Factory failure releases reservation on store", func(t *testing.T) {
+		failed := &mockWire{ErrorFn: func() error { return errors.New("factory failure") }}
+		p := newTestPool(1, func(context.Context) wire { return failed })
+		w := p.Acquire(context.Background())
+		stats := p.stats()
+		if stats.Reserved != 1 || stats.Dialing != 0 {
+			t.Fatalf("unexpected failed factory stats before store: %+v", stats)
+		}
+		p.Store(w)
+		stats = p.stats()
+		if stats.Reserved != 0 || stats.Dialing != 0 || stats.Idle != 0 {
+			t.Fatalf("unexpected failed factory stats after store: %+v", stats)
+		}
+		p.Close()
+	})
+
+	t.Run("Expired creation retries without leaking reservation", func(t *testing.T) {
+		attempt := 0
+		p := newTestPool(1, func(context.Context) wire {
+			attempt++
+			return &mockWire{StopTimerFn: func() bool { return attempt != 1 }}
+		})
+		w := p.Acquire(context.Background())
+		stats := p.stats()
+		if attempt != 2 || stats.Reserved != 1 || stats.Dialing != 0 || stats.Idle != 0 {
+			t.Fatalf("unexpected expired creation stats: attempts=%d stats=%+v", attempt, stats)
+		}
+		p.Store(w)
+		p.Close()
+	})
+
+	t.Run("Expired creation closes outside pool lock", func(t *testing.T) {
+		closeStarted := make(chan struct{})
+		releaseClose := make(chan struct{})
+		attempt := 0
+		p := newTestPool(1, func(context.Context) wire {
+			attempt++
+			if attempt == 1 {
+				return &mockWire{
+					StopTimerFn: func() bool { return false },
+					CloseFn: func() {
+						close(closeStarted)
+						<-releaseClose
+					},
+				}
+			}
+			return &mockWire{}
+		})
+		acquired := make(chan wire, 1)
+		go func() {
+			acquired <- p.Acquire(context.Background())
+		}()
+		<-closeStarted
+
+		statsRead := make(chan struct{})
+		go func() {
+			p.stats()
+			close(statsRead)
+		}()
+		select {
+		case <-statsRead:
+		case <-time.After(time.Second):
+			t.Fatal("pool mutex held while closing expired wire")
+		}
+
+		close(releaseClose)
+		p.Store(<-acquired)
+		p.Close()
+	})
+
+	t.Run("Idle cleanup updates current state", func(t *testing.T) {
+		p := newPool(2, dead, 10*time.Millisecond, 1, func(context.Context) wire { return &mockWire{} })
+		w1 := p.Acquire(context.Background())
+		w2 := p.Acquire(context.Background())
+		p.Store(w1)
+		p.Store(w2)
+		waitFor(t, p, func(stats PoolStats) bool {
+			return stats.Reserved == 1 && stats.Idle == 1
+		})
+		p.Close()
+	})
+
+	t.Run("Close retains only outstanding reservations", func(t *testing.T) {
+		p := newTestPool(2, func(context.Context) wire { return &mockWire{} })
+		idle := p.Acquire(context.Background())
+		borrowed := p.Acquire(context.Background())
+		p.Store(idle)
+		p.Close()
+
+		stats := p.stats()
+		if !stats.Closed || stats.Reserved != 1 || stats.Dialing != 0 || stats.Idle != 0 {
+			t.Fatalf("unexpected stats after close: %+v", stats)
+		}
+		p.Store(borrowed)
+		stats = p.stats()
+		if stats.Reserved != 0 || stats.Idle != 0 {
+			t.Fatalf("unexpected stats after borrowed wire returned: %+v", stats)
+		}
+		before := stats
+		got := p.Acquire(context.Background())
+		if got != dead {
+			t.Fatalf("expected dead wire after close, got %T with error %v", got, got.Error())
+		}
+		p.Store(got)
+		after := p.stats()
+		if before != after {
+			t.Fatalf("post-close acquire/store changed stats: before=%+v after=%+v", before, after)
+		}
+	})
+}
+
+func BenchmarkPoolAcquireStore(b *testing.B) {
+	p := newPool(1, dead, 0, 0, func(context.Context) wire { return &mockWire{} })
+	p.Store(p.Acquire(context.Background()))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		p.Store(p.Acquire(context.Background()))
+	}
+}

@@ -403,6 +403,13 @@ func (m *mux) Store(w wire) {
 	m.dpool.Store(w)
 }
 
+func (m *mux) poolStats() NodePoolStats {
+	return NodePoolStats{
+		Blocking:  m.dpool.stats(),
+		Streaming: m.spool.stats(),
+	}
+}
+
 func (m *mux) Close() {
 	for i := 0; i < len(m.muxwires); i++ {
 		if prev := m.muxwires[i].wire.Swap(m.dead).(wire); prev != m.init && prev != m.dead {

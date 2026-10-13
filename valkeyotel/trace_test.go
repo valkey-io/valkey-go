@@ -28,6 +28,38 @@ var (
 	errMocked = errors.New("ERROR_MOCKED")
 )
 
+type poolStatsClient struct {
+	valkey.Client
+	stats map[string]valkey.NodePoolStats
+}
+
+func (c *poolStatsClient) PoolStats() (map[string]valkey.NodePoolStats, error) {
+	return c.stats, nil
+}
+
+type clientWithoutPoolStats struct {
+	valkey.Client
+}
+
+func TestOtelClientPoolStats(t *testing.T) {
+	expected := map[string]valkey.NodePoolStats{
+		"node:6379": {Streaming: valkey.PoolStats{Capacity: 3}},
+	}
+	client := &otelclient{client: &poolStatsClient{stats: expected}}
+	got, err := client.PoolStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["node:6379"].Streaming.Capacity != 3 {
+		t.Fatalf("unexpected stats: %+v", got)
+	}
+
+	client.client = &clientWithoutPoolStats{}
+	if _, err := client.PoolStats(); !errors.Is(err, valkey.ErrPoolStatsUnsupported) {
+		t.Fatalf("unexpected unsupported error: %v", err)
+	}
+}
+
 // MockMeterProvider for testing purposes
 type MockMeterProvider struct {
 	metric.MeterProvider

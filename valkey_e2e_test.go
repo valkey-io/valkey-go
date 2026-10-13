@@ -1169,3 +1169,115 @@ func TestNegativeConnWriteTimeoutKeepalive(t *testing.T) {
 	}
 	client.Close()
 }
+
+func TestIntegrationPoolStats(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+	const addr = "127.0.0.1:6379"
+
+	newClient := func(disableAutoPipelining bool) (Client, PoolStatsProvider) {
+		t.Helper()
+		client, err := NewClient(ClientOption{
+			InitAddress:           []string{addr},
+			ForceSingleClient:     true,
+			DisableAutoPipelining: disableAutoPipelining,
+			BlockingPoolSize:      1,
+			DisableCache:          true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		provider, ok := client.(PoolStatsProvider)
+		if !ok {
+			client.Close()
+			t.Fatal("client does not implement PoolStatsProvider")
+		}
+		return client, provider
+	}
+
+	waitFor := func(provider PoolStatsProvider, fn func(NodePoolStats) bool) NodePoolStats {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			stats, err := provider.PoolStats()
+			if err != nil {
+				t.Fatal(err)
+			}
+			node, ok := stats[addr]
+			if !ok {
+				t.Fatalf("missing pool stats for %s: %+v", addr, stats)
+			}
+			if fn(node) {
+				return node
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for pool stats: %+v", node)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	streamClient, streamProvider := newClient(true)
+	if err := streamClient.Do(context.Background(), streamClient.B().Ping().Build()).Error(); err != nil {
+		streamClient.Close()
+		t.Fatal(err)
+	}
+	node := waitFor(streamProvider, func(node NodePoolStats) bool {
+		return node.Streaming.Reserved == 1 && node.Streaming.Idle == 1
+	})
+	if node.Blocking.Reserved != 0 {
+		streamClient.Close()
+		t.Fatalf("ordinary command changed blocking pool stats: %+v", node)
+	}
+	streamClient.Close()
+	node = waitFor(streamProvider, func(node NodePoolStats) bool {
+		return node.Blocking.Closed && node.Streaming.Closed
+	})
+	if node.Streaming.Reserved != 0 {
+		t.Fatalf("closed streaming pool retained reservations: %+v", node)
+	}
+
+	blockingClient, blockingProvider := newClient(false)
+	first := make(chan error, 1)
+	go func() {
+		first <- blockingClient.Do(
+			context.Background(),
+			blockingClient.B().Blpop().Key("pool-stats-e2e").Timeout(1).Build(),
+		).Error()
+	}()
+	waitFor(blockingProvider, func(node NodePoolStats) bool {
+		return node.Blocking.Reserved == 1 && node.Blocking.Idle == 0
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	err := blockingClient.Do(ctx, blockingClient.B().Blpop().Key("pool-stats-e2e").Timeout(1).Build()).Error()
+	cancel()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		blockingClient.Close()
+		t.Fatalf("unexpected waiting acquire error: %v", err)
+	}
+	node = waitFor(blockingProvider, func(node NodePoolStats) bool {
+		return node.Blocking.WaitCount == 1 &&
+			node.Blocking.WaitCanceled == 1 &&
+			node.Blocking.Waiters == 0
+	})
+	if node.Blocking.WaitDuration < 100*time.Millisecond {
+		blockingClient.Close()
+		t.Fatalf("unexpected wait duration: %+v", node.Blocking)
+	}
+
+	if err := <-first; !IsValkeyNil(err) {
+		blockingClient.Close()
+		t.Fatalf("unexpected first BLPOP result: %v", err)
+	}
+	waitFor(blockingProvider, func(node NodePoolStats) bool {
+		return node.Blocking.Reserved == 1 && node.Blocking.Idle == 1
+	})
+
+	blockingClient.Close()
+	node = waitFor(blockingProvider, func(node NodePoolStats) bool {
+		return node.Blocking.Closed && node.Streaming.Closed
+	})
+	if node.Blocking.Reserved != 0 || node.Streaming.Reserved != 0 {
+		t.Fatalf("closed pools retained reservations: %+v", node)
+	}
+}

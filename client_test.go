@@ -201,6 +201,102 @@ func (m *mockConn) OptInCmd() cmds.Completed {
 	return cmds.OptInCmd
 }
 
+func TestClientPoolStats(t *testing.T) {
+	newStatsMux := func(addr string) *mux {
+		dead := deadFn()
+		option := &ClientOption{BlockingPoolSize: 2}
+		makeWire := func(context.Context) wire { return &mockWire{} }
+		return newMux(addr, option, dead, dead, makeWire, makeWire)
+	}
+
+	t.Run("Single client exposes both pools", func(t *testing.T) {
+		m := newStatsMux("node:6379")
+		m.dpool.Store(m.dpool.Acquire(context.Background()))
+		m.spool.Store(m.spool.Acquire(context.Background()))
+		client := newSingleClientWithConn(
+			m,
+			cmds.NewBuilder(cmds.NoSlot),
+			false,
+			false,
+			newRetryer(defaultRetryDelayFn),
+			false,
+		)
+
+		stats, err := client.PoolStats()
+		if err != nil {
+			t.Fatal(err)
+		}
+		node, ok := stats["node:6379"]
+		if !ok {
+			t.Fatalf("missing node stats: %+v", stats)
+		}
+		if node.Blocking.Capacity != 2 || node.Blocking.Reserved != 1 || node.Blocking.Idle != 1 {
+			t.Fatalf("unexpected blocking stats: %+v", node.Blocking)
+		}
+		if node.Streaming.Capacity != 2 || node.Streaming.Reserved != 1 || node.Streaming.Idle != 1 {
+			t.Fatalf("unexpected streaming stats: %+v", node.Streaming)
+		}
+		client.Close()
+	})
+
+	t.Run("Unsupported connection is explicit", func(t *testing.T) {
+		client := newSingleClientWithConn(
+			&mockConn{AddrFn: func() string { return "mock:6379" }},
+			cmds.NewBuilder(cmds.NoSlot),
+			false,
+			false,
+			newRetryer(defaultRetryDelayFn),
+			false,
+		)
+		if _, err := client.PoolStats(); !errors.Is(err, ErrPoolStatsUnsupported) {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("Cluster includes visible current nodes only", func(t *testing.T) {
+		visible := newStatsMux("visible:6379")
+		hidden := newStatsMux("hidden:6379")
+		visible.dpool.Store(visible.dpool.Acquire(context.Background()))
+		cluster := &clusterClient{
+			opt:          &ClientOption{},
+			conns:        map[string]connrole{"visible:6379": {conn: visible}, "hidden:6379": {conn: hidden, hidden: true}},
+			cmd:          cmds.NewBuilder(cmds.InitSlot),
+			retryHandler: newRetryer(defaultRetryDelayFn),
+		}
+		stats, err := cluster.PoolStats()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(stats) != 1 {
+			t.Fatalf("unexpected node count: %+v", stats)
+		}
+		if _, ok := stats["visible:6379"]; !ok {
+			t.Fatalf("visible node missing: %+v", stats)
+		}
+		if _, ok := stats["hidden:6379"]; ok {
+			t.Fatalf("hidden node included: %+v", stats)
+		}
+		if stats["visible:6379"].Blocking.Idle != 1 {
+			t.Fatalf("unexpected initial visible stats: %+v", stats)
+		}
+
+		replacement := newStatsMux("visible:6379")
+		cluster.mu.Lock()
+		cluster.conns["visible:6379"] = connrole{conn: replacement}
+		cluster.mu.Unlock()
+		stats, err = cluster.PoolStats()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stats["visible:6379"].Blocking.Idle != 0 {
+			t.Fatalf("replacement retained old pool stats: %+v", stats)
+		}
+		visible.Close()
+		hidden.Close()
+		replacement.Close()
+	})
+}
+
 func TestNewSingleClientNoNode(t *testing.T) {
 	defer ShouldNotLeak(SetupLeakDetection())
 	if _, err := newSingleClient(

@@ -8,6 +8,7 @@ import (
 )
 
 var _ valkey.Client = (*hookclient)(nil)
+var _ valkey.PoolStatsProvider = (*hookclient)(nil)
 
 // Hook allows user to intercept valkey.Client by using WithHook
 type Hook interface {
@@ -79,6 +80,14 @@ func (c *hookclient) Nodes() map[string]valkey.Client {
 		nodes[addr] = &hookclient{client: client, hook: c.hook}
 	}
 	return nodes
+}
+
+func (c *hookclient) PoolStats() (map[string]valkey.NodePoolStats, error) {
+	provider, ok := c.client.(valkey.PoolStatsProvider)
+	if !ok {
+		return nil, valkey.ErrPoolStatsUnsupported
+	}
+	return provider.PoolStats()
 }
 
 func (c *hookclient) Mode() valkey.ClientMode {
