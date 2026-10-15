@@ -11,9 +11,9 @@ replace github.com/valkey-io/valkey-go/valkeylimiter => ../valkeylimiter
 require (
 	github.com/onsi/ginkgo/v2 v2.32.2
 	github.com/onsi/gomega v1.42.1
-	github.com/valkey-io/valkey-go v1.0.78
-	github.com/valkey-io/valkey-go/valkeycompat v1.0.78
-	github.com/valkey-io/valkey-go/valkeylimiter v1.0.78
+	github.com/valkey-io/valkey-go v1.0.79
+	github.com/valkey-io/valkey-go/valkeycompat v1.0.79
+	github.com/valkey-io/valkey-go/valkeylimiter v1.0.79
 )
 
 require (
