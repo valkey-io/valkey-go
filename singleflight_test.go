@@ -336,3 +336,39 @@ func TestSingleFlightDelayDoHonorsDelay(t *testing.T) {
 		t.Fatalf("DelayDo never ran")
 	}
 }
+
+func TestSingleFlightExpedite(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	// without a flight, or with a flight started by Do, there is no delay to cut short
+	sg := call{}
+	sg.Expedite()
+	running := make(chan struct{})
+	release := make(chan struct{})
+	go sg.Do(context.Background(), func() error {
+		close(running)
+		<-release
+		return nil
+	})
+	<-running
+	sg.Expedite()
+	close(release)
+	if err := sg.Do(context.Background(), func() error { return nil }); err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+
+	// a delayed flight runs as soon as it is expedited
+	delayed := call{}
+	done := make(chan struct{})
+	delayed.DelayDo(time.Hour, func() error {
+		close(done)
+		return nil
+	})
+	delayed.Expedite()
+	delayed.Expedite() // a second call must not panic on the closed wake channel
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Expedite did not wake the delayed flight")
+	}
+}
