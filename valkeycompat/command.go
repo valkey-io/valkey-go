@@ -479,6 +479,7 @@ func (cmd *IntCmd) from(res valkey.ValkeyResult) {
 	val, err := res.AsInt64()
 	cmd.SetErr(err)
 	cmd.SetVal(val)
+	cmd.setIsCacheHit(res.IsCacheHit())
 }
 
 func newIntCmd(res valkey.ValkeyResult) *IntCmd {
@@ -501,6 +502,7 @@ func (cmd *DurationCmd) from(res valkey.ValkeyResult) {
 	cmd.SetErr(err)
 	if val > 0 {
 		cmd.SetVal(time.Duration(val) * cmd.precision)
+		cmd.setIsCacheHit(res.IsCacheHit())
 		return
 	}
 	cmd.SetVal(time.Duration(val))
@@ -549,6 +551,7 @@ func (cmd *SliceCmd) from(res valkey.ValkeyResult) {
 			vals[i] = arr
 		}
 		cmd.SetVal(vals)
+		cmd.setIsCacheHit(res.IsCacheHit())
 		return
 	}
 	for i, v := range arr {

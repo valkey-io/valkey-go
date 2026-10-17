@@ -1895,3 +1895,22 @@ func TestACLLogCmd(t *testing.T) {
 		}
 	})
 }
+
+func TestCacheHitFromCachedResult(t *testing.T) {
+	cached := func(m valkey.ValkeyMessage) valkey.ValkeyResult {
+		var hit valkey.ValkeyMessage
+		if err := hit.CacheUnmarshalView(m.CacheMarshal(nil)); err != nil {
+			t.Fatal(err)
+		}
+		return mock.Result(hit)
+	}
+	if !newIntCmd(cached(mock.ValkeyInt64(2))).IsCacheHit() {
+		t.Error("IntCmd: expected IsCacheHit to be true")
+	}
+	if !newDurationCmd(cached(mock.ValkeyInt64(60)), time.Second).IsCacheHit() {
+		t.Error("DurationCmd: expected IsCacheHit to be true")
+	}
+	if !newSliceCmd(cached(mock.ValkeyArray(mock.ValkeyArray(mock.ValkeyString("a")))), true).IsCacheHit() {
+		t.Error("SliceCmd (JSONObjKeys): expected IsCacheHit to be true")
+	}
+}
