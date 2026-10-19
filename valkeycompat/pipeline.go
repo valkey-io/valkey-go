@@ -1182,7 +1182,7 @@ func (c *Pipeline) XAck(ctx context.Context, stream, group string, ids ...string
 	return ret
 }
 
-func (c *Pipeline) XNack(ctx context.Context, a *XNackArgs) *IntCmd {
+func (c *Pipeline) XNack(ctx context.Context, a XNackArgs) *IntCmd {
 	ret := c.comp.XNack(ctx, a)
 	c.rets = append(c.rets, ret)
 	return ret

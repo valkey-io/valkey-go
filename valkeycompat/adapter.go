@@ -29,7 +29,6 @@ package valkeycompat
 import (
 	"context"
 	"encoding"
-	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -259,7 +258,7 @@ type CoreCmdable interface {
 	XGroupDelConsumer(ctx context.Context, stream, group, consumer string) *IntCmd
 	XReadGroup(ctx context.Context, a XReadGroupArgs) *XStreamSliceCmd
 	XAck(ctx context.Context, stream, group string, ids ...string) *IntCmd
-	XNack(ctx context.Context, a *XNackArgs) *IntCmd
+	XNack(ctx context.Context, a XNackArgs) *IntCmd
 	XPending(ctx context.Context, stream, group string) *XPendingCmd
 	XPendingExt(ctx context.Context, a XPendingExtArgs) *XPendingExtCmd
 	XClaim(ctx context.Context, a XClaimArgs) *XMessageSliceCmd
@@ -2316,13 +2315,7 @@ func (c *Compat) XAck(ctx context.Context, stream, group string, ids ...string) 
 	return newIntCmd(resp)
 }
 
-func (c *Compat) XNack(ctx context.Context, a *XNackArgs) *IntCmd {
-	if a == nil {
-		cmd := &IntCmd{}
-		cmd.SetErr(errors.New("valkeycompat: XNackArgs cannot be nil"))
-		return cmd
-	}
-
+func (c *Compat) XNack(ctx context.Context, a XNackArgs) *IntCmd {
 	arb := c.client.B().Arbitrary("XNACK").Keys(a.Stream).Args(a.Group, a.Mode, "IDS", strconv.Itoa(len(a.IDs))).Args(a.IDs...)
 	if a.RetryCount != nil {
 		arb = arb.Args("RETRYCOUNT", strconv.FormatUint(*a.RetryCount, 10))

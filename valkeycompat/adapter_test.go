@@ -6268,11 +6268,7 @@ func testAdapter(resp3 bool) {
 			})
 
 			It("should XNack", func() {
-				err := adapter.XNack(ctx, nil).Err()
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(Equal("valkeycompat: XNackArgs cannot be nil"))
-
-				n, err := adapter.XNack(ctx, &XNackArgs{
+				n, err := adapter.XNack(ctx, XNackArgs{
 					Stream: "stream",
 					Group:  "group",
 					Mode:   XNackModeSilent,
