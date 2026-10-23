@@ -5338,6 +5338,11 @@ func (c *Compat) Watch(ctx context.Context, fn func(Tx) error, keys ...string) e
 	if err := tx.Watch(ctx, keys...).Err(); err != nil {
 		return err
 	}
+	// Clear the watched keys before the connection goes back to the pool, so
+	// a callback that returns without EXEC does not leave them watched for the
+	// next user of the connection. Like go-redis, the result is ignored.
+	// context.WithoutCancel lets this run even if ctx is already done.
+	defer dc.Do(context.WithoutCancel(ctx), dc.B().Unwatch().Build())
 	return fn(newTx(dc, cancel))
 }
 

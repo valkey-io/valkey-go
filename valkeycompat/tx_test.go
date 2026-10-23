@@ -27,11 +27,15 @@
 package valkeycompat
 
 import (
+	"context"
 	"errors"
+	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/valkey-io/valkey-go"
+	"github.com/valkey-io/valkey-go/mock"
+	"go.uber.org/mock/gomock"
 )
 
 var _ = Describe("RESP3 TxPipeline Commands", func() {
@@ -152,6 +156,35 @@ func testAdapterTxPipeline(resp3 bool) {
 		Expect(<-ch).To(MatchError(TxFailedErr))
 	})
 
+	It("should not leave keys watched when the callback skips EXEC", func() {
+		addr := "127.0.0.1:6378"
+		if !resp3 {
+			addr = "127.0.0.1:6356"
+		}
+		// A pool of one makes the second Watch reuse the first one's connection.
+		client, err := valkey.NewClient(valkey.ClientOption{
+			InitAddress:      []string{addr},
+			DisableCache:     true,
+			BlockingPoolSize: 1,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		defer client.Close()
+		a := NewAdapter(client)
+		k1 := "_k1_"
+		k2 := "_k2_"
+		Expect(a.Watch(ctx, func(t Tx) error { return nil }, k1)).NotTo(HaveOccurred())
+		Expect(a.Set(ctx, k1, k1, 0).Err()).NotTo(HaveOccurred())
+		err = a.Watch(ctx, func(t Tx) error {
+			_, err := t.TxPipelined(ctx, func(pipe Pipeliner) error {
+				pipe.Set(ctx, k2, k2, 0)
+				return nil
+			})
+			return err
+		}, k2)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(a.Get(ctx, k2).Val()).To(Equal(k2))
+	})
+
 	It("should Unwatch and Close", func() {
 		k1 := "_k1_"
 		err := adapter.Watch(ctx, func(t Tx) error {
@@ -186,4 +219,74 @@ func testAdapterTxPipeline(resp3 bool) {
 			pipe.GetToBuffer(ctx, "key", make([]byte, 10))
 		}).To(Panic())
 	})
+}
+
+func TestWatchUnwatchesAfterCallback(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fn   func(ctx context.Context, cancel context.CancelFunc, t Tx) error
+		err  error
+	}{
+		{
+			name: "callback returns nil",
+			fn:   func(context.Context, context.CancelFunc, Tx) error { return nil },
+		},
+		{
+			name: "callback returns an error",
+			fn:   func(context.Context, context.CancelFunc, Tx) error { return errors.New("boom") },
+			err:  errors.New("boom"),
+		},
+		{
+			name: "callback cancels the context",
+			fn: func(_ context.Context, cancel context.CancelFunc, _ Tx) error {
+				cancel()
+				return nil
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			client := mock.NewClient(ctrl)
+			dc := mock.NewDedicatedClient(ctrl)
+			released := false
+			client.EXPECT().Dedicate().Return(dc, func() { released = true })
+			gomock.InOrder(
+				dc.EXPECT().Do(gomock.Any(), mock.Match("WATCH", "k")).Return(mock.Result(mock.ValkeyString("OK"))),
+				dc.EXPECT().Do(gomock.Any(), mock.Match("UNWATCH")).DoAndReturn(func(ctx context.Context, _ valkey.Completed) valkey.ValkeyResult {
+					if released {
+						t.Error("UNWATCH sent after the dedicated client was released")
+					}
+					if err := ctx.Err(); err != nil {
+						t.Errorf("UNWATCH sent with a done context: %v", err)
+					}
+					return mock.Result(mock.ValkeyString("OK"))
+				}),
+			)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			err := NewAdapter(client).Watch(ctx, func(tx Tx) error { return tc.fn(ctx, cancel, tx) }, "k")
+			if (err == nil) != (tc.err == nil) || (err != nil && err.Error() != tc.err.Error()) {
+				t.Fatalf("Watch() = %v, want %v", err, tc.err)
+			}
+			if !released {
+				t.Error("dedicated client was not released")
+			}
+		})
+	}
+}
+
+func TestWatchFailureSkipsUnwatch(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	client := mock.NewClient(ctrl)
+	dc := mock.NewDedicatedClient(ctrl)
+	client.EXPECT().Dedicate().Return(dc, func() {})
+	dc.EXPECT().Do(gomock.Any(), mock.Match("WATCH", "k")).Return(mock.ErrorResult(errors.New("conn")))
+	called := false
+	err := NewAdapter(client).Watch(context.Background(), func(Tx) error { called = true; return nil }, "k")
+	if err == nil || err.Error() != "conn" {
+		t.Fatalf("Watch() = %v, want conn", err)
+	}
+	if called {
+		t.Fatal("callback ran after WATCH failed")
+	}
 }
