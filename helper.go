@@ -494,6 +494,13 @@ func (s *ClusterScanner) Err() error {
 	return s.err
 }
 
+// DefaultSendToReplicas is a ClientOption.SendToReplicas function that sends read-only commands to replicas,
+// except blocking commands, such as XREAD with BLOCK, and pub/sub commands, which stay on the primary.
+// It is not applied automatically: set ClientOption.SendToReplicas to it to enable reading from replicas.
+func DefaultSendToReplicas(cmd Completed) bool {
+	return cmd.IsReadOnly() && !cmd.IsBlock() && !cmd.NoReply()
+}
+
 // PreferReplicaNodeSelector prioritizes reading from any replica using Round-Robin.
 // If no replicas are available, it falls back to the primary.
 func PreferReplicaNodeSelector() ReadNodeSelectorFunc {
