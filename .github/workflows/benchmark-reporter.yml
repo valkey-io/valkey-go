@@ -1,0 +1,212 @@
+name: PR Benchmark Reporter
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  benchmark:
+    if: >
+      github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/benchmark') && contains(fromJson('["COLLABORATOR", "MEMBER", "OWNER"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Get PR Information
+        id: pr-info
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUM: ${{ github.event.issue.number }}
+        run: |
+          PR_NUMBER=$PR_NUM
+          # Get base SHA directly to avoid TOCTOU on branch moving
+          BASE_SHA=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json baseRefOid -q .baseRefOid)
+          # Benchmark the PR head commit against the PR's base commit
+          # (not the merge commit), both pinned when the job starts.
+          HEAD_REF=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json headRefOid -q .headRefOid)
+
+          {
+            echo "pr_number=$PR_NUMBER"
+            echo "base_ref=$BASE_SHA"
+            echo "head_ref=$HEAD_REF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout Main Baseline
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+          ref: ${{ steps.pr-info.outputs.base_ref }}
+          path: main-code
+
+      - name: Checkout PR Code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+          ref: ${{ steps.pr-info.outputs.head_ref }}
+          path: pr-code
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: pr-code/go.mod
+          # This job runs untrusted PR code, so keep it out of the shared Actions cache.
+          cache: false
+
+      - name: Install benchstat
+        # Pinned: the Compare step parses benchstat's CSV layout.
+        run: go install golang.org/x/perf/cmd/benchstat@v0.0.0-20260908200009-22c9c6c9d4da
+
+      - name: Start Valkey
+        run: |
+          cd pr-code
+          docker compose up -d valkey
+          count=0
+          until docker compose exec -T valkey valkey-cli ping | grep -q PONG; do
+            if [ $count -gt 30 ]; then
+              echo "Timeout waiting for Valkey"
+              exit 1
+            fi
+            sleep 1
+            count=$((count+1))
+          done
+
+      - name: Run Benchmarks
+        env:
+          BENCH: '^(BenchmarkClient_Do|BenchmarkClient_Do_Parallelism|BenchmarkClient_DoMulti)$'
+        run: |
+          # Build each side once, then alternate base and PR runs so runner noise
+          # and drift affect both sides equally (10 samples each).
+          (cd main-code && go test -c -o /tmp/main.test .)
+          (cd pr-code && go test -c -o /tmp/pr.test .)
+          for i in $(seq 10); do
+            echo "::group::Round $i/10"
+            (cd main-code && /tmp/main.test -test.run='^$' -test.bench="$BENCH" -test.benchmem -test.count=1 -test.timeout=30m) | tee -a /tmp/main.txt
+            (cd pr-code && /tmp/pr.test -test.run='^$' -test.bench="$BENCH" -test.benchmem -test.count=1 -test.timeout=30m) | tee -a /tmp/pr.txt
+            echo "::endgroup::"
+          done
+
+      - name: Compare Benchmarks
+        env:
+          # Significant slowdowns above this percentage are flagged as severe.
+          REGRESSION_THRESHOLD: 10
+        run: |
+          ~/go/bin/benchstat -format csv /tmp/main.txt /tmp/pr.txt > /tmp/out.csv
+
+          awk -v threshold="$REGRESSION_THRESHOLD" '
+          function format_time(v) {
+              ns = v * 1e9;
+              if (ns >= 1e6) return sprintf("%.2f ms/op", ns / 1e6);
+              if (ns >= 1e3) return sprintf("%.2f µs/op", ns / 1e3);
+              return sprintf("%.2f ns/op", ns);
+          }
+          BEGIN { FS="," }
+          $2 ~ "/op$" { current_unit = $2; next }
+          current_unit !~ "sec/op|time/op" { next }
+          NF >= 7 && $1 != "" && $1 != "geomean" && $1 !~ /^,/ {
+              if ($2 !~ /^[0-9]/ || $4 !~ /^[0-9]/) next;
+
+              fullname = $1;
+              split(fullname, parts, "/");
+              cat = parts[1];
+              shortname = substr(fullname, length(cat) + 2);
+              if (shortname == "") { cat = "Ungrouped"; shortname = fullname; }
+
+              old = $2; new = $4; delta = $6; note = $7;
+
+              color = delta;
+              if (delta ~ /\+/) {
+                  val = delta; gsub(/[%+]/, "", val); val = val + 0.0;
+                  if (val > threshold + 0) color = "🔴 **" delta "**"; else color = "🟠 " delta;
+              } else if (delta ~ /-/) color = "🟢 " delta;
+              else if (delta ~ /~/) color = "🟡 ~";
+
+              fmt_old = format_time(old);
+              fmt_new = format_time(new);
+
+              row = sprintf("| <span title=\"%s\">`%s`</span> | %s | %s | %s | _%s_ |\n", fullname, shortname, fmt_old, fmt_new, color, note);
+
+              if (!(cat in groups)) {
+                  groups[cat] = "";
+                  order[++num_cats] = cat;
+              }
+              groups[cat] = groups[cat] row;
+
+              if (color ~ /🔴/) {
+                  regressions = regressions sprintf("| `%s` | %s | %s | %s | _%s_ |\n", fullname, fmt_old, fmt_new, color, note);
+              }
+          }
+          END {
+              for (i = 1; i <= num_cats; i++) {
+                  c = order[i];
+                  printf "#### 📦 Category: `%s`\n", c >> "/tmp/md_output.txt";
+                  printf "| Benchmark | Main | PR | Delta | Note |\n|---|---|---|---|---|\n" >> "/tmp/md_output.txt";
+                  printf "%s\n", groups[c] >> "/tmp/md_output.txt";
+              }
+              if (regressions != "") {
+                  printf "%s", regressions > "/tmp/regressions.txt";
+              }
+          }' /tmp/out.csv
+
+          if [ ! -s /tmp/md_output.txt ]; then
+            SUMMARY_TEXT="⚠️ **Benchmarks were skipped:** no comparable results were produced (e.g. Valkey was unreachable, or the base commit has no matching benchmarks). See the [workflow run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID) for details. A maintainer can comment \`/benchmark\` to re-run."
+          elif [ -s /tmp/regressions.txt ]; then
+            SUMMARY_TEXT=$(printf "⚠️ **Severe Regressions Detected:**\n\n| Benchmark | Main | PR | Delta | Note |\n|---|---|---|---|---|\n%s" "$(cat /tmp/regressions.txt)")
+          else
+            SUMMARY_TEXT="✅ **All benchmarks passed successfully!** No severe regressions (>${REGRESSION_THRESHOLD}%) detected."
+          fi
+
+          # Only show the metrics section when there are results to show.
+          DETAILS=""
+          if [ -s /tmp/md_output.txt ]; then
+            DETAILS=$(printf '<br>\n<details>\n<summary><b>📊 Click here to view all metrics</b></summary>\n\n%s\n\n</details>' "$(cat /tmp/md_output.txt)")
+          fi
+
+          cat <<EOM > /tmp/comment.md
+          ## 🚀 Valkey-Go Benchmark Results
+
+          $SUMMARY_TEXT
+
+          $DETAILS
+
+          *Triggered by @${{ github.actor }}*
+          EOM
+
+      - name: Upload Comment Artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: benchmark-comment
+          path: /tmp/comment.md
+          retention-days: 1
+
+      - name: Teardown Valkey
+        if: always()
+        run: |
+          cd pr-code
+          docker compose down -v || true
+
+  comment:
+    needs: benchmark
+    # Also report when the benchmark job failed; stay quiet when it was skipped (not a /benchmark comment).
+    if: ${{ !cancelled() && (needs.benchmark.result == 'success' || needs.benchmark.result == 'failure') }}
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Get PR Information
+        id: pr-info
+        run: |
+          echo "pr_number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+      - name: Download Comment Artifact
+        # Missing when the benchmark job failed before writing the report.
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: benchmark-comment
+          path: /tmp
+      - name: Post Comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ ! -s /tmp/comment.md ]; then
+            printf "## 🚀 Valkey-Go Benchmark Results\n\n❌ **The benchmark run failed before producing results.** See the [workflow run](%s) for details. A maintainer can comment \`/benchmark\` to re-run.\n" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > /tmp/comment.md
+          fi
+          gh pr comment ${{ steps.pr-info.outputs.pr_number }} --repo ${{ github.repository }} --body-file /tmp/comment.md || true
