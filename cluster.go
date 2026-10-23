@@ -38,6 +38,9 @@ type clusterClient struct {
 	cmd          Builder
 	retry        bool
 	hasLftm      bool
+	migDone      chan struct{} // closed when the slot migration monitor exits; nil if it is not enabled
+	migMoved     chan string   // addresses named by MOVED replies, for the slot migration monitor; nil if it is not enabled
+	refreshMu    sync.Mutex    // held by _refreshFrom from its topology reply, AZ lookups included, until its maps are installed
 }
 
 // NOTE: connrole and conn must be initialized at the same time
@@ -111,6 +114,12 @@ func newClusterClient(opt *ClientOption, connFn connFn, retryer retryHandler) (*
 		go client.runClusterTopologyRefreshment()
 	} else if opt.ClusterOption.ShardsRefreshInterval < 0 {
 		return nil, ErrInvalidShardsRefreshInterval
+	}
+
+	if opt.ClusterOption.SlotMigrationAwareness {
+		client.migDone = make(chan struct{})
+		client.migMoved = make(chan string, slotMigrationWakeBuffer)
+		go newSlotMigrationMonitor(client).run(client.migDone)
 	}
 
 	return client, nil
@@ -232,11 +241,21 @@ func getClusterSlots(c conn, timeout time.Duration, preferShards bool) clustersl
 }
 
 func (c *clusterClient) _refresh() (err error) {
+	return c._refreshFrom(c.clusterRefreshConns())
+}
+
+// _refreshFrom rebuilds the slot maps from the first non-empty CLUSTER SLOTS/SHARDS reply among pending.
+// The slot migration monitor calls it directly, not through sc, so two refreshes can overlap. refreshMu makes
+// each of them read the connections and install its maps with no other refresh in between; otherwise a refresh
+// could put back a connection that the other one has just removed and is about to close.
+func (c *clusterClient) _refreshFrom(pending []conn) (err error) {
 	batchDelay := c.clusterRefreshBatchDelay()
-	result, err := c.refreshConns(c.clusterRefreshConns(), batchDelay)
+	result, err := c.refreshConns(pending, batchDelay)
 	if err != nil {
 		return err
 	}
+	c.refreshMu.Lock()
+	defer c.refreshMu.Unlock()
 
 	groups := result.parse(c.opt.TLSConfig != nil)
 	conns := make(map[string]connrole, len(groups))
@@ -614,8 +633,21 @@ func (c *clusterClient) pick(ctx context.Context, slot uint16, toReplica bool) (
 func (c *clusterClient) redirectOrNew(addr string, prev conn, slot uint16, mode RedirectMode) conn {
 	c.mu.RLock()
 	cc := c.conns[addr]
+	// With ReplicaOnly the slot map points to replicas, not to the primary named by MOVED, so it is left to the
+	// regular refresh.
+	stale := !c.opt.ReplicaOnly && mode == RedirectMove && slot != cmds.InitSlot && cc.conn != nil && c.wslots[slot] != cc.conn
 	c.mu.RUnlock()
 	if cc.conn != nil && prev != cc.conn {
+		if stale {
+			// MOVED is authoritative for the slot. Remember the new owner, as the branches below do,
+			// so the following commands for the slot go there directly instead of being redirected
+			// again until the next topology refresh.
+			c.mu.Lock()
+			if c.conns[addr].conn == cc.conn {
+				c.wslots[slot] = cc.conn
+			}
+			c.mu.Unlock()
+		}
 		return cc.conn
 	}
 	c.mu.Lock()
@@ -1723,6 +1755,10 @@ func (c *clusterClient) Close() {
 		go cc.conn.Close()
 	}
 	c.mu.RUnlock()
+
+	if c.migDone != nil {
+		<-c.migDone // closing stopCh stops the monitor without waiting for its in-flight requests
+	}
 }
 
 func (c *clusterClient) shouldRefreshRetry(err error, ctx context.Context) (addr string, mode RedirectMode) {
@@ -1730,6 +1766,12 @@ func (c *clusterClient) shouldRefreshRetry(err error, ctx context.Context) (addr
 		if err, ok := err.(*ValkeyError); ok {
 			if addr, ok = err.IsMoved(); ok {
 				mode = RedirectMove
+				if c.migMoved != nil {
+					select {
+					case c.migMoved <- addr: // the slot migration monitor polls the new owner
+					default: // the monitor is already catching up on earlier MOVED replies
+					}
+				}
 			} else if addr, ok = err.IsAsk(); ok {
 				mode = RedirectAsk
 			} else if err.IsClusterDown() || err.IsTryAgain() || err.IsLoading() {
