@@ -788,7 +788,13 @@ func usePrecise(d time.Duration) bool {
 	return d < time.Second || d%time.Second != 0
 }
 
-func formatMs(d time.Duration) int64 { return int64(d / time.Millisecond) }
+func formatMs(d time.Duration) int64 {
+	if d > 0 && d < time.Millisecond {
+		// too small, truncate to 1ms, matching valkeycompat.formatMs
+		return 1
+	}
+	return int64(d / time.Millisecond)
+}
 
 func formatSec(d time.Duration) int64 { return int64(d / time.Second) }
 
