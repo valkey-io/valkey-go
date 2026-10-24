@@ -2152,7 +2152,7 @@ func (m *clientMock) ExpectClientList() *ExpectedString {
 
 func (m *clientMock) ExpectClientPause(dur time.Duration) *ExpectedBool {
 	m.expectRoleMaster()
-	cmd := m.raw.B().ClientPause().Timeout(formatSec(dur)).Build()
+	cmd := m.raw.B().ClientPause().Timeout(formatMs(dur)).Build()
 	e := m.push(match(cmd.Commands()...), mock.Result(mock.ValkeyString("OK")))
 	return &ExpectedBool{exp: e, encode: okBoolMessage}
 }
@@ -2356,7 +2356,7 @@ func (m *clientMock) ExpectKeys(pattern string) *ExpectedStringSlice {
 
 func (m *clientMock) ExpectMigrate(host, port, key string, db int, timeout time.Duration) *ExpectedStatus {
 	portNum, _ := strconv.ParseInt(port, 10, 64)
-	cmd := m.raw.B().Migrate().Host(host).Port(portNum).Key(key).DestinationDb(int64(db)).Timeout(formatSec(timeout)).Build()
+	cmd := m.raw.B().Migrate().Host(host).Port(portNum).Key(key).DestinationDb(int64(db)).Timeout(formatMs(timeout)).Build()
 	e := m.push(match(cmd.Commands()...), defaultStatusResult())
 	return &ExpectedStatus{exp: e}
 }
