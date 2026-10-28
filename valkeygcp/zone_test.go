@@ -113,4 +113,3 @@ func TestDetectCurrentGCPZoneUnreachable(t *testing.T) {
 		}
 	}
 }
-

@@ -38,9 +38,53 @@ func TestNewGCPClusterClientOptionKeepsUserFunctions(t *testing.T) {
 	}
 }
 
+func TestNewGCPStandaloneClientOption(t *testing.T) {
+	fakeMetadataServer(t, func(http.ResponseWriter, *http.Request) {
+		t.Error("unexpected metadata server request")
+	})
+	option := NewGCPStandaloneClientOption(valkey.ClientOption{
+		InitAddress: []string{"10.0.0.2:6379"},
+		Standalone:  valkey.StandaloneOption{ReplicaAddress: []string{"10.0.0.3:6379"}},
+	})
+	b := cmds.NewBuilder(cmds.NoSlot) // the builder of clients with a reader endpoint
+	for _, tc := range []struct {
+		cmd  valkey.Completed
+		want bool
+	}{
+		{b.Get().Key("k").Build(), true},
+		{b.Set().Key("k").Value("v").Build(), false},
+		{b.Xread().Block(0).Streams().Key("k").Id("$").Build(), false},
+		{b.Subscribe().Channel("c").Build(), false},
+	} {
+		if got := option.SendToReplicas(tc.cmd); got != tc.want {
+			t.Errorf("SendToReplicas(%v) = %v, want %v", tc.cmd.Commands(), got, tc.want)
+		}
+	}
+	if option.EnableReplicaAZInfo || option.ReadNodeSelector != nil {
+		t.Fatal("zone options should not be set: the reader endpoint picks the replica")
+	}
+}
+
+func TestNewGCPStandaloneClientOptionKeepsSendToReplicas(t *testing.T) {
+	option := NewGCPStandaloneClientOption(valkey.ClientOption{
+		InitAddress:    []string{"10.0.0.2:6379"},
+		Standalone:     valkey.StandaloneOption{ReplicaAddress: []string{"10.0.0.3:6379"}},
+		SendToReplicas: func(valkey.Completed) bool { return false },
+	})
+	if option.SendToReplicas(cmds.NewBuilder(cmds.NoSlot).Get().Key("k").Build()) {
+		t.Fatal("SendToReplicas should be kept")
+	}
+}
+
+func TestNewGCPStandaloneClientOptionWithoutReaderEndpoint(t *testing.T) {
+	if option := NewGCPStandaloneClientOption(valkey.ClientOption{InitAddress: []string{"10.0.0.2:6379"}}); option.SendToReplicas != nil {
+		t.Fatal("SendToReplicas should not be set without a reader endpoint")
+	}
+}
+
 func TestNewClientError(t *testing.T) {
 	t.Setenv("GCP_ZONE", "us-central1-a")
-	for _, opts := range [][]Option{nil, {WithReadYourWrites(0)}} {
+	for _, opts := range [][]Option{nil, {WithReadYourWrites(0)}, {WithReaderEndpoint("127.0.0.1:0")}} {
 		if client, err := NewClient(context.Background(), valkey.ClientOption{}, opts...); client != nil || err != valkey.ErrNoAddr {
 			t.Fatalf("got %v, %v, want nil, %v", client, err, valkey.ErrNoAddr)
 		}

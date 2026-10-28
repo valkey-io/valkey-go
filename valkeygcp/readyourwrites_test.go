@@ -13,8 +13,8 @@ import (
 	"github.com/valkey-io/valkey-go/internal/cmds"
 )
 
-// fakeClient stands in for a cluster client: like the real one, it asks sendToReplicas where each command goes.
-// It records the answers in toReplica.
+// fakeClient stands in for a client that reads from replicas: like the real one, it asks sendToReplicas where each
+// command goes. It records the answers in toReplica.
 type fakeClient struct {
 	valkey.Client
 	sendToReplicas func(valkey.Completed) bool
@@ -85,18 +85,34 @@ func TestReadYourWritesDoMulti(t *testing.T) {
 	}
 }
 
-func TestReadYourWritesIgnoresCommandsWithoutClusterSlot(t *testing.T) {
-	r, fake := newTestReadYourWrites(time.Minute)
-	single := cmds.NewBuilder(cmds.NoSlot) // the builder of standalone and sentinel clients
-	r.Do(context.Background(), cmds.NewBuilder(cmds.InitSlot).Ping().Build())
-	r.DoMulti(context.Background(), single.Set().Key("k").Value("v").Build())
+func TestReadYourWritesIgnoresCommandsWithoutKeys(t *testing.T) {
+	r, _ := newTestReadYourWrites(time.Minute)
+	ctx := context.Background()
+	r.Do(ctx, cmds.NewBuilder(cmds.InitSlot).Ping().Build())        // cluster client
+	r.DoMulti(ctx, cmds.NewBuilder(cmds.NoSlot).Flushall().Build()) // other clients, such as with a reader endpoint
 	for i := range r.until {
 		if r.until[i].Load() != 0 {
 			t.Fatalf("slot %d should not be pinned", i)
 		}
 	}
-	if !fake.sendToReplicas(single.Get().Key("k").Build()) {
-		t.Fatal("a read without a cluster slot should go to a replica")
+}
+
+func TestReadYourWritesReaderEndpoint(t *testing.T) {
+	r, fake := newTestReadYourWrites(500 * time.Millisecond)
+	b := cmds.NewBuilder(cmds.NoSlot) // the builder of clients with a reader endpoint
+	r.Do(context.Background(), b.Set().Key("{a}").Value("v").Build())
+
+	time.Sleep(50 * time.Millisecond)
+	if fake.sendToReplicas(b.Get().Key("{a}").Build()) {
+		t.Fatal("a read 50ms after a write to its slot should go to the primary")
+	}
+	if !fake.sendToReplicas(b.Get().Key("{b}").Build()) {
+		t.Fatal("a read of another slot should go to the reader endpoint")
+	}
+
+	time.Sleep(550 * time.Millisecond)
+	if !fake.sendToReplicas(b.Get().Key("{a}").Build()) {
+		t.Fatal("a read 600ms after a write to its slot should go to the reader endpoint")
 	}
 }
 
@@ -129,4 +145,3 @@ func TestReadYourWritesConcurrency(t *testing.T) {
 	}
 	wg.Wait()
 }
-

@@ -24,7 +24,7 @@ A fast Golang Valkey client that does auto pipelining and supports server-assist
 - Valkey Cluster, Sentinel, RedisJSON, RedisBloom, RediSearch, RedisTimeseries, etc.
 - [Probabilistic Data Structures without Redis Stack](./valkeyprob)
 - [Availability zone affinity routing](#availability-zone-affinity-routing)
-- [GCP zone-aware replica reads](./valkeygcp)
+- [GCP zone-aware replica reads and reader endpoint routing](./valkeygcp)
 
 ---
 

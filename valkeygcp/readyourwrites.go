@@ -6,10 +6,11 @@ import (
 	"time"
 
 	"github.com/valkey-io/valkey-go"
+	"github.com/valkey-io/valkey-go/internal/cmds"
 )
 
-// readYourWrites wraps a cluster valkey.Client so that, for a window after the client writes to a hash slot,
-// reads of that slot go to the primary instead of to replicas that may not have the write yet.
+// readYourWrites wraps a valkey.Client that reads from replicas, a cluster client or a client with a reader endpoint,
+
 type readYourWrites struct {
 	valkey.Client
 	start  time.Time
@@ -35,20 +36,31 @@ func (r *readYourWrites) sendToReplicas(next func(valkey.Completed) bool) func(v
 		if !next(cmd) {
 			return false
 		}
-		s := int(cmd.Slot())
-		return s >= len(r.until) || r.until[s].Load() <= int64(time.Since(r.start))
+		s, ok := slot(cmd)
+		return !ok || r.until[s].Load() <= int64(time.Since(r.start))
 	}
 }
 
 // pin sends reads of the slots written by multi to the primary for the window.
-// Commands without a cluster hash slot are ignored.
+// Commands without keys are ignored.
 func (r *readYourWrites) pin(multi ...valkey.Completed) {
 	until := int64(time.Since(r.start) + r.window)
 	for _, cmd := range multi {
-		if s := int(cmd.Slot()); s < len(r.until) && cmd.IsWrite() {
+		if s, ok := slot(cmd); ok && cmd.IsWrite() {
 			r.until[s].Store(until)
 		}
 	}
+}
+
+// slot returns the hash slot of the keys of cmd, or false if cmd has no keys.
+// Cluster clients build commands with their slot; other clients, such as clients with a reader endpoint,
+// build them with their slot and the cmds.NoSlot flag.
+func slot(cmd valkey.Completed) (int, bool) {
+	s := cmd.Slot()
+	if s == cmds.InitSlot || s == cmds.NoSlot {
+		return 0, false
+	}
+	return int(s &^ cmds.NoSlot), true
 }
 
 func (r *readYourWrites) Do(ctx context.Context, cmd valkey.Completed) valkey.ValkeyResult {
@@ -66,4 +78,3 @@ func (r *readYourWrites) DoMulti(ctx context.Context, multi ...valkey.Completed)
 	r.pin(multi...)
 	return resps
 }
-

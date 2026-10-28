@@ -62,4 +62,3 @@ func zoneName(zone string) string {
 	}
 	return path.Base(zone)
 }
-
