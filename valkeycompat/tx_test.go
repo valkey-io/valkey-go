@@ -243,6 +243,12 @@ func TestWatchUnwatchesAfterCallback(t *testing.T) {
 				return nil
 			},
 		},
+		{
+			name: "callback closes the Tx",
+			fn: func(ctx context.Context, _ context.CancelFunc, tx Tx) error {
+				return tx.Close(ctx)
+			},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
@@ -258,6 +264,9 @@ func TestWatchUnwatchesAfterCallback(t *testing.T) {
 					}
 					if err := ctx.Err(); err != nil {
 						t.Errorf("UNWATCH sent with a done context: %v", err)
+					}
+					if _, ok := ctx.Deadline(); !ok {
+						t.Error("UNWATCH sent without a deadline")
 					}
 					return mock.Result(mock.ValkeyString("OK"))
 				}),

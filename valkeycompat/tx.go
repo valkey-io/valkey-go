@@ -3,6 +3,7 @@ package valkeycompat
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/valkey-io/valkey-go"
@@ -125,7 +126,12 @@ func newTx(client valkey.DedicatedClient, cancel func()) *tx {
 type tx struct {
 	CoreCmdable
 	cancel func()
+	once   sync.Once
 }
+
+// unwatchTimeout bounds the UNWATCH sent by tx.Close, so an unresponsive
+// server cannot hold the dedicated connection until the connection timeout.
+const unwatchTimeout = time.Second
 
 func (t *tx) Watch(ctx context.Context, keys ...string) *StatusCmd {
 	ret := &StatusCmd{}
@@ -143,8 +149,17 @@ func (t *tx) Unwatch(ctx context.Context, _ ...string) *StatusCmd {
 	return ret
 }
 
-func (t *tx) Close(_ context.Context) error {
-	t.cancel()
+// Close clears any watched keys and releases the dedicated connection.
+// Like go-redis, the UNWATCH result is ignored. It runs even if ctx is
+// already done, but with its own short deadline.
+func (t *tx) Close(ctx context.Context) error {
+	t.once.Do(func() {
+		client := t.CoreCmdable.(*Compat).client
+		uctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), unwatchTimeout)
+		client.Do(uctx, client.B().Unwatch().Build())
+		cancel()
+		t.cancel()
+	})
 	return nil
 }
 
