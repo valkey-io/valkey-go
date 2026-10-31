@@ -299,3 +299,37 @@ func TestWatchFailureSkipsUnwatch(t *testing.T) {
 		t.Fatal("callback ran after WATCH failed")
 	}
 }
+
+func TestWatchClosesConnectionWhenUnwatchFails(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		res  valkey.ValkeyResult
+	}{
+		{name: "server error", res: mock.Result(mock.ValkeyError("NOPERM"))},
+		{name: "connection error", res: mock.ErrorResult(errors.New("conn"))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			client := mock.NewClient(ctrl)
+			dc := mock.NewDedicatedClient(ctrl)
+			released := false
+			client.EXPECT().Dedicate().Return(dc, func() { released = true })
+			gomock.InOrder(
+				dc.EXPECT().Do(gomock.Any(), mock.Match("WATCH", "k")).Return(mock.Result(mock.ValkeyString("OK"))),
+				dc.EXPECT().Do(gomock.Any(), mock.Match("UNWATCH")).Return(tc.res),
+				dc.EXPECT().Close().Do(func() {
+					if released {
+						t.Error("dedicated client was released before it was closed")
+					}
+				}),
+			)
+			err := NewAdapter(client).Watch(context.Background(), func(Tx) error { return errors.New("boom") }, "k")
+			if err == nil || err.Error() != "boom" {
+				t.Fatalf("Watch() = %v, want boom", err)
+			}
+			if !released {
+				t.Error("dedicated client was not released")
+			}
+		})
+	}
+}

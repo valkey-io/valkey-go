@@ -120,11 +120,12 @@ type Tx interface {
 }
 
 func newTx(client valkey.DedicatedClient, cancel func()) *tx {
-	return &tx{CoreCmdable: NewAdapter(&txproxy{CoreClient: client}), cancel: cancel}
+	return &tx{CoreCmdable: NewAdapter(&txproxy{CoreClient: client}), dc: client, cancel: cancel}
 }
 
 type tx struct {
 	CoreCmdable
+	dc     valkey.DedicatedClient
 	cancel func()
 	once   sync.Once
 }
@@ -150,14 +151,17 @@ func (t *tx) Unwatch(ctx context.Context, _ ...string) *StatusCmd {
 }
 
 // Close clears any watched keys and releases the dedicated connection.
-// Like go-redis, the UNWATCH result is ignored. It runs even if ctx is
-// already done, but with its own short deadline.
+// UNWATCH runs even if ctx is already done, but with its own short deadline.
+// If it fails, the keys may still be watched, so the connection is closed
+// instead of going back to the pool. Like go-redis, Close returns nil.
 func (t *tx) Close(ctx context.Context) error {
 	t.once.Do(func() {
-		client := t.CoreCmdable.(*Compat).client
 		uctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), unwatchTimeout)
-		client.Do(uctx, client.B().Unwatch().Build())
+		err := t.dc.Do(uctx, t.dc.B().Unwatch().Build()).Error()
 		cancel()
+		if err != nil {
+			t.dc.Close()
+		}
 		t.cancel()
 	})
 	return nil
