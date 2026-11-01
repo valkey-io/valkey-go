@@ -127,3 +127,39 @@ services:
       - "7010:7010"
       - "7011:7011"
       - "7012:7012"
+  cluster9:
+    image: valkey/valkey:9.0-alpine
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        valkey-server --port 7013 --save "" --appendonly no --cluster-enabled yes --cluster-config-file 7013.conf &
+        valkey-server --port 7014 --save "" --appendonly no --cluster-enabled yes --cluster-config-file 7014.conf &
+        valkey-server --port 7015 --save "" --appendonly no --cluster-enabled yes --cluster-config-file 7015.conf &
+        valkey-server --port 7019 --save "" --appendonly no --cluster-enabled yes --cluster-config-file 7019.conf --cluster-allow-replica-migration no &
+        while ! valkey-cli --cluster create 127.0.0.1:7013 127.0.0.1:7014 127.0.0.1:7015 --cluster-yes; do sleep 1; done
+        while ! valkey-cli --cluster add-node 127.0.0.1:7019 127.0.0.1:7013; do sleep 1; done
+        wait
+    ports:
+      - "7013:7013"
+      - "7014:7014"
+      - "7015:7015"
+      - "7019:7019"
+  cluster91:
+    image: valkey/valkey:9.1-alpine
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        valkey-server --port 7016 --save "" --appendonly no --cluster-enabled yes --cluster-config-file 7016.conf &
+        valkey-server --port 7017 --save "" --appendonly no --cluster-enabled yes --cluster-config-file 7017.conf &
+        valkey-server --port 7018 --save "" --appendonly no --cluster-enabled yes --cluster-config-file 7018.conf &
+        valkey-server --port 7020 --save "" --appendonly no --cluster-enabled yes --cluster-config-file 7020.conf --cluster-allow-replica-migration no &
+        while ! valkey-cli --cluster create 127.0.0.1:7016 127.0.0.1:7017 127.0.0.1:7018 --cluster-yes; do sleep 1; done
+        while ! valkey-cli --cluster add-node 127.0.0.1:7020 127.0.0.1:7016; do sleep 1; done
+        wait
+    ports:
+      - "7016:7016"
+      - "7017:7017"
+      - "7018:7018"
+      - "7020:7020"
