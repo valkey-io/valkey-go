@@ -3,6 +3,7 @@ package valkeycompat
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/valkey-io/valkey-go"
@@ -119,13 +120,19 @@ type Tx interface {
 }
 
 func newTx(client valkey.DedicatedClient, cancel func()) *tx {
-	return &tx{CoreCmdable: NewAdapter(&txproxy{CoreClient: client}), cancel: cancel}
+	return &tx{CoreCmdable: NewAdapter(&txproxy{CoreClient: client}), dc: client, cancel: cancel}
 }
 
 type tx struct {
 	CoreCmdable
+	dc     valkey.DedicatedClient
 	cancel func()
+	once   sync.Once
 }
+
+// unwatchTimeout bounds the UNWATCH sent by tx.Close, so an unresponsive
+// server cannot hold the dedicated connection until the connection timeout.
+const unwatchTimeout = time.Second
 
 func (t *tx) Watch(ctx context.Context, keys ...string) *StatusCmd {
 	ret := &StatusCmd{}
@@ -143,8 +150,20 @@ func (t *tx) Unwatch(ctx context.Context, _ ...string) *StatusCmd {
 	return ret
 }
 
-func (t *tx) Close(_ context.Context) error {
-	t.cancel()
+// Close clears any watched keys and releases the dedicated connection.
+// UNWATCH runs even if ctx is already done, but with its own short deadline.
+// If it fails, the keys may still be watched, so the connection is closed
+// instead of going back to the pool. Like go-redis, Close returns nil.
+func (t *tx) Close(ctx context.Context) error {
+	t.once.Do(func() {
+		uctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), unwatchTimeout)
+		err := t.dc.Do(uctx, t.dc.B().Unwatch().Build()).Error()
+		cancel()
+		if err != nil {
+			t.dc.Close()
+		}
+		t.cancel()
+	})
 	return nil
 }
 
