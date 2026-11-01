@@ -701,6 +701,9 @@ process:
 			shouldRetry := c.retryHandler.WaitOrSkipRetry(ctx, attempts, cmd, resp.Error())
 			if shouldRetry {
 				attempts++
+				// Preempt any sleeping DelayDo timer (waking it early with 0-49ms jitter)
+				// and wait for topology refresh before the next attempt.
+				_ = c.refresh(ctx)
 				goto retry
 			}
 		}
@@ -1140,6 +1143,7 @@ retry:
 		}
 		if retries.RetryDelay >= 0 {
 			c.retryHandler.WaitForRetry(ctx, retries.RetryDelay)
+			_ = c.refresh(ctx)
 			c.rebucketRetries(retries)
 			attempts++
 			goto retry
@@ -1203,6 +1207,7 @@ process:
 			shouldRetry := c.retryHandler.WaitOrSkipRetry(ctx, attempts, Completed(cmd), resp.Error())
 			if shouldRetry {
 				attempts++
+				_ = c.refresh(ctx)
 				goto retry
 			}
 		}
@@ -1608,6 +1613,7 @@ retry:
 		}
 		if retries.RetryDelay >= 0 {
 			c.retryHandler.WaitForRetry(ctx, retries.RetryDelay)
+			_ = c.refresh(ctx)
 			c.rebucketRetriesCache(retries)
 			attempts++
 			goto retry
@@ -1637,6 +1643,7 @@ retry:
 		shouldRetry := c.retryHandler.WaitOrSkipRetry(ctx, attempts, subscribe, err)
 		if shouldRetry {
 			attempts++
+			_ = c.refresh(ctx)
 			goto retry
 		}
 	}
@@ -1841,6 +1848,7 @@ retry:
 				)
 				if shouldRetry {
 					attempts++
+					_ = c.client.refresh(ctx)
 					goto retry
 				}
 			}
@@ -1876,6 +1884,7 @@ retry:
 				)
 				if shouldRetry {
 					attempts++
+					_ = c.client.refresh(ctx)
 					goto retry
 				}
 			}
@@ -1909,6 +1918,7 @@ retry:
 			shouldRetry := c.retryHandler.WaitOrSkipRetry(ctx, attempts, subscribe, err)
 			if shouldRetry {
 				attempts++
+				_ = c.client.refresh(ctx)
 				goto retry
 			}
 		}
