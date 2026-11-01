@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/valkey-io/valkey-go/internal/cmds"
 )
 
 //gocyclo:ignore
@@ -2207,6 +2209,77 @@ func TestClusterScanner(t *testing.T) {
 			t.Errorf("cursors: got %v, want %v", receivedCursors, []string{"0"})
 		}
 	})
+}
+
+func TestDefaultSendToReplicas(t *testing.T) {
+	b := cmds.NewBuilder(cmds.InitSlot)
+	for _, tc := range []struct {
+		cmd  Completed
+		want bool
+	}{
+		// read-only commands go to replicas
+		{b.Get().Key("k").Build(), true},
+		{b.Mget().Key("k").Build(), true},
+		{b.Strlen().Key("k").Build(), true},
+		{b.Getrange().Key("k").Start(0).End(1).Build(), true},
+		{b.Exists().Key("k").Build(), true},
+		{b.Ttl().Key("k").Build(), true},
+		{b.Type().Key("k").Build(), true},
+		{b.Hget().Key("k").Field("f").Build(), true},
+		{b.Hmget().Key("k").Field("f").Build(), true},
+		{b.Hgetall().Key("k").Build(), true},
+		{b.Hlen().Key("k").Build(), true},
+		{b.Lrange().Key("k").Start(0).Stop(-1).Build(), true},
+		{b.Llen().Key("k").Build(), true},
+		{b.Lindex().Key("k").Index(0).Build(), true},
+		{b.Smembers().Key("k").Build(), true},
+		{b.Sismember().Key("k").Member("m").Build(), true},
+		{b.Scard().Key("k").Build(), true},
+		{b.Zrange().Key("k").Min("0").Max("-1").Build(), true},
+		{b.Zscore().Key("k").Member("m").Build(), true},
+		{b.Zcard().Key("k").Build(), true},
+		{b.Xrange().Key("k").Start("-").End("+").Build(), true},
+		{b.Xlen().Key("k").Build(), true},
+		{b.Xread().Streams().Key("k").Id("0").Build(), true},
+		// writes stay on the primary
+		{b.Set().Key("k").Value("v").Build(), false},
+		{b.Getdel().Key("k").Build(), false},
+		{b.Incr().Key("k").Build(), false},
+		{b.Del().Key("k").Build(), false},
+		{b.Expire().Key("k").Seconds(1).Build(), false},
+		{b.Hset().Key("k").FieldValue().FieldValue("f", "v").Build(), false},
+		{b.Hdel().Key("k").Field("f").Build(), false},
+		{b.Lpush().Key("k").Element("e").Build(), false},
+		{b.Rpop().Key("k").Build(), false},
+		{b.Sadd().Key("k").Member("m").Build(), false},
+		{b.Zadd().Key("k").ScoreMember().ScoreMember(1, "m").Build(), false},
+		{b.Xadd().Key("k").Id("*").FieldValue().FieldValue("f", "v").Build(), false},
+		{b.Xreadgroup().Group("g", "c").Streams().Key("k").Id(">").Build(), false},
+		{b.Setbit().Key("k").Offset(0).Value(1).Build(), false},
+		// blocking commands stay on the primary
+		{b.Blpop().Key("k").Timeout(0).Build(), false},
+		{b.Brpop().Key("k").Timeout(0).Build(), false},
+		{b.Blmove().Source("{k}1").Destination("{k}2").Left().Right().Timeout(0).Build(), false},
+		{b.Blmpop().Timeout(0).Numkeys(1).Key("k").Left().Build(), false},
+		{b.Brpoplpush().Source("{k}1").Destination("{k}2").Timeout(0).Build(), false},
+		{b.Bzpopmin().Key("k").Timeout(0).Build(), false},
+		{b.Bzpopmax().Key("k").Timeout(0).Build(), false},
+		{b.Bzmpop().Timeout(0).Numkeys(1).Key("k").Min().Build(), false},
+		{b.Xread().Block(0).Streams().Key("k").Id("$").Build(), false},
+		{b.Xreadgroup().Group("g", "c").Block(0).Streams().Key("k").Id(">").Build(), false},
+		{b.Wait().Numreplicas(1).Timeout(0).Build(), false},
+		// pub/sub commands stay on the primary
+		{b.Subscribe().Channel("c").Build(), false},
+		{b.Psubscribe().Pattern("p").Build(), false},
+		{b.Ssubscribe().Channel("c").Build(), false},
+		{b.Unsubscribe().Channel("c").Build(), false},
+		{b.Punsubscribe().Pattern("p").Build(), false},
+		{b.Sunsubscribe().Channel("c").Build(), false},
+	} {
+		if got := DefaultSendToReplicas(tc.cmd); got != tc.want {
+			t.Errorf("DefaultSendToReplicas(%v) = %v, want %v", tc.cmd.Commands(), got, tc.want)
+		}
+	}
 }
 
 func TestAZAffinityNodesSelection(t *testing.T) {

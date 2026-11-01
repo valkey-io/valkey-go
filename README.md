@@ -24,6 +24,7 @@ A fast Golang Valkey client that does auto pipelining and supports server-assist
 - Valkey Cluster, Sentinel, RedisJSON, RedisBloom, RediSearch, RedisTimeseries, etc.
 - [Probabilistic Data Structures without Redis Stack](./valkeyprob)
 - [Availability zone affinity routing](#availability-zone-affinity-routing)
+- [GCP zone-aware replica reads and reader endpoint routing](./valkeygcp)
 
 ---
 
@@ -562,15 +563,14 @@ set the `EnableReplicaAZInfo` option and your `ReadNodeSelector` function with h
 - **AZAffinityNodeSelector**: Prioritizes reading from replicas in the same availability zone, then any replica. Fallback to primary.
 - **AZAffinityReplicasAndPrimaryNodeSelector**: Prioritizes reading from replicas in the same availability zone, then primary in the same availability zone, then any replica. Fallback to primary.
 
-For example:
+For example, with `valkey.DefaultSendToReplicas`, which sends read-only commands to replicas but keeps blocking commands,
+such as `XREAD` with `BLOCK`, and pub/sub commands on the primary:
 ```go
 client, err := valkey.NewClient(valkey.ClientOption{
   InitAddress:         []string{"address.example.com:6379"},
   EnableReplicaAZInfo: true,
-  SendToReplicas: func(cmd valkey.Completed) bool {
-    return cmd.IsReadOnly() && !cmd.NoReply()
-  },
-  ReadNodeSelector: valkey.AZAffinityNodeSelector("us-east-1a"),
+  SendToReplicas:      valkey.DefaultSendToReplicas,
+  ReadNodeSelector:    valkey.AZAffinityNodeSelector("us-east-1a"),
 })
 ```
 You can also implement a custom selector to fit your specific needs:
@@ -578,9 +578,7 @@ You can also implement a custom selector to fit your specific needs:
 client, err := valkey.NewClient(valkey.ClientOption{
   InitAddress:         []string{"address.example.com:6379"},
   EnableReplicaAZInfo: true,
-  SendToReplicas: func(cmd valkey.Completed) bool {
-    return cmd.IsReadOnly() && !cmd.NoReply()
-  },
+  SendToReplicas:      valkey.DefaultSendToReplicas,
   ReadNodeSelector: func(slot uint16, nodes []valkey.NodeInfo) int {
     for i, node := range nodes {
       if node.AZ == "us-east-1a" {
@@ -591,6 +589,8 @@ client, err := valkey.NewClient(valkey.ClientOption{
   },
 })
 ```
+
+On Google Cloud, [valkeygcp](./valkeygcp) detects the zone of the caller and sets these options for you.
 
 For deployments that only provide the availability zone via the INFO command (e.g. AWS ElastiCache for Valkey 7.2+), set the `AZFromInfo`
  option as well as `EnableReplicaAZInfo`.
