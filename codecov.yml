@@ -4,3 +4,4 @@ coverage:
     patch: false
 ignore:
   - hack
+  - valkeygcp/cmd # manual checks against a live Memorystore instance; not run in CI
