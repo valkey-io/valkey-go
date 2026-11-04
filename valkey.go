@@ -329,6 +329,43 @@ type ClusterOption struct {
 	// Cluster topology cache refresh happens always in the background after a successful scan.
 	ShardsRefreshInterval time.Duration
 
+	// MinRefreshInterval is the minimum time between two cluster topology refreshes of this client. It bounds
+	// the CLUSTER SHARDS or CLUSTER SLOTS commands the client sends, for example during a failover, when every
+	// request for the failed primary's slots would otherwise refresh again.
+	// While requests fail on a node, because it cannot be reached or its connection broke, the client refreshes
+	// about once per interval instead of after the random delay of a lazy refresh, until it sees the change. A
+	// lazy refresh already scheduled, whose random delay is up to 30s in large clusters, then runs sooner too.
+	// A request that finds no node for its slot waits for the next refresh (see MaxSlotWait).
+	// If the value is zero (default), the interval depends on the number of nodes: 1ms per node, between 250ms
+	// and 1s. Then, while a shard waits for the promotion of a replica, the waiting requests refresh more often:
+	// every fifth of the interval, at least every 50ms, for 2s, after which the gap doubles every 2s up to the
+	// interval. A value that is set is used as it is.
+	// If the value is negative, refreshes are deduplicated but not rate limited, as before.
+	MinRefreshInterval time.Duration
+
+	// MaxSlotWait is how long a request waits for its slot to have a node, for example while a shard has
+	// no online primary during a failover, before it fails with ErrNoSlot, or with the error of the last
+	// refresh it waited for. While waiting, it re-reads the slot map after each topology refresh; the waiting
+	// requests share these refreshes, paced as MinRefreshInterval describes. The request is sent as soon as its
+	// slot has a node. The wait never outlasts the request's context: when the context is done, the request
+	// fails with the context's error.
+	// If the value is zero (default), requests wait up to 3s: about the time a cluster needs to promote a
+	// replica once it has flagged the primary as failed, and for the client to see it.
+	// If the value is negative, the request fails with ErrNoSlot right after one refresh, as before.
+	MaxSlotWait time.Duration
+
+	// MaxRefreshDelay is the upper bound of the random delay before a lazy cluster topology refresh: the refresh
+	// that a MOVED redirection, a TRYAGAIN error, a request deadline or ShardsRefreshInterval starts. The delay
+	// spreads the refreshes of many clients that see the same change. Until the refresh, the client routes by its
+	// current slot map, which a MOVED reply already updates for its slot, so a shorter delay mostly finds other
+	// changes sooner, such as new replicas, or the replacement of a hung primary, at the cost of more CLUSTER
+	// SHARDS or CLUSTER SLOTS commands arriving together. The refresh after a node fails does not wait for it: it
+	// waits at most half of MinRefreshInterval, or MaxRefreshDelay if that is shorter.
+	// If the value is zero (default), the bound depends on the number of nodes: 250ms below 100 nodes, growing
+	// linearly to 30s at 1000 nodes or more.
+	// If the value is negative, the bound is the one used before: 1s below 100 nodes, growing linearly to 30s.
+	MaxRefreshDelay time.Duration
+
 	// MaxMovedRedirections is the maximum number of times to retry a command when receiving MOVED|ASK responses.
 	// If set to 0 (default), MOVED|ASK retries will continue until the context timeout.
 	// If set to a positive value, the client will return an error after that many MOVED|ASK redirects.

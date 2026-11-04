@@ -517,6 +517,26 @@ Note that scaling the number of replicas on an existing shard (e.g. via ElastiCa
 neither moves slots nor closes existing connections, so without `ShardsRefreshInterval`
 the client never discovers the new replicas and continues reading the old shard.
 
+During a failover, a request for a slot of the failed primary waits up to 3s, never past its own deadline,
+for the cluster to promote a replica, instead of failing with `ErrNoSlot` at once. The client refreshes the
+topology about every 250ms while a node fails, and every 50ms while a shard waits for its promotion, so it
+finds the new primary within about 50ms of the promotion. These intervals grow with the size of the cluster,
+up to 1s and 200ms at 1000 nodes, and the client learns the new owner of a slot from the first `MOVED`
+reply for it. Other refreshes, after a `MOVED` reply, a request deadline or a `ShardsRefreshInterval` tick,
+start after a random delay of up to 250ms, 30s at 1000 nodes, that spreads the refreshes of many clients. To
+change the defaults, or to go back to the previous behavior with -1:
+
+```golang
+client, err := valkey.NewClient(valkey.ClientOption{
+    InitAddress: []string{"127.0.0.1:7001", "127.0.0.1:7002", "127.0.0.1:7003"},
+    ClusterOption: valkey.ClusterOption{
+        MinRefreshInterval: 500 * time.Millisecond, // refresh the topology at most every 500ms; -1: no limit
+        MaxSlotWait:        10 * time.Second,       // wait up to 10s for a slot without a node; -1: fail at once
+        MaxRefreshDelay:    time.Second,            // start other refreshes within 1s; -1: as before
+    },
+})
+```
+
 ```golang
 // Connect to sentinels
 client, err := valkey.NewClient(valkey.ClientOption{
