@@ -18,9 +18,10 @@ const (
 	// DefaultCloudPlatformScope is the OAuth2 scope requested for IAM access tokens.
 	DefaultCloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform"
 	// DefaultRefreshBuffer is how long before a token expires a new one is used: 3m45s, the
-	// margin Google's own auth library uses. The metadata server can keep handing out the
-	// old token until 4 minutes before it expires, so asking earlier could get the same
-	// token again.
+	// margin Google's own auth library uses (defaultExpiryDelta in cloud.google.com/go/auth,
+	// https://github.com/googleapis/google-cloud-go/blob/auth/v0.24.0/auth/auth.go#L47-L49).
+	// The metadata server can keep handing out the old token until 4 minutes before it
+	// expires, so asking earlier could get the same token again.
 	DefaultRefreshBuffer = 3*time.Minute + 45*time.Second
 	// DefaultIAMUsername is the username sent with AUTH. Memorystore accepts "default" or
 	// the email of the IAM principal.
@@ -42,7 +43,8 @@ const credentialRetry = 30 * time.Second
 // needs roles/memorystore.dbConnectionUser on the instance.
 type IAMAuthOptions struct {
 	// Username is sent with AUTH. Memorystore accepts only "default" or the email of the
-	// IAM principal. Empty means DefaultIAMUsername.
+	// IAM principal. Empty means ClientOption.Username when NewClient or
+	// ResolveClientOption gets one, otherwise DefaultIAMUsername.
 	Username string
 	// RefreshBuffer is how long before a token expires a new one is used. Live connections
 	// re-AUTH with the new token at a random moment in the first half of this window, so
@@ -67,14 +69,25 @@ type IAMAuthOptions struct {
 	// so many connections reconnecting at once don't all ask for authentication together.
 	// Each NewClient, ResolveClientOption or NewGCPTokenProvider call has its own limit.
 	// 0 disables it.
+	//
+	// The queue has no upper bound: when N connections authenticate at once, the last one
+	// waits about N/MaxAuthPerSecond seconds, and so does a command waiting for that
+	// connection, since AuthCredentialsFn gets no context. valkey-go starts the handshake
+	// timeout (Dialer.Timeout) and the re-AUTH timeout (ConnWriteTimeout) only after
+	// AuthCredentialsFn returns, so the wait doesn't make those time out. Pick a rate that
+	// authenticates all of a client's connections within a delay you can accept.
 	MaxAuthPerSecond float64
 	// OnCredentialError receives the token fetch errors that valkeygcp works around instead
 	// of returning: when a refresh fails, connections keep the last token that worked, and
 	// the fetch is retried about every 30s. Use it for logs and metrics.
+	//
+	// Once that token has expired, valkeygcp has no token to give a new connection, so its
+	// HELLO goes without AUTH and fails with NOAUTH. That NOAUTH error goes to the command
+	// that opened the connection, not to OnCredentialError, which still gets the fetch errors.
 	OnCredentialError func(error)
 	// FetchTimeout limits how long one request for a new token may take, so a token endpoint
 	// that hangs can't block new connections. A timed-out request counts as a failed fetch
-	// (see OnCredentialError). Zero means DefaultTokenFetchTimeout; negative means no limit.
+	// (see OnCredentialError). Zero or negative means DefaultTokenFetchTimeout.
 	FetchTimeout time.Duration
 }
 
@@ -116,9 +129,6 @@ func NewGCPTokenProvider(ctx context.Context, opt IAMAuthOptions) (GCPTokenProvi
 	}
 	if len(opt.Scopes) == 0 {
 		opt.Scopes = []string{DefaultCloudPlatformScope}
-	}
-	if opt.FetchTimeout == 0 {
-		opt.FetchTimeout = DefaultTokenFetchTimeout
 	}
 
 	setupCtx, cancel := context.WithTimeout(ctx, setupTimeout)
@@ -322,11 +332,12 @@ func callWithContext[T any](ctx context.Context, what string, fn func() (T, erro
 	}
 }
 
-// withFetchTimeout limits each fetch from src to timeout (IAMAuthOptions.FetchTimeout). A
-// negative timeout returns src unchanged.
-func withFetchTimeout(src oauth2.TokenSource, timeout time.Duration) oauth2.TokenSource {
-	if timeout < 0 {
-		return src
+// withFetchTimeout limits each fetch from src to timeout (IAMAuthOptions.FetchTimeout).
+// Zero or negative means DefaultTokenFetchTimeout: an unbounded fetch would hold the token
+// cache's lock, and so block every new connection and re-AUTH, for as long as it hangs.
+func withFetchTimeout(src oauth2.TokenSource, timeout time.Duration) *timeoutSource {
+	if timeout <= 0 {
+		timeout = DefaultTokenFetchTimeout
 	}
 	return &timeoutSource{src: src, timeout: timeout}
 }
@@ -334,9 +345,11 @@ func withFetchTimeout(src oauth2.TokenSource, timeout time.Duration) oauth2.Toke
 // timeoutSource stops waiting for a token fetch after timeout, so a token endpoint that hangs
 // can't block new connections, nor every other caller waiting on the token cache, which
 // holds its lock while it fetches. oauth2.TokenSource can't be cancelled, so a timed-out
-// fetch keeps running in the background. Later calls wait for that fetch instead of starting
+// fetch keeps running in the background. Later calls share that fetch instead of starting
 // another until it is 3*timeout old, so a hung endpoint costs at most one goroutine per
-// 3*timeout.
+// 3*timeout. A call waits only until the shared fetch is timeout old: once the fetch has
+// timed out, later calls fail at once, and the provider falls back to the last token that
+// worked, instead of each caller waiting another full timeout.
 type timeoutSource struct {
 	src     oauth2.TokenSource
 	timeout time.Duration
@@ -363,7 +376,8 @@ func (f *tokenFetch) finished() bool {
 	}
 }
 
-// Token waits up to timeout for the running fetch, starting one when none is running.
+// Token waits for the running fetch, starting one when none is running, until the fetch is
+// timeout old.
 func (s *timeoutSource) Token() (*oauth2.Token, error) {
 	s.mu.Lock()
 	f := s.cur
@@ -377,7 +391,13 @@ func (s *timeoutSource) Token() (*oauth2.Token, error) {
 	}
 	s.mu.Unlock()
 
-	timer := time.NewTimer(s.timeout)
+	// A shared fetch has already used part of its timeout; one that has used all of it is
+	// stuck, so fail now and let the provider fall back to the last token that worked.
+	wait := s.timeout - time.Since(f.start)
+	if wait <= 0 {
+		return nil, fmt.Errorf("token fetch timed out after %v", s.timeout)
+	}
+	timer := time.NewTimer(wait)
 	defer timer.Stop()
 	select {
 	case <-f.done:

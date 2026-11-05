@@ -76,11 +76,15 @@ func ResolveClientOption(ctx context.Context, option valkey.ClientOption, opts .
 		return valkey.ClientOption{}, errNoEndpoint
 	}
 	if field := callerAuthField(option); field != "" && cfg.iam != nil {
-		return valkey.ClientOption{}, fmt.Errorf("valkeygcp: ClientOption.%s conflicts with WithIAMOptions, which supplies the AUTH username (IAMAuthOptions.Username) and token", field)
+		return valkey.ClientOption{}, fmt.Errorf("valkeygcp: ClientOption.%s conflicts with WithIAMOptions, which supplies the AUTH token", field)
 	}
 	opt := withDefaults(option)
 	if cfg.iam != nil {
-		p, err := NewGCPTokenProvider(ctx, *cfg.iam)
+		iam, err := withCallerUsername(*cfg.iam, option.Username)
+		if err != nil {
+			return valkey.ClientOption{}, err
+		}
+		p, err := NewGCPTokenProvider(ctx, iam)
 		if err != nil {
 			return valkey.ClientOption{}, err
 		}
@@ -96,14 +100,16 @@ func withDefaults(opt valkey.ClientOption) valkey.ClientOption {
 		if opt.SendToReplicas == nil {
 			opt.SendToReplicas = sendReadsToReplicas
 		}
-	} else {
+	} else if opt.ClusterOption == (valkey.ClusterOption{}) {
 		// Cluster mode, or not known before connecting. valkey-go reads these only in its
 		// cluster client, so they are harmless when it falls back to a single-node client.
-		// A false bool can't be told apart from an unset one, so the bools are always on.
-		opt.ClusterOption.PreferInitAddressRefresh = true // topology only through InitAddress
-		opt.ClusterOption.PreferClusterShards = true
-		if opt.ClusterOption.ShardsRefreshInterval == 0 {
-			opt.ClusterOption.ShardsRefreshInterval = defaultShardsRefreshInterval
+		// A false bool can't be told apart from an unset one, so ClusterOption is filled
+		// only when the caller left all of it at zero: setting any of its fields leaves the
+		// whole ClusterOption to the caller, who can then turn each of these off.
+		opt.ClusterOption = valkey.ClusterOption{
+			ShardsRefreshInterval:    defaultShardsRefreshInterval,
+			PreferInitAddressRefresh: true, // topology only through InitAddress
+			PreferClusterShards:      true,
 		}
 	}
 	if opt.Dialer.Timeout == 0 {
@@ -123,18 +129,32 @@ func withDefaults(opt valkey.ClientOption) valkey.ClientOption {
 
 // callerAuthField names the ClientOption credential field the caller set, if any.
 // Caller-managed credentials are used as is; an IAM option next to them is an error.
-// Username counts too: valkey-go ignores it once AuthCredentialsFn is set, so next to an
-// IAM option it would be dropped without a word.
+// Username is not one of them: next to an IAM option it is the IAM username (see
+// withCallerUsername).
 func callerAuthField(o valkey.ClientOption) string {
 	switch {
 	case o.AuthCredentialsFn != nil:
 		return "AuthCredentialsFn"
 	case o.Password != "":
 		return "Password"
-	case o.Username != "":
-		return "Username"
 	}
 	return ""
+}
+
+// withCallerUsername returns iam with ClientOption.Username as the IAM username when
+// IAMAuthOptions.Username is empty. valkey-go ignores ClientOption.Username once
+// AuthCredentialsFn is set, so this keeps it from being dropped without a word. Two
+// different usernames are an error: only one can be sent. iam is a copy, so the
+// caller's Option is not changed.
+func withCallerUsername(iam IAMAuthOptions, username string) (IAMAuthOptions, error) {
+	switch {
+	case username == "" || username == iam.Username:
+	case iam.Username == "":
+		iam.Username = username
+	default:
+		return IAMAuthOptions{}, fmt.Errorf("valkeygcp: ClientOption.Username %q and IAMAuthOptions.Username %q differ; set only one of them", username, iam.Username)
+	}
+	return iam, nil
 }
 
 // sendReadsToReplicas routes read-only commands to the reader endpoint, except blocking

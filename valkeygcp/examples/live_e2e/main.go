@@ -7,9 +7,9 @@
 // It needs a host that can reach the instance's discovery endpoint, such as a VM in the
 // instance's VPC network. The tokens come from Application Default Credentials; that
 // principal needs roles/memorystore.dbConnectionUser on the instance. Run it from the
-// valkeygcp directory and stop it with Ctrl+C:
+// valkeygcp/examples directory and stop it with Ctrl+C:
 //
-//	MEMORYSTORE_TEST_DISCOVERY_ENDPOINT=10.0.0.15:6379 go run ./cmd/live_e2e
+//	MEMORYSTORE_TEST_DISCOVERY_ENDPOINT=10.0.0.15:6379 go run ./live_e2e
 //
 // It runs one SET/GET pair every 200ms, logs each failure, and logs the counts after every
 // 300 successful pairs, about once a minute. When stopped, it prints the totals and exits

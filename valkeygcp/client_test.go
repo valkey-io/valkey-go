@@ -136,8 +136,8 @@ func TestResolveClientOption_CallerValuesWin(t *testing.T) {
 		t.Errorf("Dialer = %v / %v", opt.Dialer.Timeout, opt.Dialer.KeepAlive)
 	case opt.ConnWriteTimeout != 11*time.Second:
 		t.Errorf("ConnWriteTimeout = %v", opt.ConnWriteTimeout)
-	case opt.ClusterOption.ShardsRefreshInterval != time.Minute:
-		t.Errorf("ShardsRefreshInterval = %v", opt.ClusterOption.ShardsRefreshInterval)
+	case opt.ClusterOption != (valkey.ClusterOption{ShardsRefreshInterval: time.Minute}):
+		t.Errorf("ClusterOption = %+v; a ClusterOption the caller set must be kept as is", opt.ClusterOption)
 	case opt.RetryDelay(0, valkey.Completed{}, nil) != time.Second:
 		t.Error("RetryDelay replaced")
 	}
@@ -154,7 +154,7 @@ func TestResolveClientOption_CallerValuesWin(t *testing.T) {
 }
 
 // Credentials set on the ClientOption are used as is; next to an IAM option they are an
-// error. That includes Username, which valkey-go would otherwise drop without a word.
+// error.
 func TestResolveClientOption_CallerCredentials(t *testing.T) {
 	ownFn := func(valkey.AuthCredentialsContext) (valkey.AuthCredentials, error) {
 		return valkey.AuthCredentials{}, nil
@@ -162,7 +162,6 @@ func TestResolveClientOption_CallerCredentials(t *testing.T) {
 	for field, option := range map[string]valkey.ClientOption{
 		"Password":          {InitAddress: []string{"10.0.0.15:6379"}, Password: "secret"},
 		"AuthCredentialsFn": {InitAddress: []string{"10.0.0.15:6379"}, AuthCredentialsFn: ownFn},
-		"Username":          {InitAddress: []string{"10.0.0.15:6379"}, Username: "alice"},
 	} {
 		_, err := ResolveClientOption(context.Background(), option, WithIAMOptions(staticTokenIAM("t")))
 		if err == nil || !strings.Contains(err.Error(), "ClientOption."+field+" conflicts with WithIAMOptions") {
@@ -173,6 +172,38 @@ func TestResolveClientOption_CallerCredentials(t *testing.T) {
 			(opt.AuthCredentialsFn != nil) != (option.AuthCredentialsFn != nil) {
 			t.Errorf("%s alone: not kept as is (%v)", field, err)
 		}
+	}
+}
+
+// Next to an IAM option, ClientOption.Username is the IAM username when
+// IAMAuthOptions.Username is empty, instead of being dropped by valkey-go. Two different
+// usernames are an error. The caller's Option is not changed, so a later call without
+// ClientOption.Username sends the default username again.
+func TestResolveClientOption_CallerUsername(t *testing.T) {
+	const email = "app@proj.iam.gserviceaccount.com"
+	iam := WithIAMOptions(staticTokenIAM("t"))
+	username := func(option valkey.ClientOption, opts ...Option) (string, error) {
+		opt, err := ResolveClientOption(context.Background(), option, opts...)
+		if err != nil {
+			return "", err
+		}
+		creds, err := opt.AuthCredentialsFn(valkey.AuthCredentialsContext{})
+		return creds.Username, err
+	}
+	if got, err := username(valkey.ClientOption{InitAddress: []string{"10.0.0.15:6379"}, Username: email}, iam); err != nil || got != email {
+		t.Errorf("ClientOption.Username only: AUTH user %q, %v; want %q", got, err, email)
+	}
+	if got, err := username(valkey.ClientOption{InitAddress: []string{"10.0.0.15:6379"}}, iam); err != nil || got != DefaultIAMUsername {
+		t.Errorf("after a call with ClientOption.Username: AUTH user %q, %v; want %q", got, err, DefaultIAMUsername)
+	}
+	both := staticTokenIAM("t")
+	both.Username = email
+	if got, err := username(valkey.ClientOption{InitAddress: []string{"10.0.0.15:6379"}, Username: email}, WithIAMOptions(both)); err != nil || got != email {
+		t.Errorf("same username in both: AUTH user %q, %v; want %q", got, err, email)
+	}
+	if _, err := username(valkey.ClientOption{InitAddress: []string{"10.0.0.15:6379"}, Username: "alice"}, WithIAMOptions(both)); err == nil ||
+		!strings.Contains(err.Error(), "differ") {
+		t.Errorf("different usernames: got %v, want an error", err)
 	}
 }
 

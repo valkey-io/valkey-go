@@ -6,9 +6,9 @@
 // It doesn't connect to Memorystore, so it needs no instance and no role, only working
 // Application Default Credentials: for example from gcloud auth application-default login,
 // from GOOGLE_APPLICATION_CREDENTIALS, or from the metadata server on Compute Engine, GKE
-// or Cloud Run. Run it from the valkeygcp directory:
+// or Cloud Run. Run it from the valkeygcp/examples directory:
 //
-//	go run ./cmd/test_adc
+//	go run ./test_adc
 package main
 
 import (

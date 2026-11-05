@@ -89,16 +89,16 @@ client, err := valkeygcp.NewClient(ctx, valkey.ClientOption{
 }))
 ```
 
-| `IAMAuthOptions` field   | Default                                            | Meaning                                                                                               |
-| :------------------------- | :------------------------------------------------- | :---------------------------------------------------------------------------------------------------- |
-| `CustomTokenSource`      | ADC                                                | Where access tokens come from                                                                         |
-| `Username`               | `"default"` (`DefaultIAMUsername`)             | The AUTH username                                                                                     |
-| `Scopes`                 | `cloud-platform` (`DefaultCloudPlatformScope`) | OAuth2 scopes requested from ADC; not used with `CustomTokenSource`                                 |
-| `RefreshBuffer`          | 3m45s (`DefaultRefreshBuffer`)                   | How long before expiry a token is replaced; live connections re-AUTH in the first half of that window |
-| `FetchTimeout`           | 10s (`DefaultTokenFetchTimeout`)                 | Cap on one token fetch; negative disables it                                                          |
-| `DisableProactiveReauth` | `false`                                          | When true, live connections aren't re-AUTHed; every new connection still gets a fresh token           |
-| `MaxAuthPerSecond`       | 0 (off)                                            | Limits how many AUTHs the client sends per second, for when many connections reconnect at once        |
-| `OnCredentialError`      | none                                               | Receives token fetch errors while live connections keep the last valid token                          |
+| `IAMAuthOptions` field   | Default                                                                | Meaning                                                                                                  |
+| :------------------------- | :--------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------- |
+| `CustomTokenSource`      | ADC                                                                    | Where access tokens come from                                                                            |
+| `Username`               | `ClientOption.Username`, else `"default"` (`DefaultIAMUsername`) | The AUTH username                                                                                        |
+| `Scopes`                 | `cloud-platform` (`DefaultCloudPlatformScope`)                     | OAuth2 scopes requested from ADC; not used with `CustomTokenSource`                                    |
+| `RefreshBuffer`          | 3m45s (`DefaultRefreshBuffer`)                                       | How long before expiry a token is replaced; live connections re-AUTH in the first half of that window    |
+| `FetchTimeout`           | 10s (`DefaultTokenFetchTimeout`)                                     | Cap on one token fetch; zero or negative means the default                                               |
+| `DisableProactiveReauth` | `false`                                                              | When true, live connections aren't re-AUTHed; every new connection still gets a fresh token              |
+| `MaxAuthPerSecond`       | 0 (off)                                                                | Limits how many AUTHs the client sends per second; N connections at once wait up to about N/rate seconds |
+| `OnCredentialError`      | none                                                                   | Receives token fetch errors while live connections keep the last valid token                             |
 
 #### Use valkey.NewClient Directly
 
@@ -138,23 +138,22 @@ client, err := valkeyotel.NewClient(option)
 
 `NewClient` and `ResolveClientOption` fill these into the `valkey.ClientOption` fields you leave at zero:
 
-| Field                                                                             | Default                                                                                             |
-| :-------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------- |
-| `Dialer.Timeout` / `Dialer.KeepAlive` / `ConnWriteTimeout`                  | 2s / 1s / 3s                                                                                        |
-| `RetryDelay`                                                                    | Exponential backoff with full jitter, up to 2s; stops after 20 retries                              |
-| `ClusterOption.ShardsRefreshInterval`                                           | 10s                                                                                                 |
-| `ClusterOption.PreferInitAddressRefresh`, `ClusterOption.PreferClusterShards` | Always on: the topology is refreshed through the discovery endpoint with `CLUSTER SHARDS`         |
-| `SendToReplicas`                                                                | Read-only commands that don't block go to the replicas; set only with `Standalone.ReplicaAddress` |
+| Field                                                            | Default                                                                                                                                                                                                                                                                                    |
+| :--------------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Dialer.Timeout` / `Dialer.KeepAlive` / `ConnWriteTimeout` | 2s / 1s / 3s                                                                                                                                                                                                                                                                               |
+| `RetryDelay`                                                   | Exponential backoff with full jitter, up to 2s; stops after 20 retries                                                                                                                                                                                                                     |
+| `ClusterOption`                                                | Only when left entirely at zero: `ShardsRefreshInterval` 10s, `PreferInitAddressRefresh` and `PreferClusterShards` on, so the topology is refreshed through the discovery endpoint with `CLUSTER SHARDS`. Set any `ClusterOption` field and the whole `ClusterOption` is yours |
+| `SendToReplicas`                                               | Read-only commands that don't block go to the replicas; set only with `Standalone.ReplicaAddress`                                                                                                                                                                                        |
 
 The cluster settings are left out when `Standalone.ReplicaAddress` is set. valkey-go ignores them when it ends up with a single-node client.
 
 ### 1.5 Token Refresh and Failures
 
 * **When tokens are refreshed.** A token is replaced `RefreshBuffer` (3m45s) before it expires. Live connections re-AUTH with the new token at a random time in the first half of that window, so they don't all re-AUTH in the same second. `DisableProactiveReauth` turns this off; new connections still get a fresh token.
-* **Why 3m45s.** It is the margin Google's own auth library uses: the metadata server can keep handing out the old token until 4 minutes before it expires, so asking earlier could get the same token again. valkeygcp passes the same margin to Application Default Credentials (`EarlyTokenRefresh`), so their own token cache renews at the same point. The Go OAuth2 library applies it only to metadata-server credentials.
+* **Why 3m45s.** It is the margin Google's own auth library uses ([`defaultExpiryDelta` in `cloud.google.com/go/auth`](https://github.com/googleapis/google-cloud-go/blob/auth/v0.24.0/auth/auth.go#L47-L49)): the metadata server can keep handing out the old token until 4 minutes before it expires, so asking earlier could get the same token again. valkeygcp passes the same margin to Application Default Credentials (`EarlyTokenRefresh`), so their own token cache renews at the same point. The Go OAuth2 library applies it only to metadata-server credentials.
 * **Custom token sources.** valkeygcp asks for a new token once the current one has less than `RefreshBuffer` left. A `CustomTokenSource` that caches tokens must hand out a new one by then; otherwise live connections re-AUTH with the old token.
-* **When a refresh fails.** Live connections keep the last valid token, and the refresh is retried about every 30 seconds. `OnCredentialError` receives each error. If the last token expires before a refresh succeeds, live connections stay authenticated (their re-AUTH is skipped), but new connections fail until a token can be fetched again.
-* **Token fetches are capped.** Each fetch waits at most `FetchTimeout` (10s); a fetch that times out counts as a failed one.
+* **When a refresh fails.** Live connections keep the last valid token, and the refresh is retried about every 30 seconds. `OnCredentialError` receives each error. If the last token expires before a refresh succeeds, live connections stay authenticated (their re-AUTH is skipped), but new connections fail with `NOAUTH` until a token can be fetched again. Those `NOAUTH` errors go to the commands that opened the connections, not to `OnCredentialError`.
+* **Token fetches are capped.** Each fetch waits at most `FetchTimeout` (10s); a fetch that times out counts as a failed one. While a timed-out fetch is still hanging, the next fetches fail at once instead of waiting another `FetchTimeout`, and a new fetch is tried after 3×`FetchTimeout`.
 * **A rejected re-AUTH closes the connection.** If Memorystore rejects the re-AUTH of a live connection (for example with `ERR_IAM_EXHAUSTED`), valkey-go closes that connection and the next command dials a new one, although Memorystore would have kept the authenticated connection working.
 
 ### 1.6 Contexts and Setup Failures
@@ -162,12 +161,12 @@ The cluster settings are left out when `Standalone.ReplicaAddress` is set. valke
 * **`NewClient`'s `ctx` bounds setup only.** Credential discovery stops when it is cancelled or its deadline passes, and after 15 seconds if it has no deadline; a `ctx` that has ended by then stops `NewClient` before it connects. Token refreshes never use it, because they run for the life of the client.
 * **Setup needs working credentials.** valkey-go connects and authenticates while it builds the client, so missing ADC fails `NewClient` immediately, with the underlying error. Without ADC, pass a token source in `IAMAuthOptions.CustomTokenSource`.
 * **`InitAddress` is required.** `NewClient` and `ResolveClientOption` return an error without it.
-* **Credentials on the `ClientOption`** (`Username`, `Password` or `AuthCredentialsFn`) are used as is; passing them together with `WithIAMOptions` or `WithDefaultIAM` is an error. Set the IAM username with `IAMAuthOptions.Username`.
+* **Credentials on the `ClientOption`** (`Password` or `AuthCredentialsFn`) are used as is; passing them together with `WithIAMOptions` or `WithDefaultIAM` is an error. With an IAM option, `ClientOption.Username` is the IAM username unless `IAMAuthOptions.Username` sets one; if both are set, they must match.
 
 ### 1.7 Required Roles
 
-| Mechanism | Role                                                                   |
-| :-------- | :--------------------------------------------------------------------- |
+| Mechanism | Role                                                                       |
+| :-------- | :------------------------------------------------------------------------- |
 | IAM Auth  | `roles/memorystore.dbConnectionUser` (`memorystore.instances.connect`) |
 
 Grant it to the identity behind the access tokens: the ADC identity, or the identity of `IAMAuthOptions.CustomTokenSource` when you set one.
@@ -182,10 +181,10 @@ go test -v -race .
 
 The unit tests need no cloud access. `TestRefreshTolerance_LiveConnection` also runs against a local Valkey on `127.0.0.1:6379` (the repository's `docker compose` setup) and is skipped when none is running.
 
-Programs under `cmd/` for manual checks:
+Programs for manual checks live in `examples/`, a separate Go module, so they aren't part of the `valkeygcp` module. Run them from the `examples` directory, for example `go run ./accelerated_test`:
 
-| Program                  | What it does                                                               | Needs                                                                            |
-| :----------------------- | :------------------------------------------------------------------------- | :------------------------------------------------------------------------------- |
-| `cmd/test_adc`         | Fetches one IAM access token through ADC and prints its type and expiry    | ADC                                                                              |
-| `cmd/accelerated_test` | Simulates token rotation with tokens that expire after 10 seconds          | Nothing                                                                          |
-| `cmd/live_e2e`         | Sends SET/GET traffic to an instance until stopped, across token rotations | ADC, network access to the instance, `MEMORYSTORE_TEST_DISCOVERY_ENDPOINT` set |
+| Program              | What it does                                                               | Needs                                                                            |
+| :------------------- | :------------------------------------------------------------------------- | :------------------------------------------------------------------------------- |
+| `test_adc`         | Fetches one IAM access token through ADC and prints its type and expiry    | ADC                                                                              |
+| `accelerated_test` | Simulates token rotation with tokens that expire after 10 seconds          | Nothing                                                                          |
+| `live_e2e`         | Sends SET/GET traffic to an instance until stopped, across token rotations | ADC, network access to the instance, `MEMORYSTORE_TEST_DISCOVERY_ENDPOINT` set |

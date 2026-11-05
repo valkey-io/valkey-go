@@ -651,8 +651,9 @@ func TestCallWithContext_HonorsDeadline(t *testing.T) {
 }
 
 // A hung token endpoint can't block a dial for longer than FetchTimeout, and later calls
-// share the running fetch instead of piling up goroutines. Once the fetch is 3*FetchTimeout
-// old, it counts as stuck and the next call starts a new one.
+// share the running fetch instead of piling up goroutines. Once that fetch has timed out,
+// later calls fail at once instead of each waiting another FetchTimeout. Once the fetch is
+// 3*FetchTimeout old, it counts as stuck and the next call starts a new one.
 func TestFetchTimeout_HungSource(t *testing.T) {
 	const timeout = 40 * time.Millisecond
 	release := make(chan struct{})
@@ -675,8 +676,12 @@ func TestFetchTimeout_HungSource(t *testing.T) {
 	if d := time.Since(start); d > timeout+time.Second {
 		t.Fatalf("dial blocked for %v", d)
 	}
+	start = time.Now()
 	if _, err := authFn(valkey.AuthCredentialsContext{}); err == nil {
 		t.Fatal("want a timeout while the fetch is still hung")
+	}
+	if d := time.Since(start); d >= timeout {
+		t.Fatalf("second call waited %v; a fetch that has already timed out must fail at once", d)
 	}
 	if n := calls.Load(); n != 1 {
 		t.Fatalf("upstream fetches = %d, want 1 while the first is still running", n)
@@ -686,8 +691,10 @@ func TestFetchTimeout_HungSource(t *testing.T) {
 	if n := calls.Load(); n != 2 {
 		t.Fatalf("upstream fetches = %d, want a fresh fetch after 3*FetchTimeout", n)
 	}
-	if _, ok := withFetchTimeout(hung, -1).(*timeoutSource); ok {
-		t.Error("a negative FetchTimeout must disable the cap")
+	for _, d := range []time.Duration{0, -1} {
+		if s := withFetchTimeout(hung, d); s.timeout != DefaultTokenFetchTimeout {
+			t.Errorf("FetchTimeout %v: cap = %v, want DefaultTokenFetchTimeout", d, s.timeout)
+		}
 	}
 }
 

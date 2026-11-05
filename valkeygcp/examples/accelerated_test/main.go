@@ -3,9 +3,10 @@
 // seconds instead of an hour, so the timing shows in seconds.
 //
 // A fake token source (IAMAuthOptions.CustomTokenSource) hands out the tokens, so the
-// program needs no credentials, instance or network. Run it from the valkeygcp directory:
+// program needs no credentials, instance or network. Run it from the valkeygcp/examples
+// directory:
 //
-//	go run ./cmd/accelerated_test
+//	go run ./accelerated_test
 //
 // It asks the provider's AuthCredentialsFn for credentials 15 times, one second apart, as
 // valkey-go does for each new connection, and logs the number of the token it got (never
