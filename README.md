@@ -196,6 +196,8 @@ If the OpenTelemetry is enabled by the `valkeyotel.NewClient(option)`, then ther
 - valkey_do_cache_miss
 - valkey_do_cache_hits
 
+In that case, `valkey_command_duration_seconds` samples from `DoCache`/`DoMultiCache` are tagged with a `db.cache.source` attribute (`hit`, `miss`, or `mixed`) so you can tell which operations were executed against valkey and which were served from the client-side memory.
+
 ### MGET/JSON.MGET Client-Side Caching Helpers
 
 `valkey.MGetCache` and `valkey.JsonMGetCache` are handy helpers fetching multiple keys across different slots through the client-side caching.

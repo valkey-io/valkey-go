@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -142,10 +143,12 @@ func testWithClient(t *testing.T, client valkey.Client, exp *tracetest.InMemoryE
 	client.DoMulti(ctx, client.B().Set().Key("key").Value("val").Build(), client.B().Set().Key("key").Value("val").Build())
 	validateTrace(t, exp, "SET SET", codes.Ok)
 
-	client.DoStream(ctx, client.B().Set().Key("key").Value("val").Build())
+	stream := client.DoStream(ctx, client.B().Set().Key("key").Value("val").Build())
+	drainStream(t, stream)
 	validateTrace(t, exp, "SET", codes.Ok)
 
-	client.DoMultiStream(ctx, client.B().Set().Key("key").Value("val").Build(), client.B().Set().Key("key").Value("val").Build())
+	stream = client.DoMultiStream(ctx, client.B().Set().Key("key").Value("val").Build(), client.B().Set().Key("key").Value("val").Build())
+	drainStream(t, stream)
 	validateTrace(t, exp, "SET SET", codes.Ok)
 
 	// first DoCache
@@ -283,7 +286,9 @@ func testWithClient(t *testing.T, client valkey.Client, exp *tracetest.InMemoryE
 	validateMetrics(t, metrics, "valkey_command_errors", 6)
 
 	validateMetricNumDataPoints(t, metrics, "valkey_command_errors", 1)
-	validateMetricNumDataPoints(t, metrics, "valkey_command_duration_seconds", 1)
+	validateMetricNumDataPoints(t, metrics, "valkey_command_duration_seconds", 3)
+	validateMetricHasDataPointWithAttribute(t, metrics, "valkey_command_duration_seconds", cacheSource.String("miss"))
+	validateMetricHasDataPointWithAttribute(t, metrics, "valkey_command_duration_seconds", cacheSource.String("hit"))
 
 	duration := float64HistogramMetric(metrics, "valkey_command_duration_seconds")
 	if duration == 0 {
@@ -292,6 +297,19 @@ func testWithClient(t *testing.T, client valkey.Client, exp *tracetest.InMemoryE
 
 	validateMetricHasNoAttribute(t, metrics, "valkey_command_errors", "operation")
 	validateMetricHasNoAttribute(t, metrics, "valkey_command_duration_seconds", "operation")
+}
+
+// drainStream reads all pending responses of a result stream.
+// It guarantees that the commands behind the stream have been
+// fully processed by the server, so they cannot race with
+// client-side cache tracking established by later commands.
+func drainStream(t *testing.T, s valkey.ValkeyResultStream) {
+	t.Helper()
+	for s.HasNext() {
+		if _, err := s.WriteTo(io.Discard); err != nil && !errors.Is(err, io.EOF) {
+			t.Fatal(err)
+		}
+	}
 }
 
 func validateTrace(t *testing.T, exp *tracetest.InMemoryExporter, op string, code codes.Code) {
@@ -522,6 +540,28 @@ func validateMetricNumDataPoints(t *testing.T, metrics metricdata.ResourceMetric
 	default:
 		t.Fatalf("unexpected metric type for %v: %T", name, data)
 	}
+}
+
+func validateMetricHasDataPointWithAttribute(t *testing.T, metrics metricdata.ResourceMetrics, name string, expected attribute.KeyValue) {
+	t.Helper()
+
+	switch data := findMetric(metrics, name).(type) {
+	case metricdata.Sum[int64]:
+		for _, dp := range data.DataPoints {
+			if v, ok := dp.Attributes.Value(expected.Key); ok && v == expected.Value {
+				return
+			}
+		}
+	case metricdata.Histogram[float64]:
+		for _, dp := range data.DataPoints {
+			if v, ok := dp.Attributes.Value(expected.Key); ok && v == expected.Value {
+				return
+			}
+		}
+	default:
+		t.Fatalf("unexpected metric type for %v: %T", name, data)
+	}
+	t.Fatalf("metric %v has no data point with attribute %v", name, expected)
 }
 
 func ExampleWithClient_openTelemetry() {

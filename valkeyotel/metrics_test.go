@@ -675,3 +675,164 @@ func TestLabeler(t *testing.T) {
 		}
 	})
 }
+
+func TestCacheSourceMetricAttr(t *testing.T) {
+	t.Run("DoCache and DoMultiCache duration sources", func(t *testing.T) {
+		client, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{"127.0.0.1:6379"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		mxp := metric.NewManualReader()
+		meterProvider := metric.NewMeterProvider(metric.WithReader(mxp))
+
+		oclient := WithClient(client, WithMeterProvider(meterProvider))
+		defer oclient.Close()
+
+		ctx := context.Background()
+
+		// DoCache miss, then hit
+		oclient.DoCache(ctx, oclient.B().Get().Key("src:1").Cache(), time.Minute)
+		oclient.DoCache(ctx, oclient.B().Get().Key("src:1").Cache(), time.Minute)
+
+		// DoMultiCache all miss, then all hit
+		oclient.DoMultiCache(
+			ctx,
+			valkey.CT(oclient.B().Get().Key("src:2").Cache(), time.Minute),
+			valkey.CT(oclient.B().Get().Key("src:3").Cache(), time.Minute),
+		)
+		oclient.DoMultiCache(
+			ctx,
+			valkey.CT(oclient.B().Get().Key("src:2").Cache(), time.Minute),
+			valkey.CT(oclient.B().Get().Key("src:3").Cache(), time.Minute),
+		)
+
+		// DoMultiCache mixed: src:2 is cached, src:4 is not
+		oclient.DoMultiCache(
+			ctx,
+			valkey.CT(oclient.B().Get().Key("src:2").Cache(), time.Minute),
+			valkey.CT(oclient.B().Get().Key("src:4").Cache(), time.Minute),
+		)
+
+		metrics := metricdata.ResourceMetrics{}
+		if err := mxp.Collect(ctx, &metrics); err != nil {
+			t.Fatal(err)
+		}
+
+		if n := histogramSampleCountWithCacheSource(metrics, "valkey_command_duration_seconds", "miss"); n != 2 {
+			t.Errorf("db.cache.source=miss samples: got %d, want 2", n)
+		}
+		if n := histogramSampleCountWithCacheSource(metrics, "valkey_command_duration_seconds", "hit"); n != 2 {
+			t.Errorf("db.cache.source=hit samples: got %d, want 2", n)
+		}
+		if n := histogramSampleCountWithCacheSource(metrics, "valkey_command_duration_seconds", "mixed"); n != 1 {
+			t.Errorf("db.cache.source=mixed samples: got %d, want 1", n)
+		}
+	})
+
+	t.Run("DoCache non-Valkey error has no cache source attr", func(t *testing.T) {
+		client, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{"127.0.0.1:6379"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		mxp := metric.NewManualReader()
+		meterProvider := metric.NewMeterProvider(metric.WithReader(mxp))
+
+		oclient := WithClient(client, WithMeterProvider(meterProvider))
+		defer oclient.Close()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		oclient.DoCache(ctx, oclient.B().Get().Key("src:err:1").Cache(), time.Minute)
+
+		metrics := metricdata.ResourceMetrics{}
+		if err := mxp.Collect(context.Background(), &metrics); err != nil {
+			t.Fatal(err)
+		}
+
+		m := findMetric(metrics, "valkey_command_duration_seconds")
+		if m == nil {
+			t.Fatal("valkey_command_duration_seconds metric not found")
+		}
+
+		data, ok := m.(metricdata.Histogram[float64])
+		if !ok {
+			t.Fatalf("unexpected metric type %T", m)
+		}
+
+		for _, dp := range data.DataPoints {
+			if _, ok := dp.Attributes.Value(cacheSource); ok {
+				t.Error("db.cache.source should not be set for a result with a non-Valkey error")
+			}
+		}
+	})
+
+	t.Run("DoCache duration source with operation attr", func(t *testing.T) {
+		client, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{"127.0.0.1:6379"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		mxp := metric.NewManualReader()
+		meterProvider := metric.NewMeterProvider(metric.WithReader(mxp))
+
+		oclient := WithClient(client, WithMeterProvider(meterProvider), WithOperationMetricAttr())
+		defer oclient.Close()
+
+		ctx := context.Background()
+
+		oclient.DoCache(ctx, oclient.B().Get().Key("src:op:1").Cache(), time.Minute)
+		oclient.DoCache(ctx, oclient.B().Get().Key("src:op:1").Cache(), time.Minute)
+
+		metrics := metricdata.ResourceMetrics{}
+		if err := mxp.Collect(ctx, &metrics); err != nil {
+			t.Fatal(err)
+		}
+
+		if !histogramHasAttrPair(metrics, "valkey_command_duration_seconds", "operation", "GET", "db.cache.source", "miss") {
+			t.Error("command duration metric should have a data point with operation=GET and db.cache.source=miss")
+		}
+		if !histogramHasAttrPair(metrics, "valkey_command_duration_seconds", "operation", "GET", "db.cache.source", "hit") {
+			t.Error("command duration metric should have a data point with operation=GET and db.cache.source=hit")
+		}
+	})
+}
+
+func histogramSampleCountWithCacheSource(metrics metricdata.ResourceMetrics, name, source string) uint64 {
+	m := findMetric(metrics, name)
+	if m == nil {
+		return 0
+	}
+	data, ok := m.(metricdata.Histogram[float64])
+	if !ok {
+		return 0
+	}
+	var count uint64
+	for _, dp := range data.DataPoints {
+		if v, ok := dp.Attributes.Value(cacheSource); ok && v == attribute.StringValue(source) {
+			count += dp.Count
+		}
+	}
+	return count
+}
+
+func histogramHasAttrPair(metrics metricdata.ResourceMetrics, name, k1, v1, k2, v2 string) bool {
+	m := findMetric(metrics, name)
+	if m == nil {
+		return false
+	}
+	data, ok := m.(metricdata.Histogram[float64])
+	if !ok {
+		return false
+	}
+	for _, dp := range data.DataPoints {
+		a1, ok1 := dp.Attributes.Value(attribute.Key(k1))
+		a2, ok2 := dp.Attributes.Value(attribute.Key(k2))
+		if ok1 && a1 == attribute.StringValue(v1) && ok2 && a2 == attribute.StringValue(v2) {
+			return true
+		}
+	}
+	return false
+}
