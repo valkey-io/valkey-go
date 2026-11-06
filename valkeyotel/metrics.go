@@ -66,7 +66,8 @@ type dialTracer struct {
 	tAttrs trace.SpanStartEventOption
 }
 
-// WithHistogramOption sets the HistogramOption.
+// WithHistogramOption sets the HistogramOption: the bucket boundaries, in seconds, of the
+// latency histograms valkey_command_duration_seconds and valkey_dial_latency.
 // If not set, DefaultHistogramBuckets will be used.
 func WithHistogramOption(histogramOption HistogramOption) Option {
 	return func(cli *otelclient) {
@@ -179,7 +180,7 @@ func newClient(opts ...Option) (*otelclient, error) {
 	cli.duration, err = cli.meter.Float64Histogram(
 		"valkey_command_duration_seconds",
 		metric.WithUnit("s"),
-		metric.WithExplicitBucketBoundaries(defaultHistogramBuckets...),
+		metric.WithExplicitBucketBoundaries(cli.histogramOption.Buckets...),
 	)
 	if err != nil {
 		return nil, err
