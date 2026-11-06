@@ -17,6 +17,8 @@ Client side command metrics:
  - `valkey_command_duration_seconds`: histogram of command duration
  - `valkey_command_errors`: number of command errors
 
+`valkeyotel.WithHistogramOption` sets the bucket boundaries, in seconds, of both latency histograms: `valkey_command_duration_seconds` and `valkey_dial_latency`.
+
 ```golang
 package main
 
