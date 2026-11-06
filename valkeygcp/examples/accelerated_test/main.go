@@ -50,7 +50,7 @@ func (s *shortLivedTokenSource) Token() (*oauth2.Token, error) {
 func main() {
 	mockSource := &shortLivedTokenSource{}
 
-	provider, err := valkeygcp.NewGCPTokenProvider(context.Background(), valkeygcp.IAMAuthOptions{
+	provider, err := valkeygcp.NewIAMTokenProvider(context.Background(), valkeygcp.IAMAuthOptions{
 		RefreshBuffer:     3 * time.Second, // re-AUTH 7s to 8.5s after each token is issued
 		CustomTokenSource: mockSource,
 	})

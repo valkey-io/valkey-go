@@ -8,7 +8,8 @@
 //		InitAddress: []string{"10.0.0.15:6379"}, // the instance's discovery endpoint
 //	}, valkeygcp.WithDefaultIAM())
 //
-// NewClient fills Memorystore-friendly connection defaults into the fields left empty, and
+// NewClient fills Memorystore defaults (retry backoff, cluster topology refresh through the
+// discovery endpoint, reads sent to the reader endpoint) into the fields left empty, and
 // adds the credentials its Options ask for:
 //   - WithDefaultIAM authenticates with IAM access tokens from Application Default
 //     Credentials, which are replaced on live connections before they expire.

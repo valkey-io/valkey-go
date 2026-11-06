@@ -67,7 +67,7 @@ type IAMAuthOptions struct {
 	DisableProactiveReauth bool
 	// MaxAuthPerSecond spaces out the AUTHs that send a token, at most this many per second,
 	// so many connections reconnecting at once don't all ask for authentication together.
-	// Each NewClient, ResolveClientOption or NewGCPTokenProvider call has its own limit.
+	// Each NewClient, ResolveClientOption or NewIAMTokenProvider call has its own limit.
 	// 0 disables it.
 	//
 	// The queue has no upper bound: when N connections authenticate at once, the last one
@@ -84,6 +84,11 @@ type IAMAuthOptions struct {
 	// Once that token has expired, valkeygcp has no token to give a new connection, so its
 	// HELLO goes without AUTH and fails with NOAUTH. That NOAUTH error goes to the command
 	// that opened the connection, not to OnCredentialError, which still gets the fetch errors.
+	//
+	// Some fetch errors are returned instead, and don't come here: the new connection fails
+	// with "valkeygcp: token acquisition failed: ...". That happens when no fetch has
+	// succeeded yet, and with DisableProactiveReauth once the last token has expired: valkeygcp
+	// then runs only for new connections, so it returns the fetch error rather than NOAUTH.
 	OnCredentialError func(error)
 	// FetchTimeout limits how long one request for a new token may take, so a token endpoint
 	// that hangs can't block new connections. A timed-out request counts as a failed fetch
@@ -91,9 +96,9 @@ type IAMAuthOptions struct {
 	FetchTimeout time.Duration
 }
 
-// GCPTokenProvider gets, caches and refreshes IAM access tokens. NewGCPTokenProvider makes
+// IAMTokenProvider gets, caches and refreshes IAM access tokens. NewIAMTokenProvider makes
 // one, for callers who build the valkey.ClientOption themselves.
-type GCPTokenProvider interface {
+type IAMTokenProvider interface {
 	// Token returns a valid access token: the cached one, or a new one when the cached one
 	// is within RefreshBuffer of expiring.
 	Token(ctx context.Context) (*oauth2.Token, error)
@@ -102,7 +107,7 @@ type GCPTokenProvider interface {
 	AuthCredentialsFn() func(valkey.AuthCredentialsContext) (valkey.AuthCredentials, error)
 }
 
-// tokenProvider is the GCPTokenProvider behind NewGCPTokenProvider and WithIAMOptions.
+// tokenProvider is the IAMTokenProvider behind NewIAMTokenProvider and WithIAMOptions.
 type tokenProvider struct {
 	source        oauth2.TokenSource // cached tokens; a new one RefreshBuffer before expiry
 	refreshBuffer time.Duration
@@ -113,14 +118,14 @@ type tokenProvider struct {
 	onErr         func(error)
 }
 
-// NewGCPTokenProvider returns a GCPTokenProvider for opt, for callers who set
+// NewIAMTokenProvider returns an IAMTokenProvider for opt, for callers who set
 // valkey.ClientOption.AuthCredentialsFn themselves instead of using NewClient. Tokens are
 // cached and replaced RefreshBuffer before they expire, so a re-AUTH sends a new token, as
 // long as the token source hands one out by then (see IAMAuthOptions.CustomTokenSource).
 //
 // ctx bounds the one-off setup (finding the credentials), which also stops after 15s when
 // ctx has no earlier deadline. Token refreshes don't use ctx.
-func NewGCPTokenProvider(ctx context.Context, opt IAMAuthOptions) (GCPTokenProvider, error) {
+func NewIAMTokenProvider(ctx context.Context, opt IAMAuthOptions) (IAMTokenProvider, error) {
 	if opt.Username == "" {
 		opt.Username = DefaultIAMUsername
 	}
@@ -238,7 +243,9 @@ func (p *tokenProvider) credentials() (valkey.AuthCredentials, error) {
 //   - It has expired: return empty credentials. valkey-go then skips the re-AUTH, and the
 //     live connection stays authenticated; a new connection fails with NOAUTH until a fetch
 //     succeeds.
-//   - No fetch has succeeded yet: return the error.
+//   - No fetch has succeeded yet, or the last token has expired and DisableProactiveReauth
+//     is set: return the error, without calling OnCredentialError. The new connection fails
+//     with it.
 func (p *tokenProvider) tolerate(now time.Time, err error) (valkey.AuthCredentials, error) {
 	last := p.lastGood.Load()
 	lastValid := last != nil && (last.Expiry.IsZero() || last.Expiry.After(now))
@@ -414,7 +421,7 @@ func WithDefaultIAM() Option {
 }
 
 // WithIAMOptions authenticates with IAM access tokens configured by iamOpt. NewClient's ctx
-// bounds the token setup (see NewGCPTokenProvider).
+// bounds the token setup (see NewIAMTokenProvider).
 func WithIAMOptions(iamOpt IAMAuthOptions) Option {
 	return func(c *config) { c.iam = &iamOpt }
 }

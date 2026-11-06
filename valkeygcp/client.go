@@ -31,11 +31,10 @@ func newConfig(opts []Option) config {
 	return c
 }
 
-// Connection defaults NewClient fills into the valkey.ClientOption fields left at zero.
+// Defaults NewClient fills into the valkey.ClientOption fields left at zero. Timeouts are
+// not among them: Dialer.Timeout, Dialer.KeepAlive and ConnWriteTimeout keep valkey-go's
+// defaults.
 const (
-	defaultDialTimeout      = 2 * time.Second
-	defaultKeepAlive        = 1 * time.Second
-	defaultConnWriteTimeout = 3 * time.Second
 	// defaultShardsRefreshInterval is how often a cluster client re-reads the cluster
 	// topology. valkey-go starts each refresh after a short random delay, so many clients
 	// don't query the cluster at the same moment.
@@ -84,7 +83,7 @@ func ResolveClientOption(ctx context.Context, option valkey.ClientOption, opts .
 		if err != nil {
 			return valkey.ClientOption{}, err
 		}
-		p, err := NewGCPTokenProvider(ctx, iam)
+		p, err := NewIAMTokenProvider(ctx, iam)
 		if err != nil {
 			return valkey.ClientOption{}, err
 		}
@@ -111,15 +110,6 @@ func withDefaults(opt valkey.ClientOption) valkey.ClientOption {
 			PreferInitAddressRefresh: true, // topology only through InitAddress
 			PreferClusterShards:      true,
 		}
-	}
-	if opt.Dialer.Timeout == 0 {
-		opt.Dialer.Timeout = defaultDialTimeout
-	}
-	if opt.Dialer.KeepAlive == 0 {
-		opt.Dialer.KeepAlive = defaultKeepAlive
-	}
-	if opt.ConnWriteTimeout == 0 {
-		opt.ConnWriteTimeout = defaultConnWriteTimeout
 	}
 	if opt.RetryDelay == nil {
 		opt.RetryDelay = memorystoreRetryDelay // exponential backoff with full jitter

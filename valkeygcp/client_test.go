@@ -48,8 +48,8 @@ func TestResolveClientOption_ClusterWiring(t *testing.T) {
 		!opt.ClusterOption.PreferClusterShards || opt.ClusterOption.ShardsRefreshInterval != defaultShardsRefreshInterval {
 		t.Errorf("cluster options = %+v / %+v", opt.InitAddress, opt.ClusterOption)
 	}
-	if opt.Dialer.Timeout != defaultDialTimeout || opt.Dialer.KeepAlive != defaultKeepAlive || opt.ConnWriteTimeout != defaultConnWriteTimeout {
-		t.Errorf("connection defaults = %v / %v / %v", opt.Dialer.Timeout, opt.Dialer.KeepAlive, opt.ConnWriteTimeout)
+	if opt.Dialer.Timeout != 0 || opt.Dialer.KeepAlive != 0 || opt.ConnWriteTimeout != 0 {
+		t.Errorf("timeouts = %v / %v / %v, want them left to valkey-go's defaults", opt.Dialer.Timeout, opt.Dialer.KeepAlive, opt.ConnWriteTimeout)
 	}
 	if len(opt.Standalone.ReplicaAddress) != 0 || opt.SendToReplicas != nil {
 		t.Errorf("reader routing set without a reader endpoint: %v", opt.Standalone.ReplicaAddress)

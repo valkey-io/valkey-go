@@ -55,7 +55,7 @@ func (m *mockTokenSource) CallCount() int64 {
 // A provider built on a custom token source returns its token from Token, and
 // AuthCredentialsFn turns that token into AUTH credentials: the configured username, the
 // token as the password, and a re-AUTH time inside the refresh buffer.
-func TestNewGCPTokenProvider_CustomTokenSource(t *testing.T) {
+func TestNewIAMTokenProvider_CustomTokenSource(t *testing.T) {
 	ctx := context.Background()
 	expectedToken := &oauth2.Token{
 		AccessToken: "initial-secret-token",
@@ -64,7 +64,7 @@ func TestNewGCPTokenProvider_CustomTokenSource(t *testing.T) {
 	}
 	mock := &mockTokenSource{defaultTok: expectedToken}
 
-	provider, err := NewGCPTokenProvider(ctx, IAMAuthOptions{
+	provider, err := NewIAMTokenProvider(ctx, IAMAuthOptions{
 		Username:          "custom-user",
 		RefreshBuffer:     10 * time.Minute,
 		CustomTokenSource: mock,
@@ -129,7 +129,7 @@ func TestTokenCache_RefreshesInsideBuffer(t *testing.T) {
 	}
 
 	// Create provider with 5-minute buffer
-	provider, err := NewGCPTokenProvider(ctx, IAMAuthOptions{
+	provider, err := NewIAMTokenProvider(ctx, IAMAuthOptions{
 		RefreshBuffer:     5 * time.Minute,
 		CustomTokenSource: mock,
 	})
@@ -178,7 +178,7 @@ func TestAuthCredentialsFn_NearExpiryFallback(t *testing.T) {
 	}
 	mock := &mockTokenSource{defaultTok: nearExpiryToken}
 
-	provider, err := NewGCPTokenProvider(ctx, IAMAuthOptions{
+	provider, err := NewIAMTokenProvider(ctx, IAMAuthOptions{
 		RefreshBuffer:     5 * time.Minute,
 		CustomTokenSource: mock,
 	})
@@ -205,7 +205,7 @@ func TestAuthCredentialsFn_NearExpiryFallback(t *testing.T) {
 		Expiry:      time.Now().Add(-1 * time.Minute),
 	}
 	mockExpired := &mockTokenSource{defaultTok: expiredToken}
-	providerExpired, err := NewGCPTokenProvider(ctx, IAMAuthOptions{
+	providerExpired, err := NewIAMTokenProvider(ctx, IAMAuthOptions{
 		RefreshBuffer:     5 * time.Minute,
 		CustomTokenSource: mockExpired,
 	})
@@ -233,7 +233,7 @@ func TestAuthCredentials_Concurrency(t *testing.T) {
 			Expiry:      time.Now().Add(1 * time.Hour),
 		},
 	}
-	provider, err := NewGCPTokenProvider(ctx, IAMAuthOptions{
+	provider, err := NewIAMTokenProvider(ctx, IAMAuthOptions{
 		CustomTokenSource: mock,
 	})
 	if err != nil {
@@ -314,7 +314,7 @@ func TestAuthCredentialsFn_TokenError(t *testing.T) {
 		err: errors.New("network failure fetching oauth2 token"),
 	}
 
-	provider, err := NewGCPTokenProvider(ctx, IAMAuthOptions{
+	provider, err := NewIAMTokenProvider(ctx, IAMAuthOptions{
 		CustomTokenSource: mock,
 	})
 	if err != nil {
@@ -329,7 +329,7 @@ func TestAuthCredentialsFn_TokenError(t *testing.T) {
 }
 
 // Options left empty get their defaults: the AUTH username is DefaultIAMUsername.
-func TestNewGCPTokenProvider_Defaults(t *testing.T) {
+func TestNewIAMTokenProvider_Defaults(t *testing.T) {
 	ctx := context.Background()
 	mock := &mockTokenSource{
 		defaultTok: &oauth2.Token{
@@ -339,7 +339,7 @@ func TestNewGCPTokenProvider_Defaults(t *testing.T) {
 		},
 	}
 
-	provider, err := NewGCPTokenProvider(ctx, IAMAuthOptions{
+	provider, err := NewIAMTokenProvider(ctx, IAMAuthOptions{
 		CustomTokenSource: mock,
 		// Leaving Username, RefreshBuffer, Scopes empty to trigger defaults
 	})
@@ -374,7 +374,7 @@ func TestRefreshTolerance_CachedTokenValid(t *testing.T) {
 		return &oauth2.Token{AccessToken: "cached", Expiry: time.Now().Add(3 * time.Minute)}, nil
 	})
 	var absorbed atomic.Int32
-	provider, err := NewGCPTokenProvider(context.Background(), IAMAuthOptions{
+	provider, err := NewIAMTokenProvider(context.Background(), IAMAuthOptions{
 		CustomTokenSource: src,
 		OnCredentialError: func(error) { absorbed.Add(1) },
 	})
@@ -407,7 +407,7 @@ func TestRefreshTolerance_CachedTokenValid(t *testing.T) {
 // scheduled in 27-30s.
 func TestRefreshTolerance_CachedTokenExpired(t *testing.T) {
 	mock := &mockTokenSource{tokens: []*oauth2.Token{{AccessToken: "expired", Expiry: time.Now().Add(-time.Minute)}}}
-	provider, err := NewGCPTokenProvider(context.Background(), IAMAuthOptions{CustomTokenSource: mock})
+	provider, err := NewIAMTokenProvider(context.Background(), IAMAuthOptions{CustomTokenSource: mock})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -435,7 +435,7 @@ func TestRefreshTolerance_CachedTokenExpired(t *testing.T) {
 // returns the error, and OnCredentialError isn't called for it.
 func TestRefreshTolerance_NeverSucceeded(t *testing.T) {
 	var absorbed atomic.Int32
-	provider, err := NewGCPTokenProvider(context.Background(), IAMAuthOptions{
+	provider, err := NewIAMTokenProvider(context.Background(), IAMAuthOptions{
 		CustomTokenSource: &mockTokenSource{err: errors.New("no credentials")},
 		OnCredentialError: func(error) { absorbed.Add(1) },
 	})
@@ -470,7 +470,7 @@ func TestRefreshTolerance_LiveConnection(t *testing.T) {
 		return &oauth2.Token{AccessToken: fmt.Sprintf("tok-%d", issued.Add(1)), Expiry: time.Now().Add(3 * time.Second)}, nil
 	})
 	var absorbed atomic.Int32
-	provider, err := NewGCPTokenProvider(context.Background(), IAMAuthOptions{
+	provider, err := NewIAMTokenProvider(context.Background(), IAMAuthOptions{
 		CustomTokenSource: src,
 		RefreshBuffer:     2 * time.Second, // first re-AUTH 1-2s after the dial
 		OnCredentialError: func(error) { absorbed.Add(1) },
@@ -557,7 +557,7 @@ func TestRefreshTolerance_DisableProactiveReauth(t *testing.T) {
 		}
 		return &oauth2.Token{AccessToken: "t", Expiry: expiry}, nil
 	})
-	provider, err := NewGCPTokenProvider(context.Background(), IAMAuthOptions{CustomTokenSource: src, DisableProactiveReauth: true})
+	provider, err := NewIAMTokenProvider(context.Background(), IAMAuthOptions{CustomTokenSource: src, DisableProactiveReauth: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -580,7 +580,7 @@ func TestRefreshTolerance_DisableProactiveReauth(t *testing.T) {
 }
 
 func TestAuthCredentials_NonExpiringToken(t *testing.T) {
-	provider, err := NewGCPTokenProvider(context.Background(), IAMAuthOptions{
+	provider, err := NewIAMTokenProvider(context.Background(), IAMAuthOptions{
 		CustomTokenSource: oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "forever"}),
 	})
 	if err != nil {
@@ -596,7 +596,7 @@ func TestAuthCredentials_NonExpiringToken(t *testing.T) {
 // doesn't send all its AUTHs to Memorystore at once: at 20 per second, four AUTHs take at
 // least 150ms. MaxAuthPerSecond 0 creates no limiter, and a nil limiter doesn't wait.
 func TestMaxAuthPerSecond(t *testing.T) {
-	provider, err := NewGCPTokenProvider(context.Background(), IAMAuthOptions{
+	provider, err := NewIAMTokenProvider(context.Background(), IAMAuthOptions{
 		CustomTokenSource: &mockTokenSource{},
 		MaxAuthPerSecond:  20, // one AUTH per 50ms
 	})
@@ -618,7 +618,7 @@ func TestMaxAuthPerSecond(t *testing.T) {
 	if p := provider.(*tokenProvider); p.limiter == nil || p.limiter.interval != 50*time.Millisecond {
 		t.Errorf("limiter = %+v", p.limiter)
 	}
-	unpaced, err := NewGCPTokenProvider(context.Background(), IAMAuthOptions{CustomTokenSource: &mockTokenSource{}})
+	unpaced, err := NewIAMTokenProvider(context.Background(), IAMAuthOptions{CustomTokenSource: &mockTokenSource{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -630,7 +630,7 @@ func TestMaxAuthPerSecond(t *testing.T) {
 // Context and timeouts: setup honors the caller's ctx, and each upstream token fetch is
 // capped by FetchTimeout.
 
-// A hung setup call (NewGCPTokenProvider runs credential discovery through callWithContext)
+// A hung setup call (NewIAMTokenProvider runs credential discovery through callWithContext)
 // stops at the caller's deadline.
 func TestCallWithContext_HonorsDeadline(t *testing.T) {
 	release := make(chan struct{})
@@ -664,7 +664,7 @@ func TestFetchTimeout_HungSource(t *testing.T) {
 		<-release
 		return nil, errors.New("released")
 	})
-	provider, err := NewGCPTokenProvider(context.Background(), IAMAuthOptions{CustomTokenSource: hung, FetchTimeout: timeout})
+	provider, err := NewIAMTokenProvider(context.Background(), IAMAuthOptions{CustomTokenSource: hung, FetchTimeout: timeout})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -714,7 +714,7 @@ func TestFetchTimeout_FallsBackToLastGood(t *testing.T) {
 		return nil, errors.New("released")
 	})
 	var absorbed atomic.Int32
-	provider, err := NewGCPTokenProvider(context.Background(), IAMAuthOptions{
+	provider, err := NewIAMTokenProvider(context.Background(), IAMAuthOptions{
 		CustomTokenSource: src,
 		FetchTimeout:      timeout,
 		OnCredentialError: func(error) { absorbed.Add(1) },
@@ -735,7 +735,7 @@ func TestFetchTimeout_FallsBackToLastGood(t *testing.T) {
 	}
 }
 
-// GCPTokenProvider.Token stops waiting when its ctx ends, even when FetchTimeout is longer.
+// IAMTokenProvider.Token stops waiting when its ctx ends, even when FetchTimeout is longer.
 func TestTokenProvider_TokenHonorsContext(t *testing.T) {
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })
@@ -743,7 +743,7 @@ func TestTokenProvider_TokenHonorsContext(t *testing.T) {
 		<-release
 		return nil, errors.New("released")
 	})
-	provider, err := NewGCPTokenProvider(context.Background(), IAMAuthOptions{CustomTokenSource: hung, FetchTimeout: time.Minute})
+	provider, err := NewIAMTokenProvider(context.Background(), IAMAuthOptions{CustomTokenSource: hung, FetchTimeout: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -776,7 +776,7 @@ func TestNewBaseSource_EarlyTokenRefresh(t *testing.T) {
 		{"custom", IAMAuthOptions{RefreshBuffer: 2 * time.Minute, Scopes: []string{"scope-a"}}, 2 * time.Minute, []string{"scope-a"}},
 	} {
 		got = google.CredentialsParams{}
-		if _, err := NewGCPTokenProvider(context.Background(), tc.opt); err != nil {
+		if _, err := NewIAMTokenProvider(context.Background(), tc.opt); err != nil {
 			t.Fatalf("%s: %v", tc.name, err)
 		}
 		if got.EarlyTokenRefresh != tc.buffer || !slices.Equal(got.Scopes, tc.scopes) {
@@ -790,7 +790,7 @@ func TestNewBaseSource_EarlyTokenRefresh(t *testing.T) {
 		looked.Store(true)
 		return nil, errors.New("ADC must not be looked up")
 	}
-	if _, err := NewGCPTokenProvider(context.Background(), IAMAuthOptions{CustomTokenSource: &mockTokenSource{}}); err != nil || looked.Load() {
+	if _, err := NewIAMTokenProvider(context.Background(), IAMAuthOptions{CustomTokenSource: &mockTokenSource{}}); err != nil || looked.Load() {
 		t.Fatalf("CustomTokenSource: err = %v, ADC looked up = %v", err, looked.Load())
 	}
 }

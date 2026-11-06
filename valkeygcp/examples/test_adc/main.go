@@ -1,6 +1,6 @@
 // Command test_adc checks that Application Default Credentials can produce the IAM access
 // token valkeygcp authenticates with. It builds an IAM token provider with default options
-// (NewGCPTokenProvider with an empty IAMAuthOptions, as WithDefaultIAM does), fetches one
+// (NewIAMTokenProvider with an empty IAMAuthOptions, as WithDefaultIAM does), fetches one
 // token and prints its length, type and expiry. The token itself is never printed.
 //
 // It doesn't connect to Memorystore, so it needs no instance and no role, only working
@@ -21,7 +21,7 @@ import (
 
 func main() {
 	ctx := context.Background()
-	provider, err := valkeygcp.NewGCPTokenProvider(ctx, valkeygcp.IAMAuthOptions{})
+	provider, err := valkeygcp.NewIAMTokenProvider(ctx, valkeygcp.IAMAuthOptions{})
 	if err != nil {
 		panic(fmt.Sprintf("Failed to initialize ADC provider: %v", err))
 	}

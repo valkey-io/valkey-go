@@ -9,7 +9,7 @@ replace (
 
 require (
 	github.com/valkey-io/valkey-go v1.0.79
-	github.com/valkey-io/valkey-go/valkeygcp v0.0.0-00010101000000-000000000000
+	github.com/valkey-io/valkey-go/valkeygcp v1.0.79
 	golang.org/x/oauth2 v0.36.0
 )
 
