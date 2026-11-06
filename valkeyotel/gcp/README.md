@@ -72,7 +72,7 @@ A URL uses TLS with `https://` and plaintext with `http://`. A `host:port` endpo
 
 ## One ID per running copy
 
-Google Cloud labels each time series with `instance`, taken from `service.instance.id`. Copies of an application that share an ID overwrite each other's points. Setup uses the first one found:
+Google Cloud labels each time series with `instance`, taken from `service.instance.id`. Copies of an application that share an ID write to the same time series, so their points collide. Google refuses some of them with `One or more points were written more frequently than the maximum sampling period configured for the metric`, and what's left mixes the copies' values. A common cause is a fixed `service.instance.id` in the environment of a Kubernetes Deployment, which all its pods share. Setup uses the first one found:
 
 1. `Options.ServiceInstanceID`.
 2. `service.instance.id` in `Options.ResourceAttributes` or `OTEL_RESOURCE_ATTRIBUTES`.
@@ -115,6 +115,7 @@ Call `NewResource` once per process: unless an ID is set, each call generates a 
 - **One point every 5 seconds.** That's the most Cloud Monitoring accepts per time series, so Setup refuses a shorter interval when metrics go to the Telemetry API.
 - **No reserved labels.** `location`, `cluster`, `namespace`, `job`, `instance` and `project_id` belong to `prometheus_target`, so the instance label is `valkey.instance`.
 - **Errors.** A failed send, for example because of a missing role, never affects valkey-go's commands. Temporary errors are retried for up to 30 seconds, OpenTelemetry's export timeout. Errors go to OpenTelemetry's error handler, which logs them; `otel.SetErrorHandler` sends them elsewhere.
+- **The first write to a project.** Cloud Monitoring creates each metric's definition the first time it receives the metric. Copies that start at the same moment can then get `Too many concurrent edits to the metric` once. Google returns it as `InvalidArgument`, so it isn't retried: that copy loses one interval, and its next send goes through. It doesn't happen again once the definitions exist.
 
 ## Metrics in Cloud Monitoring
 
