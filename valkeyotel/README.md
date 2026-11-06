@@ -66,4 +66,6 @@ func main() {
 
 See [valkeyhook](../valkeyhook) if you want more customizations.
 
+To send these metrics to Cloud Monitoring and the traces to Cloud Trace, see [valkeyotel/gcp](./gcp).
+
 Note: `valkeyotel.NewClient` is not supported on go1.18 and go1.19 builds. [Reference](https://github.com/redis/rueidis/issues/442#issuecomment-1886993707)
