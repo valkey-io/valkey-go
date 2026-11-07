@@ -35,6 +35,7 @@ type conn interface {
 	Info() map[string]ValkeyMessage
 	Version() int
 	AZ() string
+	Role() string
 	Error() error
 	Close()
 	Dial() error
@@ -216,6 +217,10 @@ func (m *mux) Version() int {
 
 func (m *mux) AZ() string {
 	return m.pipe(context.Background(), 0).AZ()
+}
+
+func (m *mux) Role() string {
+	return m.pipe(context.Background(), 0).Role()
 }
 
 func (m *mux) Error() error {
