@@ -1,0 +1,49 @@
+services:
+  valkey-7001:
+    image: valkey/valkey:9.0.0
+    command: ["valkey-server", "--port", "7001", "--bind", "0.0.0.0", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--protected-mode", "no", "--dir", "/data", "--cluster-announce-port", "7001", "--cluster-announce-bus-port", "17001"]
+    ports: ["7001:7001"]
+    volumes: ["valkey7001-data:/data"]
+    networks: [valkey-asm-net]
+  valkey-7002:
+    image: valkey/valkey:9.0.0
+    command: ["valkey-server", "--port", "7002", "--bind", "0.0.0.0", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--protected-mode", "no", "--dir", "/data", "--cluster-announce-port", "7002", "--cluster-announce-bus-port", "17002"]
+    ports: ["7002:7002"]
+    volumes: ["valkey7002-data:/data"]
+    networks: [valkey-asm-net]
+  valkey-7003:
+    image: valkey/valkey:9.0.0
+    command: ["valkey-server", "--port", "7003", "--bind", "0.0.0.0", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--protected-mode", "no", "--dir", "/data", "--cluster-announce-port", "7003", "--cluster-announce-bus-port", "17003"]
+    ports: ["7003:7003"]
+    volumes: ["valkey7003-data:/data"]
+    networks: [valkey-asm-net]
+  valkey-7004:
+    image: valkey/valkey:9.0.0
+    command: ["valkey-server", "--port", "7004", "--bind", "0.0.0.0", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--protected-mode", "no", "--dir", "/data", "--cluster-announce-port", "7004", "--cluster-announce-bus-port", "17004"]
+    ports: ["7004:7004"]
+    volumes: ["valkey7004-data:/data"]
+    networks: [valkey-asm-net]
+  valkey-7005:
+    image: valkey/valkey:9.0.0
+    command: ["valkey-server", "--port", "7005", "--bind", "0.0.0.0", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--protected-mode", "no", "--dir", "/data", "--cluster-announce-port", "7005", "--cluster-announce-bus-port", "17005"]
+    ports: ["7005:7005"]
+    volumes: ["valkey7005-data:/data"]
+    networks: [valkey-asm-net]
+  valkey-7006:
+    image: valkey/valkey:9.0.0
+    command: ["valkey-server", "--port", "7006", "--bind", "0.0.0.0", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--protected-mode", "no", "--dir", "/data", "--cluster-announce-port", "7006", "--cluster-announce-bus-port", "17006"]
+    ports: ["7006:7006"]
+    volumes: ["valkey7006-data:/data"]
+    networks: [valkey-asm-net]
+
+networks:
+  valkey-asm-net:
+    name: valkey-asm-net
+
+volumes:
+  valkey7001-data:
+  valkey7002-data:
+  valkey7003-data:
+  valkey7004-data:
+  valkey7005-data:
+  valkey7006-data:
