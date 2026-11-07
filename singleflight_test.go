@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -334,5 +335,69 @@ func TestSingleFlightDelayDoHonorsDelay(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatalf("DelayDo never ran")
+	}
+}
+
+func TestSingleFlightDelayDoPreemptedByDo(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+	sg := call{}
+	delay := 10 * time.Second
+	start := time.Now()
+	executed := make(chan struct{})
+	sg.DelayDo(delay, func() error {
+		close(executed)
+		return nil
+	})
+	// Immediate Do should preempt the 10-second delay timer instantly (< 50ms)
+	err := sg.Do(context.Background(), func() error {
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	select {
+	case <-executed:
+		elapsed := time.Since(start)
+		if elapsed >= 1*time.Second {
+			t.Fatalf("DelayDo was not preempted: elapsed %v >= 1s", elapsed)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("DelayDo did not execute after preemption")
+	}
+}
+
+func TestSingleFlightDelayDoPreemptedByConcurrentDo(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+	sg := call{}
+	delay := 10 * time.Second
+	start := time.Now()
+	var runCount int64
+	sg.DelayDo(delay, func() error {
+		for sg.suppressing() != 6 {
+			runtime.Gosched()
+		}
+		atomic.AddInt64(&runCount, 1)
+		return nil
+	})
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := sg.Do(context.Background(), func() error {
+				atomic.AddInt64(&runCount, 1)
+				return nil
+			}); err != nil {
+				t.Errorf("unexpected err: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	elapsed := time.Since(start)
+	if elapsed >= 1*time.Second {
+		t.Fatalf("DelayDo was not preempted: elapsed %v >= 1s", elapsed)
+	}
+	if runs := atomic.LoadInt64(&runCount); runs != 1 {
+		t.Fatalf("expected function to run exactly once, got %d", runs)
 	}
 }
