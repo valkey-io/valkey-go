@@ -180,7 +180,7 @@ Run the unit tests with Go's race detector:
 go test -v -race .
 ```
 
-The unit tests need no cloud access. `TestRefreshTolerance_LiveConnection` also runs against a local Valkey on `127.0.0.1:6379` (the repository's `docker compose` setup) and is skipped when none is running.
+The unit tests need no cloud access. `TestRefreshTolerance_LiveConnection` also runs against a local Valkey on `127.0.0.1:6379` (the repository's `docker compose` setup) and is skipped when none is running. `TestNewClientZoneAwareReads` does the same with the local cluster on `127.0.0.1:7001`.
 
 Programs for manual checks live in `examples/`, a separate Go module, so they aren't part of the `valkeygcp` module. Run them from the `examples` directory, for example `go run ./accelerated_test`:
 
@@ -189,3 +189,52 @@ Programs for manual checks live in `examples/`, a separate Go module, so they ar
 | `test_adc`         | Fetches one IAM access token through ADC and prints its type and expiry    | ADC                                                                              |
 | `accelerated_test` | Simulates token rotation with tokens that expire after 10 seconds          | Nothing                                                                          |
 | `live_e2e`         | Sends SET/GET traffic to an instance until stopped, across token rotations | ADC, network access to the instance, `MEMORYSTORE_TEST_DISCOVERY_ENDPOINT` set |
+
+
+---
+
+## 2. Replica Reads
+
+Besides the reader endpoint routing above, `valkeygcp` can send the reads of a cluster to replicas in the zone of the caller, and keep the reads of keys the client has just written on the primary.
+
+### 2.1 Zone-Aware Replica Reads (Cluster Mode Enabled)
+
+With `WithZoneAwareReads()`, read-only commands go to a replica in the zone of the caller first, avoiding the latency and the cross-zone network charges of other zones, then to replicas in other zones, and then to the primary:
+
+```go
+client, err := valkeygcp.NewClient(ctx, valkey.ClientOption{
+	InitAddress: []string{"10.0.0.15:6379"}, // discovery endpoint
+}, valkeygcp.WithDefaultIAM(), valkeygcp.WithZoneAwareReads())
+```
+
+`WithZoneAwareReads` enables `EnableReplicaAZInfo` and, unless already set, uses the same `SendToReplicas` as with a reader endpoint, and `valkey.AZAffinityNodeSelector` with the detected zone as `ReadNodeSelector`. With a reader endpoint, it changes nothing: the reader endpoint, not the client, picks the replica. `ResolveClientOption` applies it too, for `valkeyotel.NewClient` and other constructors.
+
+`DetectCurrentGCPZone` returns the zone of the caller, such as `us-central1-a`. It uses the `GCP_ZONE` or `CLOUD_ZONE` environment variable if set, and otherwise asks the Compute Engine metadata server, waiting at most 100ms. A full resource path, such as `projects/123456789/zones/us-central1-a`, is reduced to the zone name. It returns an empty string if the zone can't be determined, such as outside Google Cloud.
+
+Zone matching needs the servers to report their availability zone. Valkey reports it when its `availability-zone` config is set. Otherwise, reads are spread across all replicas.
+
+### 2.2 Reader Endpoint (Cluster Mode Disabled)
+
+With a reader endpoint in `Standalone.ReplicaAddress` (see [Cluster Mode Disabled with a Reader Endpoint](#cluster-mode-disabled-with-a-reader-endpoint)), the client sends:
+
+| Commands | To |
+|---|---|
+| Read-only commands, such as `GET`, `MGET`, `HGETALL` and `EVAL_RO`, sent with `Do`, `DoStream`, or `DoMulti` with only reads | Reader endpoint |
+| Writes, blocking commands, transactions, and `DoMulti` batches with a write | Primary endpoint |
+| Commands sent with `DoCache`, `DoMultiCache`, `Dedicated` or `Dedicate` | Primary endpoint |
+
+- **No replicas.** Memorystore keeps the reader endpoint of an instance without replicas, but refuses its connections with `ERR no replicas found`. If that happens when the client is created, `NewClient` connects to the primary endpoint only; create the client again to read from replicas added later. If all replicas go away while the client runs, reads return errors until a replica is back: Memorystore doesn't send reader endpoint connections to the primary. Other constructors, given the `ClientOption` from `ResolveClientOption`, don't fall back to the primary endpoint.
+- **Failovers.** Memorystore closes the connections of both endpoints with `ERR role change occurred`. Commands in flight fail, and valkey-go reconnects on the next command.
+- **Spreading reads.** The reader endpoint balances connections, not commands, across the replicas. By default, a client opens up to 4 connections to it, fewer with less than 4 CPUs. Set `PipelineMultiplex` for more connections, and `ConnLifetime` so that connections, with their reads, also move to replicas added later.
+
+### 2.3 Read Your Writes
+
+With `WithReadYourWrites(window)`, after the client writes to a hash slot, reads of that slot go to the primary for `window`, or 500ms if `window <= 0`. Choose a window longer than the replication lag of your instance. It works with `WithZoneAwareReads` and with a reader endpoint:
+
+```go
+client, err := valkeygcp.NewClient(ctx, valkey.ClientOption{
+	InitAddress: []string{"10.0.0.15:6379"}, // discovery endpoint
+}, valkeygcp.WithZoneAwareReads(), valkeygcp.WithReadYourWrites(500*time.Millisecond))
+```
+
+Only writes sent with `Do` and `DoMulti` are tracked: writes sent with `Dedicated`, `Dedicate`, `DoStream` or `DoMultiStream`, and writes made by other clients, are not. `NewClient` applies it by wrapping the client, so `ResolveClientOption` ignores it.
