@@ -13416,6 +13416,13 @@ func (l *loopCluster) node(owner bool, other string) *mockConn {
 			}
 			return &valkeyresults{s: resps}
 		},
+		DoMultiCacheFn: func(multi ...CacheableTTL) *valkeyresults {
+			resps := make([]ValkeyResult, len(multi))
+			for i := range multi {
+				resps[i] = l.reply(owner, other)
+			}
+			return &valkeyresults{s: resps}
+		},
 	}
 }
 
@@ -13523,6 +13530,46 @@ func TestClusterClientRedirectLoop(t *testing.T) {
 		defer cancel()
 		if err := client.DoCache(ctx, client.B().Get().Key("bar").Cache(), time.Minute).Error(); err != context.DeadlineExceeded {
 			t.Fatalf("got %v, want context.DeadlineExceeded", err)
+		}
+	})
+
+	// The slot map says that 127.0.2.1:0 owns "foo", and every refresh says so again, like a refresh from a node
+	// that has not seen the change yet. Once the nodes agree, 127.0.2.1:0 still redirects to 127.0.0.1:0, which
+	// serves the command. The client follows one redirect after each refresh, so it gets there.
+	t.Run("a stale refresh does not hold the command back", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			do   func(ctx context.Context, client *clusterClient) error
+		}{
+			{"Do", func(ctx context.Context, client *clusterClient) error {
+				return client.Do(ctx, client.B().Get().Key("foo").Build()).Error()
+			}},
+			{"DoCache", func(ctx context.Context, client *clusterClient) error {
+				return client.DoCache(ctx, client.B().Get().Key("foo").Cache(), time.Minute).Error()
+			}},
+			{"DoMulti", func(ctx context.Context, client *clusterClient) error {
+				resps := client.DoMulti(ctx, client.B().Get().Key("foo").Build(), client.B().Get().Key("foo").Build())
+				return errors.Join(resps[0].Error(), resps[1].Error())
+			}},
+			{"DoMultiCache", func(ctx context.Context, client *clusterClient) error {
+				resps := client.DoMultiCache(ctx, CT(client.B().Get().Key("foo").Cache(), time.Minute),
+					CT(client.B().Get().Key("foo").Cache(), time.Minute))
+				return errors.Join(resps[0].Error(), resps[1].Error())
+			}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				l := &loopCluster{}
+				client := newLoopClient(t, l, opt)
+				agree := time.AfterFunc(100*time.Millisecond, func() { l.agree.Store(true) })
+				defer agree.Stop()
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				start := time.Now()
+				if err := tc.do(ctx, client); err != nil {
+					t.Fatalf("got %v, want OK", err)
+				}
+				swCheckWithin(t, "the command", time.Since(start), 100*time.Millisecond, 100*time.Millisecond+4*opt.MinRefreshInterval+swSlack)
+			})
 		}
 	})
 }

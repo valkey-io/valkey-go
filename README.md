@@ -507,7 +507,7 @@ client, err := valkey.NewClient(valkey.ClientOption{
     ClusterOption: valkey.ClusterOption{
         // Set this to periodically refresh the cluster topology.
         // Without it, newly added or removed replicas won't be picked up,
-        // because the topology is only refreshed on MOVED/ASK errors or connection closures.
+        // because the topology is otherwise only refreshed after errors, such as MOVED replies or broken connections.
         ShardsRefreshInterval: 10 * time.Second,
     },
 })

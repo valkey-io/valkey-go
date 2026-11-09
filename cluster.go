@@ -265,8 +265,10 @@ func (c *clusterClient) sinceRefreshLeft(d time.Duration) time.Duration {
 // maxFollowedMoves is how many MOVED redirects of one request, or rounds of redirects of one DoMulti, the client
 // follows directly. A further one means that the nodes disagree on the owner of the slot, and would keep
 // redirecting the request to each other, or that the client's view is several moves behind. Then the client waits
-// for a topology refresh and routes the request by the refreshed slot map, at most one round per refresh, instead
-// of following the redirects at network speed until the request's context ends.
+// for a topology refresh and routes the request by the refreshed slot map, instead of following the redirects at
+// network speed until the request's context ends. After each refresh it follows one more redirect before it waits
+// again, so a refresh that failed, or came from a node that has not seen the change yet, cannot keep the request
+// from the node that the redirect names: at most two rounds per refresh.
 const maxFollowedMoves = 2
 
 // waitRefresh waits until the topology refresh in flight, or the next one, has finished. It starts the refresh as
@@ -893,6 +895,7 @@ process:
 			if err := c.waitRefresh(ctx); err != nil {
 				return NewErrorResult(err)
 			}
+			moves = maxFollowedMoves - 1 // follow the next MOVED, then wait for the next refresh
 			goto retry
 		}
 		ncc := c.redirectOrNew(addr, cc, cmd.Slot(), mode)
@@ -1329,6 +1332,7 @@ func (c *clusterClient) DoMulti(ctx context.Context, multi ...Completed) []Valke
 
 	attempts := 1
 	redirects := 0
+	rounds := 0 // rounds of redirects since the last refresh wait, as moves in do
 
 retry:
 	retries.RetryDelay = -1 // Assume no retry. Because a client retry flag can be set to false.
@@ -1358,11 +1362,12 @@ retry:
 				return results.s
 			}
 			retries.Redirects = 0
-			if redirects > maxFollowedMoves { // as in do: let the topology refresh settle where to send them
+			if rounds++; rounds > maxFollowedMoves { // as in do: let the topology refresh settle where to send them
 				if err := c.waitRefresh(ctx); err != nil {
 					return fillPendingErrs(results.s, retries, err)
 				}
 				c.rebucketRetries(retries)
+				rounds = maxFollowedMoves - 1
 			}
 			goto retry
 		}
@@ -1415,6 +1420,7 @@ process:
 			if err := c.waitRefresh(ctx); err != nil {
 				return NewErrorResult(err)
 			}
+			moves = maxFollowedMoves - 1 // follow the next MOVED, then wait for the next refresh
 			goto retry
 		}
 		ncc := c.redirectOrNew(addr, cc, cmd.Slot(), mode)
@@ -1812,6 +1818,7 @@ func (c *clusterClient) DoMultiCache(ctx context.Context, multi ...CacheableTTL)
 
 	attempts := 1
 	redirects := 0
+	rounds := 0 // as in DoMulti
 
 retry:
 	retries.RetryDelay = -1 // Assume no retry. Because a client retry flag can be set to false.
@@ -1841,11 +1848,12 @@ retry:
 				return results.s
 			}
 			retries.Redirects = 0
-			if redirects > maxFollowedMoves { // as in do
+			if rounds++; rounds > maxFollowedMoves { // as in do
 				if err := c.waitRefresh(ctx); err != nil {
 					return fillPendingCacheErrs(results.s, retries, err)
 				}
 				c.rebucketRetriesCache(retries)
+				rounds = maxFollowedMoves - 1
 			}
 			goto retry
 		}
