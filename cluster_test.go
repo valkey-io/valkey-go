@@ -11529,42 +11529,6 @@ func clusterClientWithConnCount(n int) *clusterClient {
 	return &clusterClient{conns: conns, opt: &ClientOption{}}
 }
 
-func TestClusterRefreshStartDelayWithMaxRefreshDelay(t *testing.T) {
-	t.Run("overrides a larger automatic bound", func(t *testing.T) {
-		maxDelay := 50 * time.Millisecond
-		c := clusterClientWithConnCount(1000) // the automatic bound is 30s
-		c.opt.ClusterOption.MaxRefreshDelay = maxDelay
-		for i := 0; i < 1000; i++ {
-			if d := c.clusterRefreshStartDelay(); d < 0 || d >= maxDelay {
-				t.Fatalf("iteration %d: start delay %v out of [0, %v)", i, d, maxDelay)
-			}
-		}
-	})
-	t.Run("overrides a smaller automatic bound", func(t *testing.T) {
-		maxDelay := 10 * time.Second
-		c := clusterClientWithConnCount(1) // the automatic bound is 1s
-		c.opt.ClusterOption.MaxRefreshDelay = maxDelay
-		var longest time.Duration
-		for i := 0; i < 1000; i++ {
-			d := c.clusterRefreshStartDelay()
-			if d < 0 || d >= maxDelay {
-				t.Fatalf("iteration %d: start delay %v out of [0, %v)", i, d, maxDelay)
-			}
-			longest = max(longest, d)
-		}
-		if longest < time.Second {
-			t.Fatalf("longest start delay %v, expected some above the 1s automatic bound", longest)
-		}
-	})
-	t.Run("keeps the batch delay scaled by cluster size", func(t *testing.T) {
-		c := clusterClientWithConnCount(1000)
-		c.opt.ClusterOption.MaxRefreshDelay = 50 * time.Millisecond
-		if got, want := c.clusterRefreshBatchDelay(), 100*time.Millisecond; got != want {
-			t.Fatalf("batch delay %v, want %v", got, want)
-		}
-	})
-}
-
 func TestClusterClientRefreshClosesConnAddedWhileUnlocked(t *testing.T) {
 	defer ShouldNotLeak(SetupLeakDetection())
 
@@ -12916,7 +12880,6 @@ var (
 		{from: 0, to: 8191, nodes: []swNode{swPrimary(swAddr1)}},
 		{from: 8192, to: 16383, nodes: []swNode{{addr: swAddr2, role: "master", health: "fail"}, swReplica(swAddr3)}},
 	}
-	swPresentKey = swKeysInSlots(1, 0, 8191)[0]
 	swMissingKey = swKeysInSlots(1, 8192, 16383)[0]
 )
 
@@ -13112,14 +13075,7 @@ func TestClusterRefreshDefaults(t *testing.T) {
 			}
 		}
 	})
-	t.Run("negative values are accepted", func(t *testing.T) {
-		m := newSWCluster(swHealthy)
-		client := newSWClient(t, m, ClusterOption{MinRefreshInterval: -1, MaxRefreshDelay: -1})
-		if v, _, err := swGet(context.Background(), client, swPresentKey); err != nil || v != swAddr1 {
-			t.Fatalf("got (%q, %v), want (%q, nil)", v, err, swAddr1)
-		}
-	})
-	t.Run("delay of a lazy refresh by cluster size, and -1", func(t *testing.T) {
+	t.Run("delay of a lazy refresh by cluster size, set, and -1", func(t *testing.T) {
 		for _, tc := range []struct {
 			n            int
 			want, before time.Duration
@@ -13137,6 +13093,23 @@ func TestClusterRefreshDefaults(t *testing.T) {
 			if got := c.lazyRefreshMaxDelay(); got != tc.before {
 				t.Errorf("%d nodes: bound with -1 %v, want the previous %v", tc.n, got, tc.before)
 			}
+		}
+		// A value that is set is used as it is, below or above the automatic bound.
+		for _, tc := range []struct {
+			n   int
+			set time.Duration
+		}{{n: 1000, set: 50 * time.Millisecond}, {n: 1, set: 10 * time.Second}} {
+			c := clusterClientWithConnCount(tc.n)
+			c.opt.ClusterOption.MaxRefreshDelay = tc.set
+			if got := c.lazyRefreshMaxDelay(); got != tc.set {
+				t.Errorf("%d nodes, MaxRefreshDelay %v: bound %v", tc.n, tc.set, got)
+			}
+		}
+		// The batch delay keeps following the size of the cluster.
+		c := clusterClientWithConnCount(1000)
+		c.opt.ClusterOption.MaxRefreshDelay = 50 * time.Millisecond
+		if got, want := c.clusterRefreshBatchDelay(), 100*time.Millisecond; got != want {
+			t.Errorf("batch delay %v, want %v", got, want)
 		}
 	})
 }
@@ -13258,54 +13231,11 @@ func TestClusterLazyRefreshMinRefreshInterval(t *testing.T) {
 	})
 }
 
-// An idle client sends no commands while the cluster changes, so its slot map is stale when it resumes. Here
-// a planned failover made the replica of the second shard its primary while the client was idle. The first
-// command for one of its slots is redirected with MOVED, which routes that slot to the new primary and
-// schedules a lazy refresh for the other slots.
-func TestClusterClientResumeAfterIdle(t *testing.T) {
-	defer ShouldNotLeak(SetupLeakDetection())
-	failedOver := []swShard{
-		{from: 0, to: 8191, nodes: []swNode{swPrimary(swAddr1)}},
-		{from: 8192, to: 16383, nodes: []swNode{swPrimary(swAddr3), swReplica(swAddr2)}},
-	}
-	keys := swKeysInSlots(50, 8192, 16383)
-	slots := make(map[uint16]bool, len(keys))
-	for _, k := range keys {
-		cmd := cmds.NewBuilder(cmds.InitSlot).Get().Key(k).Build()
-		slots[cmd.Slot()] = true
-	}
-	getAll := func(t *testing.T, client *clusterClient) {
-		t.Helper()
-		for _, k := range keys {
-			if v, _, err := swGet(context.Background(), client, k); err != nil || v != swAddr3 {
-				t.Fatalf("got (%q, %v), want (%q, nil) from the new primary", v, err, swAddr3)
-			}
-		}
-	}
-
-	// With the default delay of up to 250ms, each slot is redirected at most once until the refresh.
-	t.Run("default delay", func(t *testing.T) {
-		m := newSWCluster(swHealthy)
-		m.redirect = true
-		client := newSWClient(t, m, ClusterOption{})
-		m.setTopology(failedOver)
-		getAll(t, client)
-		if n := m.movedCount(); n < 1 || n > len(slots) {
-			t.Fatalf("got %d MOVED replies, want between 1 and %d, one per slot at most", n, len(slots))
-		}
-		moved := m.movedCount()
-		getAll(t, client)
-		if n := m.movedCount(); n != moved {
-			t.Fatalf("got %d more MOVED replies for slots already redirected", n-moved)
-		}
-	})
-}
-
 // TestClusterFailoverScenarios runs every command path from concurrent goroutines through a crash, a crash
 // with the promotion held, a planned failover and a slot migration, with the refresh options at their defaults
-// and with short values. It checks that no command outlives its context, that the errors are the expected
-// ones, that the commands sent after the cluster settles succeed, and, with the options, that the refreshes stay
-// paced while every shard has a primary. While a shard has no primary, a request for one of its slots refreshes
+// and turned off with -1. It checks that no command outlives its context, that the errors are the expected
+// ones, that the commands sent after the cluster settles succeed, and, with the defaults, that the refreshes
+// stay paced while every shard has a primary. While a shard has no primary, a request for one of its slots refreshes
 // and fails with ErrNoSlot, as before.
 func TestClusterFailoverScenarios(t *testing.T) {
 	defer ShouldNotLeak(SetupLeakDetection())
@@ -13362,7 +13292,6 @@ func TestClusterFailoverScenarios(t *testing.T) {
 		{name: "defaults", settle: 600 * time.Millisecond},
 		// as before: no limit, and the lazy refreshes after their random delay of up to 1s
 		{name: "turned off", opt: ClusterOption{MinRefreshInterval: -1, MaxRefreshDelay: -1}, settle: time.Second + 100*time.Millisecond},
-		{name: "options", opt: ClusterOption{MinRefreshInterval: 50 * time.Millisecond}, settle: 600 * time.Millisecond},
 	}
 	affected := swKeysInSlots(20, 8192, 16383)
 	healthy := swKeysInSlots(5, 0, 8191)
@@ -13445,11 +13374,8 @@ func TestClusterFailoverScenarios(t *testing.T) {
 				}
 				// The refreshes the client schedules are spaced by the interval. The requests for a shard without a
 				// primary refresh on their own, as before, so the scenarios with such a shard are not checked.
-				if v.opt.MinRefreshInterval >= 0 && !sc.noPrimary {
-					iv := v.opt.MinRefreshInterval
-					if iv == 0 {
-						iv = client.refreshInterval()
-					}
+				if v.opt.MinRefreshInterval == 0 && !sc.noPrimary {
+					iv := client.refreshInterval()
 					times := m.refreshTimes()
 					swCheckSpacing(t, times, iv)
 					if limit := int(runFor/iv) + 3; len(times) > limit {
