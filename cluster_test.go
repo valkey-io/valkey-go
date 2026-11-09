@@ -13533,6 +13533,23 @@ func TestClusterClientRedirectLoop(t *testing.T) {
 		}
 	})
 
+	// With a negative MinRefreshInterval, the refresh that a redirected command waits for is a lazy refresh. The
+	// first MOVED reply already scheduled one with a random delay of up to MaxRefreshDelay, here 20s; the command
+	// must not wait for that delay.
+	t.Run("without an interval the wait ends at once", func(t *testing.T) {
+		l := &loopCluster{}
+		client := newLoopClient(t, l, ClusterOption{MinRefreshInterval: -1, MaxRefreshDelay: 20 * time.Second})
+		agree := time.AfterFunc(100*time.Millisecond, func() { l.agree.Store(true) })
+		defer agree.Stop()
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+		start := time.Now()
+		if v, err := client.Do(ctx, client.B().Get().Key("bar").Build()).ToString(); err != nil || v != "OK" {
+			t.Fatalf("got (%q, %v), want OK", v, err)
+		}
+		swCheckWithin(t, "the command", time.Since(start), 100*time.Millisecond, 100*time.Millisecond+swSlack)
+	})
+
 	// The slot map says that 127.0.2.1:0 owns "foo", and every refresh says so again, like a refresh from a node
 	// that has not seen the change yet. Once the nodes agree, 127.0.2.1:0 still redirects to 127.0.0.1:0, which
 	// serves the command. The client follows one redirect after each refresh, so it gets there.

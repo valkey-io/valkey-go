@@ -273,11 +273,15 @@ const maxFollowedMoves = 2
 
 // waitRefresh waits until the topology refresh in flight, or the next one, has finished. It starts the refresh as
 // errorRefresh does, so it never waits for a refresh that nothing starts, nor for the long random delay of a lazy
-// refresh: a request that keeps being redirected shows that the slot map is wrong. It fails with ctx.Err() when
-// ctx is done first, and with ErrClosing when the client is closed first.
+// refresh: a request that keeps being redirected shows that the slot map is wrong. Without an interval, errorRefresh
+// is a lazy refresh, so waitRefresh ends its delay at once. It fails with ctx.Err() when ctx is done first, and with
+// ErrClosing when the client is closed first.
 func (c *clusterClient) waitRefresh(ctx context.Context) error {
 	fl := c.sc.next()
 	c.errorRefresh()
+	if c.refreshInterval() <= 0 {
+		c.sc.Expedite(0) // errorRefresh was a lazy refresh: don't wait for its random delay
+	}
 	select {
 	case <-fl.ch:
 		return nil

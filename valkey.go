@@ -346,9 +346,9 @@ type ClusterOption struct {
 	// that a MOVED redirection, a TRYAGAIN error or ShardsRefreshInterval starts. The delay spreads the refreshes
 	// of many clients that see the same change. Until the refresh, the client routes by its current slot map,
 	// which a MOVED reply already updates for its slot, so a shorter delay mostly finds other changes sooner, such
-	// as new replicas, at the cost of more CLUSTER SHARDS or CLUSTER SLOTS commands arriving together. The refresh
-	// after a node fails does not wait for it: it waits at most half of MinRefreshInterval, or MaxRefreshDelay if
-	// that is shorter.
+	// as new replicas, at the cost of more CLUSTER SHARDS or CLUSTER SLOTS commands arriving together. Unless
+	// MinRefreshInterval is negative, the refresh after a node fails does not wait for it: it waits at most half of
+	// MinRefreshInterval, or MaxRefreshDelay if that is shorter.
 	// If the value is zero (default), the bound depends on the number of nodes: 250ms below 100 nodes, growing
 	// linearly to 30s at 1000 nodes or more.
 	// If the value is negative, the bound is the one used before: 1s below 100 nodes, growing linearly to 30s.
