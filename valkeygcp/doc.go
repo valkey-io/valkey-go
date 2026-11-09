@@ -13,7 +13,12 @@
 // adds the credentials its Options ask for:
 //   - WithDefaultIAM authenticates with IAM access tokens from Application Default
 //     Credentials, which are replaced on live connections before they expire.
-//   - WithIAMOptions does the same with your own token source, username or refresh settings.
+//   - WithIAMOptions does the same with another identity (a key file, a Workload Identity
+//     Federation file, an impersonated service account or your own token source), the
+//     principal's email as the username, or other refresh settings.
+//
+// NewClient also retries Memorystore's IAM backend errors (ERR_IAM_EXHAUSTED, ERR_IAM_OTHER)
+// while it connects, and after such an error makes new connections wait before dialing.
 //
 // ResolveClientOption returns the same valkey.ClientOption without connecting, for
 // valkey.NewClient or other valkey-go modules such as valkeyotel.

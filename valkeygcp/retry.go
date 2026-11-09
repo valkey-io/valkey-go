@@ -2,16 +2,20 @@ package valkeygcp
 
 import (
 	"math/rand/v2"
+	"strings"
 	"time"
 
 	"github.com/valkey-io/valkey-go"
 )
 
-// Backoff settings: full jitter over retryBase·2^attempt, capped at retryCap. After
-// maxRetryAttempts attempts, memorystoreRetryDelay stops retrying.
+// Backoff settings: retryBase and retryCap for the errors valkey-go retries, iamBackoffBase
+// and iamBackoffCap for Memorystore IAM backend errors, which Google says to retry with
+// exponential backoff. After maxRetryAttempts attempts, memorystoreRetryDelay stops retrying.
 const (
 	retryBase        = 50 * time.Millisecond
 	retryCap         = 2 * time.Second
+	iamBackoffBase   = 250 * time.Millisecond
+	iamBackoffCap    = 10 * time.Second
 	maxRetryAttempts = 20
 )
 
@@ -20,13 +24,30 @@ const (
 // retrying, 0 retries now, positive waits.
 //
 // valkey-go calls it only for errors it retries: network errors, LOADING, and in cluster
-// mode TRYAGAIN and CLUSTERDOWN. An error reply to a connection's HELLO, such as
-// Memorystore's ERR_IAM_*, is not one of them: valkey-go returns that error instead.
+// mode TRYAGAIN and CLUSTERDOWN. An ERR_IAM_* reply to a connection's HELLO is not one of
+// them; connect and the dial gate back off those instead, with iamBackoff.
 func memorystoreRetryDelay(attempts int, _ valkey.Completed, _ error) time.Duration {
 	if attempts >= maxRetryAttempts {
 		return -1
 	}
 	return fullJitter(retryBase, retryCap, attempts)
+}
+
+// isIAMBackendError reports Memorystore's IAM backend replies, which Google says to retry
+// with exponential backoff: ERR_IAM_EXHAUSTED (quota) and ERR_IAM_OTHER (transient, or an
+// invalid username).
+func isIAMBackendError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "ERR_IAM_EXHAUSTED") || strings.Contains(msg, "ERR_IAM_OTHER")
+}
+
+// iamBackoff is the wait after the attempt-th consecutive IAM backend error: full jitter
+// over 250ms·2^attempt, capped at 10s.
+func iamBackoff(attempt int) time.Duration {
+	return fullJitter(iamBackoffBase, iamBackoffCap, attempt)
 }
 
 // fullJitter returns a random duration in (0, min(base·2^attempt, limit)].

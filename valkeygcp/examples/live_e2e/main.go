@@ -11,6 +11,14 @@
 //
 //	MEMORYSTORE_TEST_DISCOVERY_ENDPOINT=10.0.0.15:6379 go run ./live_e2e
 //
+// To connect through service account impersonation instead, set VALKEY_GCP_IMPERSONATE_SA
+// to the account's email. The tokens are then issued for that account, which needs
+// roles/memorystore.dbConnectionUser, and the ADC principal needs
+// roles/iam.serviceAccountTokenCreator on it:
+//
+//	VALKEY_GCP_IMPERSONATE_SA=sa@my-proj.iam.gserviceaccount.com \
+//	MEMORYSTORE_TEST_DISCOVERY_ENDPOINT=10.0.0.15:6379 go run ./live_e2e
+//
 // It runs one SET/GET pair every 200ms, logs each failure, and logs the counts after every
 // 300 successful pairs, about once a minute. When stopped, it prints the totals and exits
 // with status 1 if any pair failed.
@@ -39,9 +47,15 @@ func main() {
 	ctx := context.Background()
 	log.Printf("Connecting to Memorystore at %s with Native IAM Auth...", endpoint)
 
+	// IAM tokens from Application Default Credentials or, with VALKEY_GCP_IMPERSONATE_SA set,
+	// tokens for that service account, issued by impersonating it.
+	iam := valkeygcp.IAMAuthOptions{ImpersonateSA: os.Getenv("VALKEY_GCP_IMPERSONATE_SA")}
+	if iam.ImpersonateSA != "" {
+		log.Printf("Impersonating %s", iam.ImpersonateSA)
+	}
 	client, err := valkeygcp.NewClient(ctx, valkey.ClientOption{
 		InitAddress: []string{endpoint}, // discovery endpoint
-	}, valkeygcp.WithDefaultIAM()) // IAM tokens from Application Default Credentials
+	}, valkeygcp.WithIAMOptions(iam))
 	if err != nil {
 		log.Fatalf("Failed to create Memorystore client: %v", err)
 	}
