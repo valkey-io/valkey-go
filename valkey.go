@@ -329,6 +329,31 @@ type ClusterOption struct {
 	// Cluster topology cache refresh happens always in the background after a successful scan.
 	ShardsRefreshInterval time.Duration
 
+	// MinRefreshInterval is the minimum time between two cluster topology refreshes that the client schedules:
+	// after a MOVED redirection or a TRYAGAIN error, after an error that shows a node failing, and on
+	// ShardsRefreshInterval ticks. It bounds the CLUSTER SHARDS or CLUSTER SLOTS commands these refreshes send.
+	// While requests fail on a node, because it cannot be reached or its connection broke, the client refreshes
+	// about once per interval instead of after the random delay of a lazy refresh, until it sees the change. A
+	// lazy refresh already scheduled, whose random delay is up to 30s in large clusters, then runs sooner too.
+	// A request that finds no node for its slot refreshes at once, or joins the refresh in progress, and fails
+	// with ErrNoSlot if the slot still has no node, as before.
+	// If the value is zero (default), the interval depends on the number of nodes: 1ms per node, between 250ms
+	// and 1s. A value that is set is used as it is.
+	// If the value is negative, refreshes are deduplicated but not rate limited, as before.
+	MinRefreshInterval time.Duration
+
+	// MaxRefreshDelay is the upper bound of the random delay before a lazy cluster topology refresh: the refresh
+	// that a MOVED redirection, a TRYAGAIN error or ShardsRefreshInterval starts. The delay spreads the refreshes
+	// of many clients that see the same change. Until the refresh, the client routes by its current slot map,
+	// which a MOVED reply already updates for its slot, so a shorter delay mostly finds other changes sooner, such
+	// as new replicas, at the cost of more CLUSTER SHARDS or CLUSTER SLOTS commands arriving together. Unless
+	// MinRefreshInterval is negative, the refresh after a node fails does not wait for it: it waits at most half of
+	// MinRefreshInterval, or MaxRefreshDelay if that is shorter.
+	// If the value is zero (default), the bound depends on the number of nodes: 250ms below 100 nodes, growing
+	// linearly to 30s at 1000 nodes or more.
+	// If the value is negative, the bound is the one used before: 1s below 100 nodes, growing linearly to 30s.
+	MaxRefreshDelay time.Duration
+
 	// MaxMovedRedirections is the maximum number of times to retry a command when receiving MOVED|ASK responses.
 	// If set to 0 (default), MOVED|ASK retries will continue until the context timeout.
 	// If set to a positive value, the client will return an error after that many MOVED|ASK redirects.

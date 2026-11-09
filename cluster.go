@@ -94,7 +94,7 @@ func newClusterClient(opt *ClientOption, connFn connFn, retryer retryHandler) (*
 	client.connFn = func(dst string, opt *ClientOption) conn {
 		cc := connFn(dst, opt)
 		cc.SetOnCloseHook(func(err error) {
-			client.lazyRefresh()
+			client.errorRefresh() // a connection broke
 		})
 		return cc
 	}
@@ -156,19 +156,208 @@ func (c *clusterClient) refresh(ctx context.Context) (err error) {
 }
 
 func (c *clusterClient) lazyRefresh() {
-	c.sc.DelayDo(c.clusterRefreshStartDelay(), c._refresh)
+	c.sc.DelayDo(c.clusterRefreshStartDelay(), c._lazyRefresh)
 }
 
-func (c *clusterClient) clusterRefreshStartDelay() time.Duration {
-	maxDelay := c.clusterRefreshMaxDelay()
-	return time.Duration(util.FastRand(int(maxDelay)))
+// periodicRefresh is the refresh of a ShardsRefreshInterval tick: a lazy refresh whose random delay also stays
+// within ShardsRefreshInterval, so that the client refreshes about once per interval, as configured. In large
+// clusters the delay of a lazy refresh is up to 30s, and it used to hold the ticks back for that long.
+func (c *clusterClient) periodicRefresh() {
+	maxDelay := min(c.lazyRefreshMaxDelay(), c.opt.ClusterOption.ShardsRefreshInterval)
+	var delay time.Duration
+	if maxDelay > 0 {
+		delay = time.Duration(util.FastRand(int(maxDelay)))
+	}
+	c.sc.DelayDo(delay, c._lazyRefresh)
 }
 
-func (c *clusterClient) clusterRefreshMaxDelay() time.Duration {
+// errorRefresh schedules the refresh after an error that shows that a node of the slot map is failing: it cannot
+// be reached, its connection broke, or the cluster answers CLUSTERDOWN or LOADING. waitRefresh uses it too, for
+// requests that keep being redirected. Instead of the long random delay of lazyRefresh, it waits a random delay of
+// up to half a refreshInterval, and refreshInterval spaces the refreshes, so while the errors continue the client
+// refreshes about once per interval, until a refresh shows the change. A lazy refresh already scheduled, whose
+// random delay is up to 30s in large clusters, runs within the same half interval instead. Without an interval,
+// that is with a negative MinRefreshInterval, it is a lazy refresh, as before.
+func (c *clusterClient) errorRefresh() {
+	iv := c.refreshInterval()
+	if iv <= 0 {
+		c.lazyRefresh()
+		return
+	}
+	maxDelay := min(iv/2, c.lazyRefreshMaxDelay())
+	delay := maxDelay
+	if delay > 0 {
+		delay = time.Duration(util.FastRand(int(delay)))
+	}
+	c.sc.DelayDo(delay, c._lazyRefresh)
+	// The random delay spreads the refreshes of many clients that see the same failure. _lazyRefresh still
+	// spaces the refresh from the previous one.
+	c.sc.Expedite(maxDelay)
+}
+
+// _lazyRefresh is the refresh that lazyRefresh and errorRefresh start after their random delay. It first waits
+// until refreshInterval has passed since the last refresh finished. It checks this here, and not when the refresh
+// is scheduled, because a refresh in flight then may finish before this one is scheduled.
+func (c *clusterClient) _lazyRefresh() error {
+	for {
+		left := c.sinceRefreshLeft(c.refreshInterval())
+		if left <= 0 {
+			return c._refresh()
+		}
+		timer := time.NewTimer(left)
+		select {
+		case <-timer.C:
+		case <-c.stopCh:
+			timer.Stop()
+			return ErrClosing
+		}
+	}
+}
+
+// Defaults of the topology refresh, for the ClusterOption fields left at zero.
+const (
+	// minAutoRefreshInterval and maxAutoRefreshInterval bound the default MinRefreshInterval. See
+	// clusterRefreshAutoInterval.
+	minAutoRefreshInterval = 250 * time.Millisecond
+	maxAutoRefreshInterval = time.Second
+)
+
+// clusterRefreshAutoInterval returns the default minimum time between two topology refreshes of a client that
+// knows n nodes: 1ms per node, at least 250ms and at most 1s. A refresh costs more in larger clusters, since the
+// CLUSTER SHARDS or CLUSTER SLOTS reply grows with the number of nodes, so they are spaced further apart. While a
+// node fails, a client then refreshes at most 4 times per second in clusters of up to 250 nodes, and once per
+// second in clusters of 1000 nodes or more.
+func clusterRefreshAutoInterval(n int) time.Duration {
+	return min(max(time.Duration(n)*time.Millisecond, minAutoRefreshInterval), maxAutoRefreshInterval)
+}
+
+// refreshInterval returns the minimum time between two topology refreshes: ClusterOption.MinRefreshInterval,
+// clusterRefreshAutoInterval when it is zero, or 0, meaning no minimum, when it is negative.
+func (c *clusterClient) refreshInterval() time.Duration {
+	if iv := c.opt.ClusterOption.MinRefreshInterval; iv != 0 {
+		return max(iv, 0)
+	}
+	return clusterRefreshAutoInterval(c.nodeCount())
+}
+
+// nodeCount returns the number of nodes in the slot map, replicas included.
+func (c *clusterClient) nodeCount() int {
 	c.mu.RLock()
 	n := len(c.conns)
 	c.mu.RUnlock()
-	return clusterRefreshAutoMaxDelay(n)
+	return n
+}
+
+// sinceRefreshLeft returns the time until d has passed since the last refresh finished, or 0.
+func (c *clusterClient) sinceRefreshLeft(d time.Duration) time.Duration {
+	if d <= 0 {
+		return 0
+	}
+	c.sc.mu.Lock()
+	last := c.sc.ts
+	c.sc.mu.Unlock()
+	if last.IsZero() {
+		return 0
+	}
+	return max(0, d-time.Since(last))
+}
+
+// maxFollowedMoves is how many MOVED redirects of one request, or rounds of redirects of one DoMulti, the client
+// follows directly. A further one means that the nodes disagree on the owner of the slot, and would keep
+// redirecting the request to each other, or that the client's view is several moves behind. Then the client waits
+// for a topology refresh and routes the request by the refreshed slot map, instead of following the redirects at
+// network speed until the request's context ends. After each refresh it follows one more redirect before it waits
+// again, so a refresh that failed, or came from a node that has not seen the change yet, cannot keep the request
+// from the node that the redirect names: at most two rounds per refresh.
+const maxFollowedMoves = 2
+
+// waitRefresh waits until the topology refresh in flight, or the next one, has finished. It starts the refresh as
+// errorRefresh does, so it never waits for a refresh that nothing starts, nor for the long random delay of a lazy
+// refresh: a request that keeps being redirected shows that the slot map is wrong. Without an interval, errorRefresh
+// is a lazy refresh, so waitRefresh ends its delay at once. It fails with ctx.Err() when ctx is done first, and with
+// ErrClosing when the client is closed first.
+func (c *clusterClient) waitRefresh(ctx context.Context) error {
+	fl := c.sc.next()
+	c.errorRefresh()
+	if c.refreshInterval() <= 0 {
+		c.sc.Expedite(0) // errorRefresh was a lazy refresh: don't wait for its random delay
+	}
+	select {
+	case <-fl.ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.stopCh:
+		return ErrClosing
+	}
+}
+
+// fillPendingErrs sets err as the result of the commands still in retries, and returns results.
+func fillPendingErrs(results []ValkeyResult, retries *connretry, err error) []ValkeyResult {
+	for _, re := range retries.m {
+		for _, i := range re.cIndexes {
+			results[i] = NewErrorResult(err)
+		}
+		for _, i := range re.aIndexes {
+			results[i] = NewErrorResult(err)
+		}
+	}
+	return results
+}
+
+// fillPendingCacheErrs is fillPendingErrs for DoMultiCache.
+func fillPendingCacheErrs(results []ValkeyResult, retries *connretrycache, err error) []ValkeyResult {
+	for _, re := range retries.m {
+		for _, i := range re.cIndexes {
+			results[i] = NewErrorResult(err)
+		}
+		for _, i := range re.aIndexes {
+			results[i] = NewErrorResult(err)
+		}
+	}
+	return results
+}
+
+// clusterRefreshStartDelay returns the random delay of a lazy refresh, below lazyRefreshMaxDelay.
+func (c *clusterClient) clusterRefreshStartDelay() time.Duration {
+	maxDelay := c.lazyRefreshMaxDelay()
+	if maxDelay <= 0 {
+		return 0
+	}
+	return time.Duration(util.FastRand(int(maxDelay)))
+}
+
+// lazyRefreshMaxDelay returns the upper bound of the random delay of a lazy refresh: ClusterOption.MaxRefreshDelay,
+// lazyRefreshAutoMaxDelay when it is zero, or the bound used before the option existed, clusterRefreshMaxDelay,
+// when it is negative.
+func (c *clusterClient) lazyRefreshMaxDelay() time.Duration {
+	switch d := c.opt.ClusterOption.MaxRefreshDelay; {
+	case d > 0:
+		return d
+	case d < 0:
+		return c.clusterRefreshMaxDelay()
+	}
+	return lazyRefreshAutoMaxDelay(c.nodeCount())
+}
+
+// lazyRefreshAutoMaxDelay returns the default upper bound of the random delay of a lazy refresh for a client that
+// knows n nodes. Below 100 nodes it is minAutoRefreshInterval: a refresh is cheap, and after a planned failover
+// every client keeps sending commands for the moved slots to the old primary until it refreshes. From 100 nodes
+// it grows linearly to 30s at 1000 nodes, like clusterRefreshAutoMaxDelay, so that the large replies of many
+// clients that refresh after the same change are spread over time.
+func lazyRefreshAutoMaxDelay(n int) time.Duration {
+	switch {
+	case n < 100:
+		return minAutoRefreshInterval
+	case n >= 1000:
+		return 30 * time.Second
+	default:
+		return minAutoRefreshInterval + time.Duration(n-100)*(30*time.Second-minAutoRefreshInterval)/900
+	}
+}
+
+func (c *clusterClient) clusterRefreshMaxDelay() time.Duration {
+	return clusterRefreshAutoMaxDelay(c.nodeCount())
 }
 
 func (c *clusterClient) clusterRefreshBatchDelay() time.Duration {
@@ -569,7 +758,7 @@ func (c *clusterClient) runClusterTopologyRefreshment() {
 		case <-c.stopCh:
 			return
 		case <-ticker.C:
-			c.lazyRefresh()
+			c.periodicRefresh()
 		}
 	}
 }
@@ -614,8 +803,21 @@ func (c *clusterClient) pick(ctx context.Context, slot uint16, toReplica bool) (
 func (c *clusterClient) redirectOrNew(addr string, prev conn, slot uint16, mode RedirectMode) conn {
 	c.mu.RLock()
 	cc := c.conns[addr]
+	// With ReplicaOnly the slot map points to replicas, not to the primary named by MOVED, so it is left to the
+	// regular refresh.
+	stale := !c.replicaOnly() && mode == RedirectMove && slot != cmds.InitSlot && cc.conn != nil && c.wslots[slot] != cc.conn
 	c.mu.RUnlock()
 	if cc.conn != nil && prev != cc.conn {
+		if stale {
+			// MOVED is authoritative for the slot. Remember the new owner, as the branches below do,
+			// so the following commands for the slot go there directly instead of being redirected
+			// again until the next topology refresh.
+			c.mu.Lock()
+			if c.conns[addr].conn == cc.conn {
+				c.routeMoved(slot, addr, cc.conn)
+			}
+			c.mu.Unlock()
+		}
 		return cc.conn
 	}
 	c.mu.Lock()
@@ -624,7 +826,7 @@ func (c *clusterClient) redirectOrNew(addr string, prev conn, slot uint16, mode 
 		cc = connrole{conn: p}
 		c.conns[addr] = cc
 		if mode == RedirectMove && slot != cmds.InitSlot {
-			c.wslots[slot] = p
+			c.routeMoved(slot, addr, p)
 		}
 	} else if prev == cc.conn {
 		// try reconnection if the MOVED redirects to the same host,
@@ -638,11 +840,28 @@ func (c *clusterClient) redirectOrNew(addr string, prev conn, slot uint16, mode 
 		cc = connrole{conn: p}
 		c.conns[addr] = cc
 		if mode == RedirectMove && slot != cmds.InitSlot { // MOVED should always point to the primary.
-			c.wslots[slot] = p
+			c.routeMoved(slot, addr, p)
 		}
 	}
 	c.mu.Unlock()
 	return cc.conn
+}
+
+// routeMoved routes slot to cc, the primary at addr named by a MOVED reply, until the next topology refresh. When
+// reads are sent to replicas, they follow it too: the replicas of the slot's previous owner no longer serve the slot,
+// and those of the new owner are only known after the refresh. c.mu must be held.
+func (c *clusterClient) routeMoved(slot uint16, addr string, cc conn) {
+	c.wslots[slot] = cc
+	if c.rslots != nil && c.opt.SendToReplicas != nil {
+		c.rslots[slot] = nodes{{Addr: addr, conn: cc}}
+	}
+}
+
+// replicaOnly reports whether the client was configured with ReplicaOnly, so that its slot map points to replicas.
+// A client with SendToReplicas also has ReplicaOnly set in c.opt, to dial every connection with READONLY, but its slot
+// map points to primaries.
+func (c *clusterClient) replicaOnly() bool {
+	return c.opt.ReplicaOnly && c.opt.SendToReplicas == nil
 }
 
 func (c *clusterClient) B() Builder {
@@ -659,6 +878,7 @@ func (c *clusterClient) Do(ctx context.Context, cmd Completed) (resp ValkeyResul
 func (c *clusterClient) do(ctx context.Context, cmd Completed) (resp ValkeyResult) {
 	attempts := 1
 	redirects := 0
+	moves := 0
 retry:
 	cc, err := c.pick(ctx, cmd.Slot(), c.toReplica(cmd))
 	if err != nil {
@@ -675,7 +895,15 @@ process:
 		if c.opt.ClusterOption.MaxMovedRedirections > 0 && redirects > c.opt.ClusterOption.MaxMovedRedirections {
 			return resp
 		}
+		if moves++; moves > maxFollowedMoves {
+			if err := c.waitRefresh(ctx); err != nil {
+				return NewErrorResult(err)
+			}
+			moves = maxFollowedMoves - 1 // follow the next MOVED, then wait for the next refresh
+			goto retry
+		}
 		ncc := c.redirectOrNew(addr, cc, cmd.Slot(), mode)
+		cc = ncc // the node that answers next: a MOVED from it to its own address reconnects, one to another node does not
 	recover1:
 		resp = ncc.Do(ctx, cmd)
 		if resp.NonValkeyError() == errConnExpired {
@@ -688,6 +916,7 @@ process:
 			return resp
 		}
 		ncc := c.redirectOrNew(addr, cc, cmd.Slot(), mode)
+		cc = ncc
 	recover2:
 		results := ncc.DoMulti(ctx, cmds.AskingCmd, cmd)
 		resp = results.s[1]
@@ -1107,6 +1336,7 @@ func (c *clusterClient) DoMulti(ctx context.Context, multi ...Completed) []Valke
 
 	attempts := 1
 	redirects := 0
+	rounds := 0 // rounds of redirects since the last refresh wait, as moves in do
 
 retry:
 	retries.RetryDelay = -1 // Assume no retry. Because a client retry flag can be set to false.
@@ -1136,6 +1366,13 @@ retry:
 				return results.s
 			}
 			retries.Redirects = 0
+			if rounds++; rounds > maxFollowedMoves { // as in do: let the topology refresh settle where to send them
+				if err := c.waitRefresh(ctx); err != nil {
+					return fillPendingErrs(results.s, retries, err)
+				}
+				c.rebucketRetries(retries)
+				rounds = maxFollowedMoves - 1
+			}
 			goto retry
 		}
 		if retries.RetryDelay >= 0 {
@@ -1165,6 +1402,7 @@ func fillErrs(n int, err error) (results []ValkeyResult) {
 func (c *clusterClient) doCache(ctx context.Context, cmd Cacheable, ttl time.Duration) (resp ValkeyResult) {
 	attempts := 1
 	redirects := 0
+	moves := 0
 
 retry:
 	cc, err := c.pick(ctx, cmd.Slot(), c.toReplica(Completed(cmd)))
@@ -1182,7 +1420,15 @@ process:
 		if c.opt.ClusterOption.MaxMovedRedirections > 0 && redirects > c.opt.ClusterOption.MaxMovedRedirections {
 			return resp
 		}
+		if moves++; moves > maxFollowedMoves {
+			if err := c.waitRefresh(ctx); err != nil {
+				return NewErrorResult(err)
+			}
+			moves = maxFollowedMoves - 1 // follow the next MOVED, then wait for the next refresh
+			goto retry
+		}
 		ncc := c.redirectOrNew(addr, cc, cmd.Slot(), mode)
+		cc = ncc
 	recover:
 		resp = ncc.DoCache(ctx, cmd, ttl)
 		if resp.NonValkeyError() == errConnExpired {
@@ -1194,7 +1440,8 @@ process:
 		if c.opt.ClusterOption.MaxMovedRedirections > 0 && redirects > c.opt.ClusterOption.MaxMovedRedirections {
 			return resp
 		}
-		results := c.askingMultiCache(c.redirectOrNew(addr, cc, cmd.Slot(), mode), ctx, []CacheableTTL{CT(cmd, ttl)})
+		cc = c.redirectOrNew(addr, cc, cmd.Slot(), mode)
+		results := c.askingMultiCache(cc, ctx, []CacheableTTL{CT(cmd, ttl)})
 		resp = results.s[0]
 		resultsp.Put(results)
 		goto process
@@ -1575,6 +1822,7 @@ func (c *clusterClient) DoMultiCache(ctx context.Context, multi ...CacheableTTL)
 
 	attempts := 1
 	redirects := 0
+	rounds := 0 // as in DoMulti
 
 retry:
 	retries.RetryDelay = -1 // Assume no retry. Because a client retry flag can be set to false.
@@ -1604,6 +1852,13 @@ retry:
 				return results.s
 			}
 			retries.Redirects = 0
+			if rounds++; rounds > maxFollowedMoves { // as in do
+				if err := c.waitRefresh(ctx); err != nil {
+					return fillPendingCacheErrs(results.s, retries, err)
+				}
+				c.rebucketRetriesCache(retries)
+				rounds = maxFollowedMoves - 1
+			}
 			goto retry
 		}
 		if retries.RetryDelay >= 0 {
@@ -1633,7 +1888,10 @@ retry:
 	if err == errConnExpired {
 		goto retry
 	}
-	if _, mode := c.shouldRefreshRetry(err, ctx); c.retry && mode != RedirectNone {
+	if addr, mode := c.shouldRefreshRetry(err, ctx); c.retry && mode != RedirectNone {
+		if mode == RedirectMove {
+			c.redirectOrNew(addr, cc, subscribe.Slot(), mode) // so that the retry goes to the new owner of the slot
+		}
 		shouldRetry := c.retryHandler.WaitOrSkipRetry(ctx, attempts, subscribe, err)
 		if shouldRetry {
 			attempts++
@@ -1727,18 +1985,25 @@ func (c *clusterClient) Close() {
 
 func (c *clusterClient) shouldRefreshRetry(err error, ctx context.Context) (addr string, mode RedirectMode) {
 	if err != nil && err != Nil && err != ErrDoCacheAborted && atomic.LoadUint32(&c.stop) == 0 {
+		failing := false // the error shows that a node of the slot map is failing
 		if err, ok := err.(*ValkeyError); ok {
 			if addr, ok = err.IsMoved(); ok {
 				mode = RedirectMove
 			} else if addr, ok = err.IsAsk(); ok {
 				mode = RedirectAsk
-			} else if err.IsClusterDown() || err.IsTryAgain() || err.IsLoading() {
+			} else if err.IsClusterDown() || err.IsLoading() {
+				mode, failing = RedirectRetry, true
+			} else if err.IsTryAgain() {
 				mode = RedirectRetry
 			}
 		} else if ctx.Err() == nil {
-			mode = RedirectRetry
+			mode, failing = RedirectRetry, true // the node could not be reached, or its connection broke
 		}
-		if mode != RedirectNone {
+		// ASK means that the slot is being migrated and is still owned by the node that replied, so the slot
+		// map is right and a refresh has nothing to learn. The MOVED replies after the migration refresh it.
+		if failing {
+			c.errorRefresh()
+		} else if mode != RedirectNone && mode != RedirectAsk {
 			c.lazyRefresh()
 		}
 	}
