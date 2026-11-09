@@ -4182,8 +4182,7 @@ func TestClusterClientErr(t *testing.T) {
 			return singleSlotResp
 		}}
 		client, err := newClusterClient(
-			// without the default wait for the slot to get a node, so that ErrNoSlot comes after one refresh
-			&ClientOption{InitAddress: []string{":0"}, ClusterOption: ClusterOption{MaxSlotWait: -1}},
+			&ClientOption{InitAddress: []string{":0"}},
 			func(dst string, opt *ClientOption) conn { return m },
 			newRetryer(defaultRetryDelayFn),
 		)
@@ -4216,8 +4215,7 @@ func TestClusterClientErr(t *testing.T) {
 			return singleSlotResp
 		}}
 		client, err := newClusterClient(
-			// without the default wait for the slot to get a node, so that ErrNoSlot comes after one refresh
-			&ClientOption{InitAddress: []string{":0"}, ClusterOption: ClusterOption{MaxSlotWait: -1}},
+			&ClientOption{InitAddress: []string{":0"}},
 			func(dst string, opt *ClientOption) conn { return m },
 			newRetryer(defaultRetryDelayFn),
 		)
@@ -4241,8 +4239,7 @@ func TestClusterClientErr(t *testing.T) {
 			return singleSlotResp
 		}}
 		client, err := newClusterClient(
-			// without the default wait for the slot to get a node, so that ErrNoSlot comes after one refresh
-			&ClientOption{InitAddress: []string{":0"}, ClusterOption: ClusterOption{MaxSlotWait: -1}},
+			&ClientOption{InitAddress: []string{":0"}},
 			func(dst string, opt *ClientOption) conn { return m },
 			newRetryer(defaultRetryDelayFn),
 		)
@@ -12837,7 +12834,7 @@ func TestClusterClientRedirectToExistingConn(t *testing.T) {
 	})
 }
 
-// Tests for the topology refresh options: ClusterOption.MinRefreshInterval and MaxSlotWait.
+// Tests for the topology refresh options: ClusterOption.MinRefreshInterval and MaxRefreshDelay.
 
 // swNode is a node in a CLUSTER SHARDS reply built by swShardsReply.
 type swNode struct {
@@ -12919,10 +12916,6 @@ var (
 		{from: 0, to: 8191, nodes: []swNode{swPrimary(swAddr1)}},
 		{from: 8192, to: 16383, nodes: []swNode{{addr: swAddr2, role: "master", health: "fail"}, swReplica(swAddr3)}},
 	}
-	swPromoted = []swShard{
-		{from: 0, to: 8191, nodes: []swNode{swPrimary(swAddr1)}},
-		{from: 8192, to: 16383, nodes: []swNode{swPrimary(swAddr3)}},
-	}
 	swPresentKey = swKeysInSlots(1, 0, 8191)[0]
 	swMissingKey = swKeysInSlots(1, 8192, 16383)[0]
 )
@@ -12931,37 +12924,13 @@ var (
 // address of the node that served them, or with MOVED when redirect is set and that node is not the primary
 // of the command's slot.
 type swCluster struct {
-	shardsErr error         // CLUSTER SHARDS fails with it when set
-	hold      chan struct{} // CLUSTER SHARDS blocks until it is closed when set
 	topology  ValkeyResult
 	shards    []swShard
 	refreshes []time.Time     // when each CLUSTER SHARDS was received
 	down      map[string]bool // commands to these nodes fail as if their connection could not be dialed
-	hung      map[string]bool // commands to these nodes get no reply until their deadline, as from a frozen node
-	hungCalls int             // commands received by hung nodes
 	moved     int             // MOVED replies sent
 	redirect  bool            // when set, a node answers commands for the slots of another primary with MOVED
 	mu        sync.Mutex
-}
-
-// swHangFor is how long a command to a hung node takes to fail with context.DeadlineExceeded. Tests give such
-// commands a shorter deadline.
-const swHangFor = 50 * time.Millisecond
-
-// setHung makes commands to addr get no reply until their deadline, as if the node had frozen, or served again.
-func (m *swCluster) setHung(addr string, hung bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.hung == nil {
-		m.hung = map[string]bool{}
-	}
-	m.hung[addr] = hung
-}
-
-func (m *swCluster) hungCallCount() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.hungCalls
 }
 
 // setDown makes commands to addr fail as if the node had crashed, or serve again.
@@ -13007,29 +12976,6 @@ func swPrimaryOf(shards []swShard, slot uint16) string {
 	return ""
 }
 
-func (m *swCluster) setShardsErr(err error) {
-	m.mu.Lock()
-	m.shardsErr = err
-	m.mu.Unlock()
-}
-
-// holdShards makes CLUSTER SHARDS block until release is called.
-func (m *swCluster) holdShards() (release func()) {
-	ch := make(chan struct{})
-	m.mu.Lock()
-	m.hold = ch
-	m.mu.Unlock()
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			m.mu.Lock()
-			m.hold = nil
-			m.mu.Unlock()
-			close(ch)
-		})
-	}
-}
-
 func (m *swCluster) refreshTimes() []time.Time {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -13045,12 +12991,6 @@ func (m *swCluster) refreshCount() int {
 func (m *swCluster) do(addr string, cmd Completed) ValkeyResult {
 	if !swIsClusterShards(cmd) {
 		m.mu.Lock()
-		if m.hung[addr] {
-			m.hungCalls++
-			m.mu.Unlock()
-			time.Sleep(swHangFor)
-			return NewErrorResult(context.DeadlineExceeded)
-		}
 		defer m.mu.Unlock()
 		if m.down[addr] {
 			return NewErrorResult(&net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")})
@@ -13065,14 +13005,8 @@ func (m *swCluster) do(addr string, cmd Completed) ValkeyResult {
 	}
 	m.mu.Lock()
 	m.refreshes = append(m.refreshes, time.Now())
-	hold, err, topology := m.hold, m.shardsErr, m.topology
+	topology := m.topology
 	m.mu.Unlock()
-	if hold != nil {
-		<-hold
-	}
-	if err != nil {
-		return NewErrorResult(err)
-	}
 	return topology
 }
 
@@ -13167,46 +13101,20 @@ func TestClusterRefreshDefaults(t *testing.T) {
 			name     string
 			opt      ClusterOption
 			interval time.Duration
-			wait     time.Duration
 		}{
-			{name: "zero", interval: 250 * time.Millisecond, wait: 3 * time.Second},
-			{name: "set", opt: ClusterOption{MinRefreshInterval: 70 * time.Millisecond, MaxSlotWait: 7 * time.Second}, interval: 70 * time.Millisecond, wait: 7 * time.Second},
-			{name: "negative", opt: ClusterOption{MinRefreshInterval: -1, MaxSlotWait: -1}, interval: 0, wait: 0},
+			{name: "zero", interval: 250 * time.Millisecond},
+			{name: "set", opt: ClusterOption{MinRefreshInterval: 70 * time.Millisecond}, interval: 70 * time.Millisecond},
+			{name: "negative", opt: ClusterOption{MinRefreshInterval: -1}, interval: 0},
 		} {
 			c := withNodes(6, tc.opt)
 			if got := c.refreshInterval(); got != tc.interval {
 				t.Errorf("%s: refreshInterval() = %v, want %v", tc.name, got, tc.interval)
 			}
-			if got := c.slotWait(); got != tc.wait {
-				t.Errorf("%s: slotWait() = %v, want %v", tc.name, got, tc.wait)
-			}
-		}
-	})
-	t.Run("gap of the waiting requests", func(t *testing.T) {
-		for _, tc := range []struct {
-			name    string
-			c       *clusterClient
-			elapsed time.Duration
-			want    time.Duration
-		}{
-			{name: "small cluster, promotion window", c: withNodes(6, ClusterOption{}), elapsed: 0, want: 50 * time.Millisecond},
-			{name: "small cluster, end of the window", c: withNodes(6, ClusterOption{}), elapsed: 1999 * time.Millisecond, want: 50 * time.Millisecond},
-			{name: "small cluster, after 2s", c: withNodes(6, ClusterOption{}), elapsed: 2 * time.Second, want: 100 * time.Millisecond},
-			{name: "small cluster, after 4s", c: withNodes(6, ClusterOption{}), elapsed: 4 * time.Second, want: 200 * time.Millisecond},
-			{name: "small cluster, after 6s", c: withNodes(6, ClusterOption{}), elapsed: 6 * time.Second, want: 250 * time.Millisecond},
-			{name: "1000 nodes, promotion window", c: withNodes(1000, ClusterOption{}), elapsed: 0, want: 200 * time.Millisecond},
-			{name: "1000 nodes, after 6s", c: withNodes(1000, ClusterOption{}), elapsed: 6 * time.Second, want: time.Second},
-			{name: "interval set", c: withNodes(6, ClusterOption{MinRefreshInterval: 70 * time.Millisecond}), elapsed: 0, want: 70 * time.Millisecond},
-			{name: "no interval", c: withNodes(6, ClusterOption{MinRefreshInterval: -1}), elapsed: 0, want: slotWaitMinGap},
-		} {
-			if got := tc.c.slotWaitGap(tc.elapsed); got != tc.want {
-				t.Errorf("%s: slotWaitGap(%v) = %v, want %v", tc.name, tc.elapsed, got, tc.want)
-			}
 		}
 	})
 	t.Run("negative values are accepted", func(t *testing.T) {
 		m := newSWCluster(swHealthy)
-		client := newSWClient(t, m, ClusterOption{MinRefreshInterval: -1, MaxSlotWait: -1})
+		client := newSWClient(t, m, ClusterOption{MinRefreshInterval: -1, MaxRefreshDelay: -1})
 		if v, _, err := swGet(context.Background(), client, swPresentKey); err != nil || v != swAddr1 {
 			t.Fatalf("got (%q, %v), want (%q, nil)", v, err, swAddr1)
 		}
@@ -13276,61 +13184,6 @@ func TestClusterErrorRefresh(t *testing.T) {
 	}
 }
 
-// A hung primary, frozen or cut off, closes no connection and sends no MOVED: the requests sent to it only reach
-// their deadline. Such a request is not retried, and it schedules a lazy refresh, within MaxRefreshDelay, 250ms by
-// default in small clusters, so that the client finds the replacement once the cluster has failed the node over.
-func TestClusterDeadlineRefreshesLazily(t *testing.T) {
-	defer ShouldNotLeak(SetupLeakDetection())
-	for _, tc := range []struct {
-		name     string
-		opt      ClusterOption
-		maxDelay time.Duration
-	}{
-		{name: "default delay", maxDelay: 250 * time.Millisecond},
-		{name: "MaxRefreshDelay", opt: ClusterOption{MaxRefreshDelay: 20 * time.Millisecond}, maxDelay: 20 * time.Millisecond},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			m := newSWCluster(swHealthy)
-			client := newSWClient(t, m, tc.opt)
-			time.Sleep(client.refreshInterval()) // so that the refresh is not held back by the initial one
-			m.setHung(swAddr2, true)
-			m.setTopology(swPromoted) // the cluster has failed the hung node over
-			took := swRefreshAfter(t, m, func() {
-				ctx, cancel := context.WithTimeout(context.Background(), swHangFor/2)
-				defer cancel()
-				if _, _, err := swGet(ctx, client, swMissingKey); !errors.Is(err, context.DeadlineExceeded) {
-					t.Errorf("got %v, want context.DeadlineExceeded", err)
-				}
-			})
-			swCheckWithin(t, "the refresh after the deadline", took, swHangFor, swHangFor+tc.maxDelay+swSlack)
-			if n := m.hungCallCount(); n != 1 {
-				t.Fatalf("the hung node got %d requests, want 1: a request past its deadline is not retried", n)
-			}
-			for client.sc.suppressing() != 0 { // let the refresh finish
-				time.Sleep(time.Millisecond)
-			}
-			if v, _, err := swGet(context.Background(), client, swMissingKey); err != nil || v != swAddr3 {
-				t.Fatalf("got (%q, %v), want (%q, nil) from the replacement", v, err, swAddr3)
-			}
-		})
-	}
-}
-
-// swRefreshAfter runs trigger and returns how long the next refresh took to start.
-func swRefreshAfter(t *testing.T, m *swCluster, trigger func()) time.Duration {
-	t.Helper()
-	before := m.refreshCount()
-	start := time.Now()
-	trigger()
-	for end := start.Add(3 * time.Second); m.refreshCount() == before; {
-		if time.Now().After(end) {
-			t.Fatal("no refresh")
-		}
-		time.Sleep(time.Millisecond)
-	}
-	return m.refreshTimes()[before].Sub(start)
-}
-
 // A ShardsRefreshInterval tick starts a lazy refresh whose random delay stays within the interval, so that the
 // client refreshes about once per interval also when the delay of a lazy refresh is longer, as in large clusters.
 func TestClusterPeriodicRefreshFollowsInterval(t *testing.T) {
@@ -13349,259 +13202,10 @@ func TestClusterPeriodicRefreshFollowsInterval(t *testing.T) {
 	}
 }
 
-// In a crash, requests fail on the dead primary and keep a lazy refresh scheduled. Once the cluster flags the
-// primary as failed, requests wait for their slot, and that scheduled refresh runs at their shorter gap, so the
-// client looks for the promotion every 50ms instead of every refresh interval.
-func TestClusterCrashLooksForPromotionOften(t *testing.T) {
-	defer ShouldNotLeak(SetupLeakDetection())
-	const (
-		failAfter    = 400 * time.Millisecond // the cluster flags the primary as failed
-		promoteAfter = 900 * time.Millisecond // and promotes its replica
-	)
-	m := newSWCluster(swHealthy)
-	client := newSWClient(t, m, ClusterOption{})
-	time.Sleep(client.refreshInterval())
-	m.setDown(swAddr2, true)
-	start := time.Now()
-	var failed, promoted atomic.Int64
-	fail := time.AfterFunc(failAfter, func() { m.setTopology(swFailingOver); failed.Store(time.Now().UnixNano()) })
-	defer fail.Stop()
-	promote := time.AfterFunc(promoteAfter, func() { m.setTopology(swPromoted); promoted.Store(time.Now().UnixNano()) })
-	defer promote.Stop()
-
-	var wg sync.WaitGroup
-	var firstOK atomic.Int64
-	for g := 0; g < 10; g++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for time.Since(start) < promoteAfter+time.Second && firstOK.Load() == 0 {
-				ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-				v, _, err := swGet(ctx, client, swMissingKey)
-				cancel()
-				if err == nil && v == swAddr3 {
-					firstOK.CompareAndSwap(0, time.Now().UnixNano())
-				}
-				if err != nil {
-					time.Sleep(time.Millisecond)
-				}
-			}
-		}()
-	}
-	wg.Wait()
-	if firstOK.Load() == 0 {
-		t.Fatal("no request reached the promoted replica")
-	}
-	swCheckWithin(t, "the first success after the promotion", time.Duration(firstOK.Load()-promoted.Load()), 0, minPromotionGap+swSlack)
-	inWindow := 0
-	for _, ts := range m.refreshTimes() {
-		if n := ts.UnixNano(); n >= failed.Load() && n < promoted.Load() {
-			inWindow++
-		}
-	}
-	if want := int((promoteAfter - failAfter) / (4 * minPromotionGap)); inWindow < want {
-		t.Fatalf("got %d refreshes while the shard had no primary, want at least %d: about one per %v", inWindow, want, minPromotionGap)
-	}
-	for client.sc.suppressing() != 0 { // let the last refresh finish
-		time.Sleep(time.Millisecond)
-	}
-}
-
 // swDelayedRefresh schedules a lazy refresh with a delay far longer than any test, as a periodic tick or a MOVED
 // does with the random delay of up to 30s of a cluster of 1000 nodes. The test must expedite it.
 func swDelayedRefresh(client *clusterClient) {
 	client.sc.DelayDo(time.Hour, client._lazyRefresh)
-}
-
-// Requests that wait for a slot make a lazy refresh in its random delay run now, at their shorter gap, instead
-// of waiting for it until MaxSlotWait ends.
-func TestClusterSlotWaitExpeditesDelayedRefresh(t *testing.T) {
-	defer ShouldNotLeak(SetupLeakDetection())
-	m := newSWCluster(swFailingOver)
-	client := newSWClient(t, m, ClusterOption{})
-	time.Sleep(client.refreshInterval()) // so that the refresh is not held back by the initial one
-	swDelayedRefresh(client)
-	m.setTopology(swPromoted)
-	start := time.Now()
-	if v, _, err := swGet(context.Background(), client, swMissingKey); err != nil || v != swAddr3 {
-		t.Fatalf("got (%q, %v), want (%q, nil) from the promoted replica", v, err, swAddr3)
-	}
-	swCheckWithin(t, "the request", time.Since(start), 0, swSlack)
-	if n := m.refreshCount(); n != 2 {
-		t.Fatalf("got %d refreshes, want 2: the initial one and the expedited one", n)
-	}
-	for client.sc.suppressing() != 0 { // let the refresh finish
-		time.Sleep(time.Millisecond)
-	}
-}
-
-// ShardsRefreshInterval schedules lazy refreshes, with a random delay. While requests wait for
-// a slot, its ticks are skipped, so that such a refresh does not hold back the refreshes of the waiting requests.
-func TestClusterSlotWaitSkipsPeriodicRefresh(t *testing.T) {
-	defer ShouldNotLeak(SetupLeakDetection())
-	m := newSWCluster(swFailingOver)
-	client := newSWClient(t, m, ClusterOption{ShardsRefreshInterval: 20 * time.Millisecond})
-	const promoteAfter = 600 * time.Millisecond
-	promote := time.AfterFunc(promoteAfter, func() { m.setTopology(swPromoted) })
-	defer promote.Stop()
-	start := time.Now()
-	if v, _, err := swGet(context.Background(), client, swMissingKey); err != nil || v != swAddr3 {
-		t.Fatalf("got (%q, %v), want (%q, nil) from the promoted replica", v, err, swAddr3)
-	}
-	swCheckWithin(t, "the request", time.Since(start), promoteAfter, promoteAfter+minPromotionGap+swSlack)
-	client.Close() // stops the periodic refreshes before the leak check
-	for client.sc.suppressing() != 0 {
-		time.Sleep(time.Millisecond)
-	}
-}
-
-// With negative values, a request for a slot without a node refreshes once and fails with ErrNoSlot, as before.
-func TestClusterSlotWaitTurnedOffFailsFast(t *testing.T) {
-	defer ShouldNotLeak(SetupLeakDetection())
-	m := newSWCluster(swFailingOver)
-	client := newSWClient(t, m, ClusterOption{MinRefreshInterval: -1, MaxSlotWait: -1})
-	ctx := context.Background()
-	b := client.B()
-	for _, tc := range []struct {
-		do   func() error
-		name string
-	}{
-		{name: "Do", do: func() error { return client.Do(ctx, b.Get().Key(swMissingKey).Build()).Error() }},
-		{name: "DoCache", do: func() error { return client.DoCache(ctx, b.Get().Key(swMissingKey).Cache(), time.Minute).Error() }},
-		{name: "DoMulti", do: func() error {
-			return client.DoMulti(ctx, b.Get().Key(swPresentKey).Build(), b.Get().Key(swMissingKey).Build())[1].Error()
-		}},
-		{name: "DoMultiCache", do: func() error {
-			return client.DoMultiCache(ctx, CT(b.Get().Key(swPresentKey).Cache(), time.Minute), CT(b.Get().Key(swMissingKey).Cache(), time.Minute))[1].Error()
-		}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			for i := 0; i < 3; i++ {
-				before := m.refreshCount()
-				start := time.Now()
-				if err := tc.do(); err != ErrNoSlot {
-					t.Fatalf("got %v, want ErrNoSlot", err)
-				}
-				swCheckWithin(t, "failing", time.Since(start), 0, swSlack)
-				if n := m.refreshCount() - before; n != 1 {
-					t.Fatalf("got %d refreshes, want 1", n)
-				}
-			}
-		})
-	}
-	if v, _, err := swGet(ctx, client, swPresentKey); err != nil || v != swAddr1 {
-		t.Fatalf("got (%q, %v) for a slot with a node, want (%q, nil)", v, err, swAddr1)
-	}
-}
-
-func TestClusterSlotWaitMinRefreshInterval(t *testing.T) {
-	defer ShouldNotLeak(SetupLeakDetection())
-	const interval = 100 * time.Millisecond
-
-	// hammer sends GETs for a slot without a node from 200 goroutines for d, and counts the results.
-	hammer := func(client *clusterClient, d time.Duration) (noSlot, other int64) {
-		var wg sync.WaitGroup
-		end := time.Now().Add(d)
-		for i := 0; i < 200; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for time.Now().Before(end) {
-					if _, _, err := swGet(context.Background(), client, swMissingKey); err == ErrNoSlot {
-						atomic.AddInt64(&noSlot, 1)
-					} else {
-						atomic.AddInt64(&other, 1)
-					}
-				}
-			}()
-		}
-		wg.Wait()
-		return noSlot, other
-	}
-
-	t.Run("concurrent requests refresh at most once per interval and still fail fast", func(t *testing.T) {
-		m := newSWCluster(swFailingOver)
-		client := newSWClient(t, m, ClusterOption{MinRefreshInterval: interval})
-		noSlot, other := hammer(client, 550*time.Millisecond)
-		if noSlot == 0 || other != 0 {
-			t.Fatalf("got %d ErrNoSlot and %d other results, want only ErrNoSlot", noSlot, other)
-		}
-		times := m.refreshTimes()
-		swCheckSpacing(t, times, interval)
-		if len(times) < 4 { // the initial refresh and at least 3 more in 550ms
-			t.Fatalf("got %d refreshes, want at least 4", len(times))
-		}
-		t.Logf("%d requests, %d refreshes", noSlot, len(times))
-	})
-
-	t.Run("without it the same requests refresh far more often", func(t *testing.T) {
-		m := newSWCluster(swFailingOver)
-		client := newSWClient(t, m, ClusterOption{MinRefreshInterval: -1, MaxSlotWait: -1})
-		noSlot, _ := hammer(client, 300*time.Millisecond)
-		if n := m.refreshCount(); n < 50 {
-			t.Fatalf("got %d refreshes, want many more than one per %v", n, interval)
-		}
-		t.Logf("%d requests, %d refreshes", noSlot, m.refreshCount())
-	})
-
-	t.Run("concurrent waiting requests refresh at most once per interval", func(t *testing.T) {
-		m := newSWCluster(swFailingOver)
-		client := newSWClient(t, m, ClusterOption{MinRefreshInterval: interval, MaxSlotWait: 450 * time.Millisecond})
-		var wg sync.WaitGroup
-		for i := 0; i < 200; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				if _, _, err := swGet(context.Background(), client, swMissingKey); err != ErrNoSlot {
-					t.Errorf("got %v, want ErrNoSlot after MaxSlotWait", err)
-				}
-			}()
-		}
-		wg.Wait()
-		times := m.refreshTimes()
-		swCheckSpacing(t, times, interval)
-		if len(times) < 4 {
-			t.Fatalf("got %d refreshes, want at least 4", len(times))
-		}
-	})
-
-	t.Run("a paced refresh within the interval returns at once and does not join a pending lazy refresh", func(t *testing.T) {
-		m := newSWCluster(swHealthy)
-		client := newSWClient(t, m, ClusterOption{MinRefreshInterval: 300 * time.Millisecond})
-		client.lazyRefresh() // pending for at least the rest of the interval
-		start := time.Now()
-		if err := client.pacedRefresh(context.Background()); err != nil {
-			t.Fatalf("refresh: %v", err)
-		}
-		swCheckWithin(t, "refresh", time.Since(start), 0, 50*time.Millisecond)
-		if n := m.refreshCount(); n != 1 {
-			t.Fatalf("got %d refreshes, want only the initial one", n)
-		}
-		// lazyRefresh waits for the interval.
-		for deadline := time.Now().Add(3 * time.Second); m.refreshCount() < 2 && time.Now().Before(deadline); {
-			time.Sleep(5 * time.Millisecond)
-		}
-		times := m.refreshTimes()
-		if len(times) != 2 {
-			t.Fatalf("got %d refreshes, want the lazy refresh too", len(times))
-		}
-		swCheckSpacing(t, times, 300*time.Millisecond)
-		for client.sc.suppressing() != 0 { // let the lazy refresh finish
-			time.Sleep(time.Millisecond)
-		}
-	})
-
-	t.Run("a paced refresh after the interval refreshes", func(t *testing.T) {
-		m := newSWCluster(swHealthy)
-		client := newSWClient(t, m, ClusterOption{MinRefreshInterval: interval})
-		time.Sleep(interval)
-		if err := client.pacedRefresh(context.Background()); err != nil {
-			t.Fatalf("refresh: %v", err)
-		}
-		if n := m.refreshCount(); n != 2 {
-			t.Fatalf("got %d refreshes, want 2", n)
-		}
-	})
 }
 
 // swWaitRefreshes waits until m has received n refreshes.
@@ -13654,204 +13258,6 @@ func TestClusterLazyRefreshMinRefreshInterval(t *testing.T) {
 	})
 }
 
-func TestClusterSlotWaitResumesWhenSlotAppears(t *testing.T) {
-	defer ShouldNotLeak(SetupLeakDetection())
-	const promoteAfter = 300 * time.Millisecond
-	for _, tc := range []struct {
-		name     string
-		interval time.Duration
-	}{
-		{name: "without MinRefreshInterval", interval: 0},
-		{name: "refreshes limited by MinRefreshInterval", interval: 100 * time.Millisecond},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			m := newSWCluster(swFailingOver)
-			client := newSWClient(t, m, ClusterOption{MinRefreshInterval: tc.interval, MaxSlotWait: 3 * time.Second})
-			promote := time.AfterFunc(promoteAfter, func() { m.setTopology(swPromoted) })
-			defer promote.Stop()
-			v, took, err := swGet(context.Background(), client, swMissingKey)
-			if err != nil || v != swAddr3 {
-				t.Fatalf("got (%q, %v), want (%q, nil) from the promoted replica", v, err, swAddr3)
-			}
-			// Found by the first refresh after the promotion: within slotWaitMinGap, or one MinRefreshInterval.
-			swCheckWithin(t, "the request", took, promoteAfter, promoteAfter+tc.interval+slotWaitMinGap+swSlack)
-			if tc.interval > 0 {
-				swCheckSpacing(t, m.refreshTimes(), tc.interval)
-			}
-		})
-	}
-
-	// A waiting request wakes up when any refresh finishes, not only those it starts itself.
-	t.Run("woken by a refresh it did not start", func(t *testing.T) {
-		m := newSWCluster(swFailingOver)
-		// The initial refresh has just finished, so the request starts none of its own for a second.
-		client := newSWClient(t, m, ClusterOption{MinRefreshInterval: time.Second, MaxSlotWait: 3 * time.Second})
-		other := time.AfterFunc(promoteAfter, func() {
-			m.setTopology(swPromoted)
-			client.sc.DelayDo(0, client._refresh) // such as a refresh that ShardsRefreshInterval starts
-		})
-		defer other.Stop()
-		v, took, err := swGet(context.Background(), client, swMissingKey)
-		if err != nil || v != swAddr3 {
-			t.Fatalf("got (%q, %v), want (%q, nil) from the promoted replica", v, err, swAddr3)
-		}
-		swCheckWithin(t, "the request", took, promoteAfter, promoteAfter+swSlack)
-		if n := m.refreshCount(); n != 2 {
-			t.Fatalf("got %d refreshes, want the initial one and the other one", n)
-		}
-	})
-}
-
-func TestClusterSlotWaitGivesUpAfterMaxSlotWait(t *testing.T) {
-	defer ShouldNotLeak(SetupLeakDetection())
-	const maxWait = 200 * time.Millisecond
-
-	t.Run("ErrNoSlot", func(t *testing.T) {
-		m := newSWCluster(swFailingOver)
-		client := newSWClient(t, m, ClusterOption{MaxSlotWait: maxWait})
-		_, took, err := swGet(context.Background(), client, swMissingKey)
-		if err != ErrNoSlot {
-			t.Fatalf("got %v, want ErrNoSlot", err)
-		}
-		swCheckWithin(t, "the request", took, maxWait, maxWait+swSlack)
-	})
-
-	t.Run("last refresh error", func(t *testing.T) {
-		m := newSWCluster(swFailingOver)
-		client := newSWClient(t, m, ClusterOption{MaxSlotWait: maxWait})
-		refreshErr := errors.New("refresh failed")
-		m.setShardsErr(refreshErr)
-		_, took, err := swGet(context.Background(), client, swMissingKey)
-		if err != refreshErr {
-			t.Fatalf("got %v, want %v", err, refreshErr)
-		}
-		swCheckWithin(t, "the request", took, maxWait, maxWait+swSlack)
-	})
-
-	t.Run("last refresh error survives the wait for the next refresh", func(t *testing.T) {
-		m := newSWCluster(swFailingOver)
-		client := newSWClient(t, m, ClusterOption{MinRefreshInterval: time.Second, MaxSlotWait: maxWait})
-		time.Sleep(time.Second) // the next refresh is allowed
-		refreshErr := errors.New("refresh failed")
-		m.setShardsErr(refreshErr)
-		_, took, err := swGet(context.Background(), client, swMissingKey)
-		if err != refreshErr {
-			t.Fatalf("got %v, want %v", err, refreshErr)
-		}
-		swCheckWithin(t, "the request", took, maxWait, maxWait+swSlack)
-		if n := m.refreshCount(); n != 2 {
-			t.Fatalf("got %d refreshes, want 2", n)
-		}
-	})
-}
-
-func TestClusterSlotWaitHonorsContext(t *testing.T) {
-	defer ShouldNotLeak(SetupLeakDetection())
-	const timeout = 100 * time.Millisecond
-
-	// The context deadline, cancel and Close timers below start before swGet's own clock, so these
-	// subtests measure from before the timer starts: swGet's duration can be a little shorter than timeout.
-	t.Run("deadline", func(t *testing.T) {
-		m := newSWCluster(swFailingOver)
-		client := newSWClient(t, m, ClusterOption{MinRefreshInterval: 50 * time.Millisecond, MaxSlotWait: 5 * time.Second})
-		start := time.Now()
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-		_, _, err := swGet(ctx, client, swMissingKey)
-		took := time.Since(start)
-		if err != context.DeadlineExceeded {
-			t.Fatalf("got %v, want context.DeadlineExceeded", err)
-		}
-		swCheckWithin(t, "the request", took, timeout, timeout+swSlack)
-	})
-
-	t.Run("cancel", func(t *testing.T) {
-		m := newSWCluster(swFailingOver)
-		client := newSWClient(t, m, ClusterOption{MaxSlotWait: 5 * time.Second})
-		ctx, cancel := context.WithCancel(context.Background())
-		start := time.Now()
-		stop := time.AfterFunc(timeout, cancel)
-		defer stop.Stop()
-		_, _, err := swGet(ctx, client, swMissingKey)
-		took := time.Since(start)
-		if err != context.Canceled {
-			t.Fatalf("got %v, want context.Canceled", err)
-		}
-		swCheckWithin(t, "the request", took, timeout, timeout+swSlack)
-	})
-
-	t.Run("deadline while the refresh it started hangs", func(t *testing.T) {
-		m := newSWCluster(swFailingOver)
-		client := newSWClient(t, m, ClusterOption{MaxSlotWait: 5 * time.Second})
-		release := m.holdShards()
-		defer release()
-		start := time.Now()
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-		_, _, err := swGet(ctx, client, swMissingKey)
-		took := time.Since(start)
-		if err != context.DeadlineExceeded {
-			t.Fatalf("got %v, want context.DeadlineExceeded", err)
-		}
-		swCheckWithin(t, "the request", took, timeout, timeout+swSlack)
-		release()
-		for client.sc.suppressing() != 0 { // let the refresh finish
-			time.Sleep(time.Millisecond)
-		}
-	})
-
-	t.Run("MaxSlotWait while the refresh hangs", func(t *testing.T) {
-		m := newSWCluster(swFailingOver)
-		client := newSWClient(t, m, ClusterOption{MaxSlotWait: timeout})
-		release := m.holdShards()
-		defer release()
-		_, took, err := swGet(context.Background(), client, swMissingKey)
-		if err != ErrNoSlot {
-			t.Fatalf("got %v, want ErrNoSlot", err)
-		}
-		swCheckWithin(t, "the request", took, timeout, timeout+swSlack)
-		release()
-		for client.sc.suppressing() != 0 {
-			time.Sleep(time.Millisecond)
-		}
-	})
-
-	t.Run("client closed", func(t *testing.T) {
-		m := newSWCluster(swFailingOver)
-		client := newSWClient(t, m, ClusterOption{MaxSlotWait: 5 * time.Second})
-		start := time.Now()
-		closing := time.AfterFunc(timeout, client.Close)
-		defer closing.Stop()
-		_, _, err := swGet(context.Background(), client, swMissingKey)
-		took := time.Since(start)
-		if err != ErrClosing {
-			t.Fatalf("got %v, want ErrClosing", err)
-		}
-		swCheckWithin(t, "the request", took, timeout, timeout+swSlack)
-	})
-
-	// Close ends the wait at once, even while the refresh hangs.
-	t.Run("client closed while the refresh hangs", func(t *testing.T) {
-		m := newSWCluster(swFailingOver)
-		client := newSWClient(t, m, ClusterOption{MaxSlotWait: 5 * time.Second})
-		release := m.holdShards()
-		defer release()
-		start := time.Now()
-		closing := time.AfterFunc(timeout, client.Close)
-		defer closing.Stop()
-		_, _, err := swGet(context.Background(), client, swMissingKey)
-		took := time.Since(start)
-		if err != ErrClosing {
-			t.Fatalf("got %v, want ErrClosing", err)
-		}
-		swCheckWithin(t, "the request", took, timeout, timeout+swSlack)
-		release()
-		for client.sc.suppressing() != 0 {
-			time.Sleep(time.Millisecond)
-		}
-	})
-}
-
 // An idle client sends no commands while the cluster changes, so its slot map is stale when it resumes. Here
 // a planned failover made the replica of the second shard its primary while the client was idle. The first
 // command for one of its slots is redirected with MOVED, which routes that slot to the new primary and
@@ -13877,7 +13283,7 @@ func TestClusterClientResumeAfterIdle(t *testing.T) {
 		}
 	}
 
-	// With the default delay of up to 1s, each slot is redirected at most once until the refresh.
+	// With the default delay of up to 250ms, each slot is redirected at most once until the refresh.
 	t.Run("default delay", func(t *testing.T) {
 		m := newSWCluster(swHealthy)
 		m.redirect = true
@@ -13898,8 +13304,9 @@ func TestClusterClientResumeAfterIdle(t *testing.T) {
 // TestClusterFailoverScenarios runs every command path from concurrent goroutines through a crash, a crash
 // with the promotion held, a planned failover and a slot migration, with the refresh options at their defaults
 // and with short values. It checks that no command outlives its context, that the errors are the expected
-// ones, that the commands sent after the cluster settles succeed, and, with the options, that no command
-// fails with ErrNoSlot and that the refreshes stay paced.
+// ones, that the commands sent after the cluster settles succeed, and, with the options, that the refreshes stay
+// paced while every shard has a primary. While a shard has no primary, a request for one of its slots refreshes
+// and fails with ErrNoSlot, as before.
 func TestClusterFailoverScenarios(t *testing.T) {
 	defer ShouldNotLeak(SetupLeakDetection())
 	const (
@@ -13924,16 +13331,17 @@ func TestClusterFailoverScenarios(t *testing.T) {
 		do func(m *swCluster)
 	}
 	scenarios := []struct {
-		name    string
-		settled time.Duration // when the last step happens
-		steps   []step
+		name      string
+		settled   time.Duration // when the last step happens
+		steps     []step
+		noPrimary bool // a shard has no online primary for a while
 	}{
-		{name: "crash", settled: 500 * time.Millisecond, steps: []step{
+		{name: "crash", settled: 500 * time.Millisecond, noPrimary: true, steps: []step{
 			{100 * time.Millisecond, func(m *swCluster) { m.setDown(swAddr2, true) }},
 			{300 * time.Millisecond, func(m *swCluster) { m.setTopology(swFailingOver) }},
 			{500 * time.Millisecond, func(m *swCluster) { m.setTopology(promoted) }},
 		}},
-		{name: "promotion held", settled: 900 * time.Millisecond, steps: []step{
+		{name: "promotion held", settled: 900 * time.Millisecond, noPrimary: true, steps: []step{
 			{100 * time.Millisecond, func(m *swCluster) { m.setDown(swAddr2, true) }},
 			{150 * time.Millisecond, func(m *swCluster) { m.setTopology(swFailingOver) }},
 			{900 * time.Millisecond, func(m *swCluster) { m.setTopology(promoted) }},
@@ -13950,11 +13358,11 @@ func TestClusterFailoverScenarios(t *testing.T) {
 		opt    ClusterOption
 		settle time.Duration // how long after the last step every command must succeed
 	}{
-		// a refresh after an error within 125ms, then every 250ms, and every 50ms while the shard has no primary
+		// a refresh after an error within 125ms, then every 250ms
 		{name: "defaults", settle: 600 * time.Millisecond},
-		// as before: no limit and no wait, and the lazy refreshes after their random delay of up to 1s
-		{name: "turned off", opt: ClusterOption{MinRefreshInterval: -1, MaxSlotWait: -1, MaxRefreshDelay: -1}, settle: time.Second + 100*time.Millisecond},
-		{name: "options", opt: ClusterOption{MinRefreshInterval: 50 * time.Millisecond, MaxSlotWait: time.Second}, settle: 600 * time.Millisecond},
+		// as before: no limit, and the lazy refreshes after their random delay of up to 1s
+		{name: "turned off", opt: ClusterOption{MinRefreshInterval: -1, MaxRefreshDelay: -1}, settle: time.Second + 100*time.Millisecond},
+		{name: "options", opt: ClusterOption{MinRefreshInterval: 50 * time.Millisecond}, settle: 600 * time.Millisecond},
 	}
 	affected := swKeysInSlots(20, 8192, 16383)
 	healthy := swKeysInSlots(5, 0, 8191)
@@ -14035,17 +13443,12 @@ func TestClusterFailoverScenarios(t *testing.T) {
 				for _, l := range late {
 					t.Errorf("failed after the cluster settled: %s", l)
 				}
-				if v.opt.MaxSlotWait >= 0 { // the wait is on
-					for k, n := range failures {
-						if strings.Contains(k, ErrNoSlot.Error()) {
-							t.Errorf("%d failures with ErrNoSlot despite MaxSlotWait: %s", n, k)
-						}
-					}
-				}
-				if v.opt.MinRefreshInterval >= 0 { // the refreshes are spaced: by the interval set, or by the promotion gap
-					iv := minPromotionGap
-					if v.opt.MinRefreshInterval > 0 {
-						iv = v.opt.MinRefreshInterval
+				// The refreshes the client schedules are spaced by the interval. The requests for a shard without a
+				// primary refresh on their own, as before, so the scenarios with such a shard are not checked.
+				if v.opt.MinRefreshInterval >= 0 && !sc.noPrimary {
+					iv := v.opt.MinRefreshInterval
+					if iv == 0 {
+						iv = client.refreshInterval()
 					}
 					times := m.refreshTimes()
 					swCheckSpacing(t, times, iv)

@@ -38,9 +38,6 @@ type clusterClient struct {
 	cmd          Builder
 	retry        bool
 	hasLftm      bool
-	waitMu       sync.Mutex
-	waitStart    time.Time // when the first of the requests waiting in waitSlots now started; guarded by waitMu
-	waiters      int       // requests waiting in waitSlots; guarded by waitMu
 }
 
 // NOTE: connrole and conn must be initialized at the same time
@@ -158,34 +155,6 @@ func (c *clusterClient) refresh(ctx context.Context) (err error) {
 	return c.sc.Do(ctx, c._refresh)
 }
 
-// pacedRefresh is refresh for a request that finds no node for its slot and does not wait for one, with a
-// negative MaxSlotWait. It returns nil without refreshing when the last refresh finished less than
-// refreshInterval ago, and the caller re-reads the current slot map. It does not join a refresh in flight then
-// either, since one started by lazyRefresh may still be in its delay.
-func (c *clusterClient) pacedRefresh(ctx context.Context) error {
-	if c.refreshInterval() <= 0 {
-		return c.sc.Do(ctx, c._refresh)
-	}
-	if c.refreshIntervalLeft() > 0 {
-		return nil
-	}
-	return c.sc.Do(ctx, c._refreshIfDue)
-}
-
-// _refreshIfDue is the refresh started by pacedRefresh. It skips the refresh if another one finished less than
-// refreshInterval ago, after pacedRefresh checked the interval and before this one started.
-func (c *clusterClient) _refreshIfDue() error {
-	return c.refreshIfOlder(c.refreshInterval())
-}
-
-// refreshIfOlder refreshes the slot map unless another refresh finished less than gap ago.
-func (c *clusterClient) refreshIfOlder(gap time.Duration) error {
-	if c.sinceRefreshLeft(gap) > 0 {
-		return nil
-	}
-	return c._refresh()
-}
-
 func (c *clusterClient) lazyRefresh() {
 	c.sc.DelayDo(c.clusterRefreshStartDelay(), c._lazyRefresh)
 }
@@ -206,11 +175,9 @@ func (c *clusterClient) periodicRefresh() {
 // be reached, its connection broke, or the cluster answers CLUSTERDOWN or LOADING. waitRefresh uses it too, for
 // requests that keep being redirected. Instead of the long random delay of lazyRefresh, it waits a random delay of
 // up to half a refreshInterval, and refreshInterval spaces the refreshes, so while the errors continue the client
-// refreshes about once per interval. That is often enough to see the cluster flag the failed primary before it
-// promotes a replica, a few hundred milliseconds later, after which waitSlots looks for the promotion more often.
-// A lazy refresh already scheduled, whose random delay is up to 30s in large clusters, runs within the same half
-// interval instead. Without an interval, that is with a negative MinRefreshInterval, it is a lazy refresh, as
-// before.
+// refreshes about once per interval, until a refresh shows the change. A lazy refresh already scheduled, whose
+// random delay is up to 30s in large clusters, runs within the same half interval instead. Without an interval,
+// that is with a negative MinRefreshInterval, it is a lazy refresh, as before.
 func (c *clusterClient) errorRefresh() {
 	iv := c.refreshInterval()
 	if iv <= 0 {
@@ -223,23 +190,21 @@ func (c *clusterClient) errorRefresh() {
 		delay = time.Duration(util.FastRand(int(delay)))
 	}
 	c.sc.DelayDo(delay, c._lazyRefresh)
-	// The random delay spreads the refreshes of many clients that see the same failure. refreshGap still
+	// The random delay spreads the refreshes of many clients that see the same failure. _lazyRefresh still
 	// spaces the refresh from the previous one.
 	c.sc.Expedite(maxDelay)
 }
 
 // _lazyRefresh is the refresh that lazyRefresh and errorRefresh start after their random delay. It first waits
-// until refreshGap has passed since the last refresh finished. It checks this here, and not when the refresh is
-// scheduled, because a refresh in flight then may finish before this one is scheduled.
+// until refreshInterval has passed since the last refresh finished. It checks this here, and not when the refresh
+// is scheduled, because a refresh in flight then may finish before this one is scheduled.
 func (c *clusterClient) _lazyRefresh() error {
 	for {
-		left := c.sinceRefreshLeft(c.refreshGap())
+		left := c.sinceRefreshLeft(c.refreshInterval())
 		if left <= 0 {
 			return c._refresh()
 		}
-		// Look again at least every minPromotionGap: if requests start waiting for a slot in the meantime, the
-		// refresh is due sooner.
-		timer := time.NewTimer(min(left, minPromotionGap))
+		timer := time.NewTimer(left)
 		select {
 		case <-timer.C:
 		case <-c.stopCh:
@@ -249,57 +214,19 @@ func (c *clusterClient) _lazyRefresh() error {
 	}
 }
 
-// refreshGap returns the time that has to pass after a refresh before a lazy refresh runs: slotWaitGap while
-// requests wait for a slot without a node, so that they do not wait for a refresh paced for the other cases,
-// and refreshInterval otherwise.
-func (c *clusterClient) refreshGap() time.Duration {
-	c.waitMu.Lock()
-	waiting, since := c.waiters > 0, c.waitStart
-	c.waitMu.Unlock()
-	if waiting {
-		return c.slotWaitGap(time.Since(since))
-	}
-	return c.refreshInterval()
-}
-
-// slotWaiting reports whether requests are waiting in waitSlots.
-func (c *clusterClient) slotWaiting() bool {
-	c.waitMu.Lock()
-	defer c.waitMu.Unlock()
-	return c.waiters > 0
-}
-
-// refreshIntervalLeft returns how long refreshInterval still defers the next refresh: the time until
-// refreshInterval has passed since the last refresh finished, or 0.
-func (c *clusterClient) refreshIntervalLeft() time.Duration {
-	return c.sinceRefreshLeft(c.refreshInterval())
-}
-
 // Defaults of the topology refresh, for the ClusterOption fields left at zero.
 const (
 	// minAutoRefreshInterval and maxAutoRefreshInterval bound the default MinRefreshInterval. See
 	// clusterRefreshAutoInterval.
 	minAutoRefreshInterval = 250 * time.Millisecond
 	maxAutoRefreshInterval = time.Second
-	// minPromotionGap is the shortest gap between the refreshes of waitSlots while it looks for a promotion.
-	// See slotWaitGap.
-	minPromotionGap = 50 * time.Millisecond
-	// promotionWindow is how long waitSlots looks for a promotion at the shortest gap. Once the cluster has
-	// flagged a primary as failed, its first replica in rank starts an election after 500ms plus up to 500ms,
-	// the next one a second later, so a shard usually has a primary again within 2s.
-	promotionWindow = 2 * time.Second
-	// defaultMaxSlotWait is the default MaxSlotWait: 3s, the 2s of promotionWindow plus up to a second for the
-	// client to see the failed primary and then its replacement. Requests never wait past their own deadline.
-	defaultMaxSlotWait = 3 * time.Second
 )
 
 // clusterRefreshAutoInterval returns the default minimum time between two topology refreshes of a client that
 // knows n nodes: 1ms per node, at least 250ms and at most 1s. A refresh costs more in larger clusters, since the
 // CLUSTER SHARDS or CLUSTER SLOTS reply grows with the number of nodes, so they are spaced further apart. While a
 // node fails, a client then refreshes at most 4 times per second in clusters of up to 250 nodes, and once per
-// second in clusters of 1000 nodes or more. 250ms is shorter than the few hundred milliseconds between the
-// cluster flagging a failed primary and promoting a replica, so the client usually sees the shard without a
-// primary, and waitSlots then looks for the promotion more often, every slotWaitGap.
+// second in clusters of 1000 nodes or more.
 func clusterRefreshAutoInterval(n int) time.Duration {
 	return min(max(time.Duration(n)*time.Millisecond, minAutoRefreshInterval), maxAutoRefreshInterval)
 }
@@ -311,15 +238,6 @@ func (c *clusterClient) refreshInterval() time.Duration {
 		return max(iv, 0)
 	}
 	return clusterRefreshAutoInterval(c.nodeCount())
-}
-
-// slotWait returns how long a request waits for its slot to have a node: ClusterOption.MaxSlotWait,
-// defaultMaxSlotWait when it is zero, or 0, meaning no wait, when it is negative.
-func (c *clusterClient) slotWait() time.Duration {
-	if w := c.opt.ClusterOption.MaxSlotWait; w != 0 {
-		return max(w, 0)
-	}
-	return defaultMaxSlotWait
 }
 
 // nodeCount returns the number of nodes in the slot map, replicas included.
@@ -342,126 +260,6 @@ func (c *clusterClient) sinceRefreshLeft(d time.Duration) time.Duration {
 		return 0
 	}
 	return max(0, d-time.Since(last))
-}
-
-// slotWaitMinGap is the shortest time between two refreshes started by requests that wait for their slot, for
-// when refreshInterval is shorter or zero.
-const slotWaitMinGap = 10 * time.Millisecond
-
-// slotWaitGap returns the time waitSlots leaves between two refreshes, elapsed after the first of the requests
-// waiting now started. A MinRefreshInterval that is set is kept as it is. With the default, the gap is a fifth of
-// refreshInterval, at least minPromotionGap, during the first promotionWindow, when the cluster usually promotes a
-// replica, then doubles every promotionWindow up to refreshInterval: 50ms, then 100ms, 200ms and 250ms in clusters
-// of up to 250 nodes, and 200ms growing to 1s in clusters of 1000 nodes or more. Without an interval, that is with
-// a negative MinRefreshInterval, it is slotWaitMinGap.
-func (c *clusterClient) slotWaitGap(elapsed time.Duration) time.Duration {
-	iv := c.refreshInterval()
-	if iv <= 0 {
-		return slotWaitMinGap
-	}
-	if c.opt.ClusterOption.MinRefreshInterval > 0 {
-		return max(iv, slotWaitMinGap)
-	}
-	gap := max(iv/5, min(minPromotionGap, iv))
-	for t := promotionWindow; t <= elapsed && gap < iv; t += promotionWindow {
-		gap *= 2
-	}
-	return max(min(gap, iv), slotWaitMinGap)
-}
-
-// startWaiting records a request that starts waiting in waitSlots, and returns when the first of the requests
-// waiting now started. stop must be called when the request stops waiting.
-func (c *clusterClient) startWaiting() (since time.Time, stop func()) {
-	c.waitMu.Lock()
-	if c.waiters == 0 {
-		c.waitStart = time.Now()
-	}
-	c.waiters++
-	since = c.waitStart
-	c.waitMu.Unlock()
-	return since, func() {
-		c.waitMu.Lock()
-		c.waiters--
-		c.waitMu.Unlock()
-	}
-}
-
-// waitSlots is called by pick, pickMulti and pickMultiCache when the slot map has no node for a slot they
-// need. found re-reads the slot map and reports whether it has the nodes now.
-// waitSlots calls found again each time a refresh finishes, until it reports true, and starts a refresh in the
-// background whenever none is in flight, at most once per slotWaitGap. The waiting requests share these refreshes and
-// wake up when one finishes, instead of polling the slot map. waitSlots fails with ctx.Err() when ctx is done,
-// with ErrClosing when the client is closed, and after slotWait with the error of the last refresh it waited
-// for, or ErrNoSlot. Without a wait, that is with a negative MaxSlotWait, it refreshes the slot map once, unless
-// pacedRefresh skips it, and fails with the refresh error, or with ErrNoSlot if found still reports false.
-func (c *clusterClient) waitSlots(ctx context.Context, found func() bool) error {
-	maxWait := c.slotWait()
-	if maxWait <= 0 {
-		if err := c.pacedRefresh(ctx); err != nil {
-			return err
-		}
-		if !found() {
-			return ErrNoSlot
-		}
-		return nil
-	}
-
-	since, stop := c.startWaiting()
-	defer stop()
-	expiry := time.NewTimer(maxWait)
-	defer expiry.Stop()
-	var pace *time.Timer
-	defer func() {
-		if pace != nil {
-			pace.Stop()
-		}
-	}()
-	var lastErr error
-	for {
-		// Take the flight before re-reading the slot map: if a refresh finishes in between, found sees
-		// its slot map, and if one finishes later, fl is that refresh or an earlier one still in flight.
-		fl := c.sc.next()
-		if found() {
-			return nil
-		}
-		var paced <-chan time.Time
-		gap := c.slotWaitGap(time.Since(since))
-		if left := c.sinceRefreshLeft(gap); left > 0 {
-			if pace == nil {
-				pace = time.NewTimer(left)
-			} else {
-				pace.Reset(left)
-			}
-			paced = pace.C
-		} else {
-			// Start the refresh in its own goroutine, unless one is in flight, so that ctx and the
-			// wait can end even if the refresh hangs. A lazy refresh still in its random delay, which
-			// can be up to 30s in large clusters, runs now instead: it is due for the waiting requests,
-			// and refreshGap still spaces it from the previous refresh.
-			c.sc.DelayDo(0, func() error { return c.refreshIfOlder(gap) })
-			c.sc.Expedite(0)
-		}
-		select {
-		case <-fl.ch:
-			lastErr = fl.err
-		case <-paced:
-		case <-expiry.C:
-			if found() {
-				return nil
-			}
-			if atomic.LoadUint32(&c.stop) != 0 { // as in isClosingRedirect
-				return ErrClosing
-			}
-			if lastErr != nil {
-				return lastErr
-			}
-			return ErrNoSlot
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-c.stopCh:
-			return ErrClosing
-		}
-	}
 }
 
 // maxFollowedMoves is how many MOVED redirects of one request, or rounds of redirects of one DoMulti, the client
@@ -954,9 +752,7 @@ func (c *clusterClient) runClusterTopologyRefreshment() {
 		case <-c.stopCh:
 			return
 		case <-ticker.C:
-			if !c.slotWaiting() { // requests waiting for a slot refresh more often, and a lazy refresh would delay them
-				c.periodicRefresh()
-			}
+			c.periodicRefresh()
 		}
 	}
 }
@@ -988,11 +784,11 @@ func (c *clusterClient) _pick(slot uint16, toReplica bool) (p conn) {
 
 func (c *clusterClient) pick(ctx context.Context, slot uint16, toReplica bool) (p conn, err error) {
 	if p = c._pick(slot, toReplica); p == nil {
-		if err := c.waitSlots(ctx, func() bool {
-			p = c._pick(slot, toReplica)
-			return p != nil
-		}); err != nil {
+		if err := c.refresh(ctx); err != nil {
 			return nil, err
+		}
+		if p = c._pick(slot, toReplica); p == nil {
+			return nil, ErrNoSlot
 		}
 	}
 	return p, nil
@@ -1267,11 +1063,11 @@ func (c *clusterClient) _pickMulti(multi []Completed) (retries *connretry, init 
 func (c *clusterClient) pickMulti(ctx context.Context, multi []Completed) (*connretry, bool, error) {
 	conns, hasInit := c._pickMulti(multi)
 	if conns == nil {
-		if err := c.waitSlots(ctx, func() bool {
-			conns, hasInit = c._pickMulti(multi)
-			return conns != nil
-		}); err != nil {
+		if err := c.refresh(ctx); err != nil {
 			return nil, false, err
+		}
+		if conns, hasInit = c._pickMulti(multi); conns == nil {
+			return nil, false, ErrNoSlot
 		}
 	}
 	return conns, hasInit, nil
@@ -1860,11 +1656,11 @@ func (c *clusterClient) _pickMultiCache(multi []CacheableTTL) *connretrycache {
 func (c *clusterClient) pickMultiCache(ctx context.Context, multi []CacheableTTL) (*connretrycache, error) {
 	conns := c._pickMultiCache(multi)
 	if conns == nil {
-		if err := c.waitSlots(ctx, func() bool {
-			conns = c._pickMultiCache(multi)
-			return conns != nil
-		}); err != nil {
+		if err := c.refresh(ctx); err != nil {
 			return nil, err
+		}
+		if conns = c._pickMultiCache(multi); conns == nil {
+			return nil, ErrNoSlot
 		}
 	}
 	return conns, nil
@@ -2190,12 +1986,6 @@ func (c *clusterClient) shouldRefreshRetry(err error, ctx context.Context) (addr
 			}
 		} else if ctx.Err() == nil {
 			mode, failing = RedirectRetry, true // the node could not be reached, or its connection broke
-		} else if ctx.Err() == context.DeadlineExceeded {
-			// A hung node, frozen or cut off, closes no connection and sends no MOVED: the requests sent to
-			// it only reach their deadline. Refresh, so that the client sees its replacement once the cluster
-			// has failed it over. Lazily, since an overloaded node misses deadlines too. The request is not
-			// retried: its deadline has passed.
-			c.lazyRefresh()
 		}
 		// ASK means that the slot is being migrated and is still owned by the node that replied, so the slot
 		// map is right and a refresh has nothing to learn. The MOVED replies after the migration refresh it.
