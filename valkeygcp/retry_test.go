@@ -3,6 +3,7 @@ package valkeygcp
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/valkey-io/valkey-go"
 )
@@ -32,5 +33,40 @@ func TestRetryDelay_StopsAfterMaxAttempts(t *testing.T) {
 		if d := memorystoreRetryDelay(attempt, valkey.Completed{}, errors.New("i/o timeout")); d >= 0 {
 			t.Errorf("attempt %d: got %v, want negative (stop)", attempt, d)
 		}
+	}
+}
+
+// Memorystore IAM backend errors (ERR_IAM_EXHAUSTED, ERR_IAM_OTHER), which connect and the
+// dial gate back off, are recognized; other errors are not. Their backoff starts at most at
+// 250ms and can pass the 2s cap of memorystoreRetryDelay, up to 10s.
+func TestIAMBackoff(t *testing.T) {
+	for _, msg := range []string{
+		"ERR (ERR_IAM_EXHAUSTED) Memorystore IAM authentication backend quota exceeded.",
+		"ERR (ERR_IAM_OTHER) Memorystore IAM authentication backend error.",
+	} {
+		if !isIAMBackendError(errors.New(msg)) {
+			t.Errorf("%q not recognized as an IAM backend error", msg)
+		}
+	}
+	for _, err := range []error{nil, errors.New("WRONGPASS invalid username-password pair"), errors.New("i/o timeout")} {
+		if isIAMBackendError(err) {
+			t.Errorf("%v recognized as an IAM backend error", err)
+		}
+	}
+	var longest time.Duration
+	for attempt := range maxRetryAttempts {
+		d := iamBackoff(attempt)
+		if d <= 0 || d > iamBackoffCap {
+			t.Fatalf("attempt %d: delay %v outside (0, 10s]", attempt, d)
+		}
+		if attempt == 0 && d > iamBackoffBase {
+			t.Fatalf("first delay %v above the IAM base %v", d, iamBackoffBase)
+		}
+	}
+	for range 200 {
+		longest = max(longest, iamBackoff(10))
+	}
+	if longest <= retryCap {
+		t.Errorf("longest IAM delay %v never exceeded the generic 2s cap", longest)
 	}
 }

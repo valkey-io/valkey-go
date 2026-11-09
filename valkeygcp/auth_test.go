@@ -15,6 +15,8 @@ import (
 	"github.com/valkey-io/valkey-go"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+	"google.golang.org/api/impersonate"
+	"google.golang.org/api/option"
 )
 
 // mockTokenSource simulates a Google OAuth2 token source with configurable expiry and call tracking.
@@ -758,7 +760,7 @@ func TestTokenProvider_TokenHonorsContext(t *testing.T) {
 // so ADC's own token cache renews at the same point as valkeygcp's cache and a re-AUTH gets
 // a new token, without relying on how oauth2's caches share token objects. A
 // CustomTokenSource is used as is, with no ADC lookup.
-func TestNewBaseSource_EarlyTokenRefresh(t *testing.T) {
+func TestNewBaseCreds_EarlyTokenRefresh(t *testing.T) {
 	orig := findDefaultCredentials
 	defer func() { findDefaultCredentials = orig }()
 	var got google.CredentialsParams
@@ -792,5 +794,183 @@ func TestNewBaseSource_EarlyTokenRefresh(t *testing.T) {
 	}
 	if _, err := NewIAMTokenProvider(context.Background(), IAMAuthOptions{CustomTokenSource: &mockTokenSource{}}); err != nil || looked.Load() {
 		t.Fatalf("CustomTokenSource: err = %v, ADC looked up = %v", err, looked.Load())
+	}
+}
+
+// NewIAMTokenProvider rejects malformed CredentialsJSON, also when it is the identity that
+// impersonates ImpersonateSA.
+func TestNewIAMTokenProvider_InvalidJSON(t *testing.T) {
+	ctx := context.Background()
+	for _, opt := range []IAMAuthOptions{
+		{CredentialsJSON: []byte(`{ invalid json`)},
+		{CredentialsJSON: []byte(`{ invalid json`), ImpersonateSA: "sa@p.iam.gserviceaccount.com"},
+	} {
+		if _, err := NewIAMTokenProvider(ctx, opt); err == nil || !strings.Contains(err.Error(), "invalid credentials JSON") {
+			t.Errorf("ImpersonateSA %q: got %v, want the invalid JSON error", opt.ImpersonateSA, err)
+		}
+	}
+}
+
+// Service account impersonation (ImpersonateSA) with a custom ImpersonateLifetime: the
+// target, delegates, lifetime and scopes reach impersonate. With a lifetime, impersonate
+// returns a source that never refreshes, so the provider calls impersonate again for each
+// new token; UsernamePrincipalEmail gives the impersonated account. Without a lifetime the
+// impersonate source refreshes itself and is built once. A negative lifetime, or one not
+// longer than RefreshBuffer, is rejected.
+func TestImpersonateLifetime(t *testing.T) {
+	orig := impersonateTokenSource
+	defer func() { impersonateTokenSource = orig }()
+	var calls atomic.Int32
+	var got impersonate.CredentialsConfig
+	impersonateTokenSource = func(_ context.Context, cfg impersonate.CredentialsConfig, _ ...option.ClientOption) (oauth2.TokenSource, error) {
+		n := calls.Add(1)
+		got = cfg
+		// What impersonate returns when Lifetime is set: a static source that never refreshes.
+		return oauth2.StaticTokenSource(&oauth2.Token{AccessToken: fmt.Sprintf("imp-%d", n), Expiry: time.Now().Add(time.Minute)}), nil
+	}
+	const sa = "reader@db-proj.iam.gserviceaccount.com"
+	provider, err := NewIAMTokenProvider(context.Background(), IAMAuthOptions{
+		ImpersonateSA:       sa,
+		Delegates:           []string{"hop@p.iam.gserviceaccount.com"},
+		ImpersonateLifetime: 2 * time.Hour,
+		UsernameStrategy:    UsernamePrincipalEmail,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.TargetPrincipal != sa || got.Lifetime != 2*time.Hour || len(got.Delegates) != 1 || got.Scopes[0] != DefaultCloudPlatformScope {
+		t.Errorf("config = %+v", got)
+	}
+	for i, want := range []string{"imp-1", "imp-2"} {
+		tok, err := provider.Token(context.Background())
+		if err != nil || tok.AccessToken != want {
+			t.Fatalf("token %d = %v, %v; want %s (refreshed)", i, tok, err, want)
+		}
+	}
+	if creds, _ := provider.AuthCredentialsFn()(valkey.AuthCredentialsContext{}); creds.Username != sa {
+		t.Errorf("username = %q, want the impersonated principal", creds.Username)
+	}
+
+	// Without a Lifetime the impersonate source refreshes itself and is used directly.
+	calls.Store(0)
+	provider, err = NewIAMTokenProvider(context.Background(), IAMAuthOptions{ImpersonateSA: sa})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = provider.Token(context.Background())
+	_, _ = provider.Token(context.Background())
+	if calls.Load() != 1 {
+		t.Errorf("impersonate source built %d times, want 1", calls.Load())
+	}
+
+	for _, lifetime := range []time.Duration{-time.Minute, DefaultRefreshBuffer} {
+		if _, err := NewIAMTokenProvider(context.Background(), IAMAuthOptions{ImpersonateSA: sa, ImpersonateLifetime: lifetime}); err == nil {
+			t.Errorf("ImpersonateLifetime %v accepted", lifetime)
+		}
+	}
+}
+
+// With ImpersonateLifetime, each new token takes a new impersonation call. When that call
+// fails, the token fetch returns its error.
+func TestImpersonateLifetime_MintError(t *testing.T) {
+	orig := impersonateTokenSource
+	defer func() { impersonateTokenSource = orig }()
+	var calls atomic.Int32
+	impersonateTokenSource = func(context.Context, impersonate.CredentialsConfig, ...option.ClientOption) (oauth2.TokenSource, error) {
+		if calls.Add(1) > 1 {
+			return nil, errors.New("iam.serviceAccounts.getAccessToken denied")
+		}
+		return oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "imp-1", Expiry: time.Now().Add(time.Minute)}), nil
+	}
+	p, err := NewIAMTokenProvider(context.Background(), IAMAuthOptions{ImpersonateSA: "sa@p.iam.gserviceaccount.com", ImpersonateLifetime: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok, err := p.Token(context.Background()); err != nil || tok.AccessToken != "imp-1" {
+		t.Fatalf("first token = %v, %v; want the one from setup", tok, err)
+	}
+	// imp-1 expires inside RefreshBuffer, so this fetch needs a new impersonation call.
+	if _, err := p.Token(context.Background()); err == nil || !strings.Contains(err.Error(), "denied") {
+		t.Fatalf("got %v, want the impersonation error", err)
+	}
+}
+
+// With CredentialsJSON, the key is the identity that impersonates ImpersonateSA; without
+// it, Application Default Credentials (ADC) are. With a custom lifetime, every new token is
+// minted with the same identity.
+func TestImpersonation_SourceIdentity(t *testing.T) {
+	orig := impersonateTokenSource
+	defer func() { impersonateTokenSource = orig }()
+	var mu sync.Mutex
+	var calls []int // options passed to each impersonation call
+	impersonateTokenSource = func(_ context.Context, _ impersonate.CredentialsConfig, opts ...option.ClientOption) (oauth2.TokenSource, error) {
+		mu.Lock()
+		calls = append(calls, len(opts))
+		mu.Unlock()
+		return oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "imp", Expiry: time.Now().Add(time.Minute)}), nil
+	}
+	const sa = "reader@db-proj.iam.gserviceaccount.com"
+	key := []byte(`{"type":"service_account","client_email":"key@p.iam.gserviceaccount.com"}`)
+
+	if _, err := NewIAMTokenProvider(context.Background(), IAMAuthOptions{ImpersonateSA: sa}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := NewIAMTokenProvider(context.Background(), IAMAuthOptions{ImpersonateSA: sa, CredentialsJSON: key, ImpersonateLifetime: 2 * time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 { // inside the refresh buffer, the second fetch mints a new token
+		if _, err := p.Token(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(calls) != 3 || calls[0] != 0 || calls[1] != 1 || calls[2] != 1 {
+		t.Fatalf("options per impersonation call = %v, want [0 1 1] (ADC, then the key for every mint)", calls)
+	}
+}
+
+// An impersonation setup error is returned by NewIAMTokenProvider.
+func TestNewIAMTokenProvider_ImpersonationError(t *testing.T) {
+	orig := impersonateTokenSource
+	defer func() { impersonateTokenSource = orig }()
+	impersonateTokenSource = func(context.Context, impersonate.CredentialsConfig, ...option.ClientOption) (oauth2.TokenSource, error) {
+		return nil, errors.New("iam.serviceAccounts.getAccessToken denied")
+	}
+	opts := IAMAuthOptions{ImpersonateSA: "sa@p.iam.gserviceaccount.com"}
+	if _, err := NewIAMTokenProvider(context.Background(), opts); err == nil ||
+		!strings.Contains(err.Error(), "impersonation token source failed") || !strings.Contains(err.Error(), "denied") {
+		t.Fatalf("got %v, want the impersonation error", err)
+	}
+}
+
+// A hung credential setup (here the eager impersonation fetch used with
+// ImpersonateLifetime) stops at the caller's deadline.
+func TestNewIAMTokenProvider_SetupHonorsContext(t *testing.T) {
+	orig := impersonateTokenSource
+	entered, release := make(chan struct{}), make(chan struct{})
+	impersonateTokenSource = func(context.Context, impersonate.CredentialsConfig, ...option.ClientOption) (oauth2.TokenSource, error) {
+		close(entered)
+		<-release // an IAM Credentials call that never answers
+		return nil, errors.New("released")
+	}
+	t.Cleanup(func() {
+		select { // the stub has read impersonateTokenSource before it is restored
+		case <-entered:
+		case <-time.After(5 * time.Second):
+		}
+		close(release)
+		impersonateTokenSource = orig
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := NewIAMTokenProvider(ctx, IAMAuthOptions{ImpersonateSA: "sa@p.iam.gserviceaccount.com", ImpersonateLifetime: time.Hour})
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "credential setup") {
+		t.Fatalf("got %v, want the caller's deadline", err)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("setup took %v despite a 50ms deadline", d)
 	}
 }
