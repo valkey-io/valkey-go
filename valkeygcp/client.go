@@ -39,8 +39,9 @@ const (
 	// topology. valkey-go starts each refresh after a short random delay, so many clients
 	// don't query the cluster at the same moment.
 	defaultShardsRefreshInterval = 10 * time.Second
-	// setupTimeout caps one-off setup calls (credential discovery) when the caller's context
-	// has no earlier deadline.
+	// setupTimeout caps one-off setup calls (finding credentials, impersonation, the
+	// principal-email lookup) and connecting, when the caller's context has no earlier
+	// deadline.
 	setupTimeout = 15 * time.Second
 )
 
@@ -52,23 +53,25 @@ var errNoEndpoint = errors.New("valkeygcp: no endpoint: set ClientOption.InitAdd
 // reader endpoint, if any. NewClient fills the Memorystore defaults into the fields left at
 // their zero value, adds the credentials opts ask for, and connects.
 //
-// ctx bounds credential setup; a ctx that has ended by then stops NewClient before it
-// connects. valkey-go connects and authenticates while it builds the client, so setup needs
-// working credentials. Token refreshes never use ctx.
+// ctx bounds credential setup and connecting. valkey-go connects and authenticates while it
+// builds the client, so setup needs working credentials. Memorystore IAM backend errors
+// (ERR_IAM_EXHAUSTED, ERR_IAM_OTHER) during the handshake are retried with backoff until ctx
+// ends, at most 15s when it has no earlier deadline. When an ACL rule refuses CLIENT
+// TRACKING, the error says so. Token refreshes never use ctx.
 func NewClient(ctx context.Context, option valkey.ClientOption, opts ...Option) (valkey.Client, error) {
 	opt, err := ResolveClientOption(ctx, option, opts...)
 	if err != nil {
 		return nil, err
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, err // valkey.NewClient takes no context
-	}
-	return valkey.NewClient(opt)
+	return connect(ctx, opt)
 }
 
 // ResolveClientOption returns the valkey.ClientOption NewClient would connect with, without
 // connecting, for callers who build the client themselves (valkey.NewClient,
-// valkeyotel.NewClient) or want to inspect it.
+// valkeyotel.NewClient) or want to inspect it. The option keeps the credentials, the
+// defaults and the dial gate of WithIAMOptions. Building the client that way skips
+// NewClient's connect-time handling: the retries of Memorystore IAM backend errors during
+// the handshake, and the CLIENT TRACKING hint.
 func ResolveClientOption(ctx context.Context, option valkey.ClientOption, opts ...Option) (valkey.ClientOption, error) {
 	cfg := newConfig(opts)
 	if len(option.InitAddress) == 0 {
@@ -88,6 +91,7 @@ func ResolveClientOption(ctx context.Context, option valkey.ClientOption, opts .
 			return valkey.ClientOption{}, err
 		}
 		opt.AuthCredentialsFn = p.AuthCredentialsFn()
+		installDialGate(&opt) // after an ERR_IAM_* rejection, new dials wait with backoff
 	}
 	return opt, nil
 }
