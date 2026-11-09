@@ -10,14 +10,18 @@ import (
 )
 
 // Option configures what NewClient and ResolveClientOption add to a valkey.ClientOption:
-// IAM credentials (WithIAMOptions, WithDefaultIAM). Settings valkey-go already has a field
-// for, such as addresses and timeouts, are set on the valkey.ClientOption itself.
+// IAM credentials (WithIAMOptions, WithDefaultIAM) and zone-aware replica reads
+// (WithZoneAwareReads). WithReadYourWrites configures the client NewClient returns. Settings
+// valkey-go already has a field for, such as addresses and timeouts, are set on the
+// valkey.ClientOption itself.
 // Later options override earlier ones of the same kind.
 type Option func(*config)
 
 // config collects the Options of one NewClient or ResolveClientOption call.
 type config struct {
-	iam *IAMAuthOptions // IAM settings (WithIAMOptions, WithDefaultIAM); nil when not given
+	iam                  *IAMAuthOptions // IAM settings (WithIAMOptions, WithDefaultIAM); nil when not given
+	zoneAwareReads       bool            // WithZoneAwareReads
+	readYourWritesWindow time.Duration   // WithReadYourWrites; 0 when not given
 }
 
 // newConfig applies opts in order, skipping nil ones.
@@ -55,6 +59,10 @@ var errNoEndpoint = errors.New("valkeygcp: no endpoint: set ClientOption.InitAdd
 // ctx bounds credential setup; a ctx that has ended by then stops NewClient before it
 // connects. valkey-go connects and authenticates while it builds the client, so setup needs
 // working credentials. Token refreshes never use ctx.
+//
+// If the reader endpoint refuses connections because the instance has no replicas, NewClient
+// connects to the primary endpoint only. With WithReadYourWrites, reads of a hash slot the
+// client has just written to go to the primary.
 func NewClient(ctx context.Context, option valkey.ClientOption, opts ...Option) (valkey.Client, error) {
 	opt, err := ResolveClientOption(ctx, option, opts...)
 	if err != nil {
@@ -63,7 +71,7 @@ func NewClient(ctx context.Context, option valkey.ClientOption, opts ...Option) 
 	if err := ctx.Err(); err != nil {
 		return nil, err // valkey.NewClient takes no context
 	}
-	return valkey.NewClient(opt)
+	return connect(opt, newConfig(opts).readYourWritesWindow)
 }
 
 // ResolveClientOption returns the valkey.ClientOption NewClient would connect with, without
@@ -88,6 +96,9 @@ func ResolveClientOption(ctx context.Context, option valkey.ClientOption, opts .
 			return valkey.ClientOption{}, err
 		}
 		opt.AuthCredentialsFn = p.AuthCredentialsFn()
+	}
+	if cfg.zoneAwareReads {
+		opt = withZoneAwareReads(ctx, opt)
 	}
 	return opt, nil
 }

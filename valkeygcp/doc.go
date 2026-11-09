@@ -15,6 +15,12 @@
 //     Credentials, which are replaced on live connections before they expire.
 //   - WithIAMOptions does the same with your own token source, username or refresh settings.
 //
+// Two more Options are about replica reads:
+//   - WithZoneAwareReads sends the reads of a cluster to replicas in the caller's zone
+//     first, using DetectCurrentGCPZone.
+//   - WithReadYourWrites keeps the reads of a hash slot on the primary for a while after the
+//     client writes to it.
+//
 // ResolveClientOption returns the same valkey.ClientOption without connecting, for
 // valkey.NewClient or other valkey-go modules such as valkeyotel.
 package valkeygcp
