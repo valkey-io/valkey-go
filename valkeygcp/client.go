@@ -10,14 +10,16 @@ import (
 )
 
 // Option configures what NewClient and ResolveClientOption add to a valkey.ClientOption:
-// IAM credentials (WithIAMOptions, WithDefaultIAM). Settings valkey-go already has a field
-// for, such as addresses and timeouts, are set on the valkey.ClientOption itself.
+// IAM credentials (WithIAMOptions, WithDefaultIAM) and TLS checked against the instance's
+// server CA certificates (WithTLS). Settings valkey-go already has a field for, such as
+// addresses and timeouts, are set on the valkey.ClientOption itself.
 // Later options override earlier ones of the same kind.
 type Option func(*config)
 
 // config collects the Options of one NewClient or ResolveClientOption call.
 type config struct {
 	iam *IAMAuthOptions // IAM settings (WithIAMOptions, WithDefaultIAM); nil when not given
+	tls *TLSOptions     // TLS settings (WithTLS); nil when not given
 }
 
 // newConfig applies opts in order, skipping nil ones.
@@ -50,7 +52,7 @@ var errNoEndpoint = errors.New("valkeygcp: no endpoint: set ClientOption.InitAdd
 // valkey.ClientOption as valkey.NewClient: InitAddress holds the discovery endpoint (cluster
 // mode) or the primary endpoint (cluster mode disabled), and Standalone.ReplicaAddress the
 // reader endpoint, if any. NewClient fills the Memorystore defaults into the fields left at
-// their zero value, adds the credentials opts ask for, and connects.
+// their zero value, adds the credentials and TLS settings opts ask for, and connects.
 //
 // ctx bounds credential setup; a ctx that has ended by then stops NewClient before it
 // connects. valkey-go connects and authenticates while it builds the client, so setup needs
@@ -77,7 +79,18 @@ func ResolveClientOption(ctx context.Context, option valkey.ClientOption, opts .
 	if field := callerAuthField(option); field != "" && cfg.iam != nil {
 		return valkey.ClientOption{}, fmt.Errorf("valkeygcp: ClientOption.%s conflicts with WithIAMOptions, which supplies the AUTH token", field)
 	}
+	if option.TLSConfig != nil && cfg.tls != nil {
+		return valkey.ClientOption{}, errTLSConfigConflict
+	}
 	opt := withDefaults(option)
+	if cfg.tls != nil {
+		// Before the IAM setup: a bad CA bundle fails without any network call.
+		tlsCfg, err := newTLSConfig(*cfg.tls)
+		if err != nil {
+			return valkey.ClientOption{}, err
+		}
+		opt.TLSConfig = tlsCfg
+	}
 	if cfg.iam != nil {
 		iam, err := withCallerUsername(*cfg.iam, option.Username)
 		if err != nil {

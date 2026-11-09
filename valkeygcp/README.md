@@ -189,3 +189,70 @@ Programs for manual checks live in `examples/`, a separate Go module, so they ar
 | `test_adc`         | Fetches one IAM access token through ADC and prints its type and expiry    | ADC                                                                              |
 | `accelerated_test` | Simulates token rotation with tokens that expire after 10 seconds          | Nothing                                                                          |
 | `live_e2e`         | Sends SET/GET traffic to an instance until stopped, across token rotations | ADC, network access to the instance, `MEMORYSTORE_TEST_DISCOVERY_ENDPOINT` set |
+| `live_tls`         | Connects over TLS, optionally with IAM, PINGs every node and runs SET/GET   | Network access to an instance with in-transit encryption, and its server CA file |
+
+---
+
+## 2. In-Transit Encryption (TLS)
+
+Instances with in-transit encryption turned on accept only TLS connections. `valkeygcp.WithTLS` turns TLS on for `NewClient` and `ResolveClientOption` and checks every node's certificate against the instance's server CA certificates, with TLS 1.2 or later. You supply the CA certificates, as a PEM file in `TLSOptions.CAFile` or as PEM bytes in `TLSOptions.CAPEM`. TLS needs no extra role on the workload identity.
+
+### 2.1 Get the Server CA Certificates
+
+The instance's server CA mode decides where the certificates come from:
+
+```bash
+gcloud memorystore instances describe INSTANCE --location=REGION \
+  --format="value(transitEncryptionMode,serverCaMode,serverCaPool)"
+```
+
+Save them with the command for that mode. Keep every certificate the command returns:
+
+```bash
+# GOOGLE_MANAGED_PER_INSTANCE_CA, or empty on older instances: TLSPerInstanceCA
+gcloud memorystore instances get-certificate-authority INSTANCE --location=REGION --format=json \
+  | jq -r '.. | strings | select(contains("BEGIN CERTIFICATE"))' > server-ca.pem
+
+# GOOGLE_MANAGED_SHARED_CA: TLSSharedCA
+gcloud memorystore instances get-shared-regional-certificate-authority --location=REGION --format=json \
+  | jq -r '.. | strings | select(contains("BEGIN CERTIFICATE"))' > server-ca.pem
+
+# CUSTOMER_MANAGED_CAS_CA: TLSCustomCA (SERVER_CA_POOL is the instance's serverCaPool)
+gcloud privateca pools get-ca-certs SERVER_CA_POOL --output-file=server-ca.pem
+```
+
+The Memorystore commands need read access to the instance, for example `roles/memorystore.viewer`. The CA Service command needs `privateca.caPools.get` on the pool (`roles/privateca.poolReader`).
+
+### 2.2 Connect with TLS
+
+```go
+// Cluster mode, IAM authentication, per-instance CA:
+client, err := valkeygcp.NewClient(ctx, valkey.ClientOption{
+	InitAddress: []string{"10.0.0.15:6379"}, // discovery endpoint
+}, valkeygcp.WithDefaultIAM(),
+	valkeygcp.WithTLS(valkeygcp.TLSOptions{Mode: valkeygcp.TLSPerInstanceCA, CAFile: "/etc/memorystore/server-ca.pem"}))
+
+// Cluster mode disabled with a reader endpoint, no authentication, shared regional CA:
+client, err := valkeygcp.NewClient(ctx, valkey.ClientOption{
+	InitAddress: []string{"10.0.0.2:6379"},                                         // primary endpoint
+	Standalone:  valkey.StandaloneOption{ReplicaAddress: []string{"10.0.0.3:6379"}}, // reader endpoint
+}, valkeygcp.WithTLS(valkeygcp.TLSOptions{Mode: valkeygcp.TLSSharedCA, CAFile: "/etc/memorystore/server-ca.pem"}))
+```
+
+* **Every certificate in the bundle is trusted.** A file saved while the instance has more than one CA, for example during a server CA rotation, verifies nodes signed by any of them. The file is read once, when `NewClient` or `ResolveClientOption` runs; after replacing it, create a new client. Per-instance CAs are valid for ten years and the next one can be downloaded about five years before the current one expires, so save the file again from time to time.
+* **Nodes are checked by IP address.** `ServerName` stays empty, so valkey-go checks each node's certificate against the IP address it dials. Set `TLSOptions.ServerName` only to check against another name.
+* **No CA, no connection.** Without CA certificates `NewClient` fails with `needs CA certificates` instead of connecting unverified, and a certificate from another CA fails the handshake (`x509: certificate signed by unknown authority`).
+* **`WithTLS` or `ClientOption.TLSConfig`, not both.** A `TLSConfig` you set on the `ClientOption` is used as is; passing it together with `WithTLS` is an error. To start `WithTLS` from your own settings, use `TLSOptions.Base`.
+* **`TLSOptions.Base`** is an optional `*tls.Config` to start from. It is cloned, never changed, and its `MinVersion` is raised to TLS 1.2. Its `RootCAs` are used when `CAPEM` and `CAFile` are empty. Its other settings are kept as they are, so `InsecureSkipVerify` still turns verification off.
+* **`TLSOptions.Mode`** names the instance's server CA mode and appears in errors. `TLSAuto`, the zero value, works like `TLSCustomCA`; `TLSDisabled` leaves TLS off; other values are rejected.
+
+### 2.3 Live Check
+
+`live_tls` (in `examples/`) connects to a real instance the way `NewClient` does, PINGs every node (each one a separate TLS handshake) and runs SET and GET. Run it from the `examples` directory, on a VM in the instance's VPC network:
+
+```bash
+go run ./live_tls -primary=10.0.0.2:6379 -reader=10.0.0.3:6379 -ca-file=server-ca.pem -tls-mode=shared
+go run ./live_tls -discovery=10.0.0.15:6379 -ca-file=server-ca.pem -tls-mode=per-instance -iam
+```
+
+The last line is `RESULT {"ok":true,...}` when every node answered over TLS. `-reader` is optional with `-primary`. `-duration=70m` keeps SET/GET traffic going and logs `STATS` every minute. With `-iam`, every login is logged as an `AUTH` line with a short hash of the token, never the token itself, so a long run shows when the token is renewed. `-conn-lifetime=5m` closes and reopens every connection every five minutes, so new logins and TLS handshakes keep happening during the run.
