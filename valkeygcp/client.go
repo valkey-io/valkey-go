@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/valkey-io/valkey-go"
@@ -113,6 +114,13 @@ func withDefaults(opt valkey.ClientOption) valkey.ClientOption {
 	}
 	if opt.RetryDelay == nil {
 		opt.RetryDelay = memorystoreRetryDelay // exponential backoff with full jitter
+	}
+	// Only when the caller set neither: a DialCtxFn takes precedence over a caller's DialFn.
+	if opt.DialCtxFn == nil && opt.DialFn == nil {
+		// A short wait before redialing an address that just failed. The endpoints are
+		// dialed as usual.
+		endpoints := slices.Concat(opt.InitAddress, opt.Standalone.ReplicaAddress)
+		opt.DialCtxFn = newDialWait(endpoints...).DialCtxFn
 	}
 	return opt
 }
