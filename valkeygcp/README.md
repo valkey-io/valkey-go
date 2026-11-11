@@ -8,12 +8,13 @@
 
 ## 1. Native Google Cloud IAM Authentication
 
-`valkeygcp` connects valkey-go to Memorystore for Valkey with IAM authentication instead of a password. `valkeygcp.NewClient` takes the same `valkey.ClientOption` as `valkey.NewClient`, as `valkeyotel.NewClient` does, fills in Memorystore-friendly defaults, and adds IAM credentials: `WithDefaultIAM()` uses Application Default Credentials (ADC), and `WithIAMOptions` lets you choose the token source, username and refresh settings.
+`valkeygcp` connects valkey-go to Memorystore for Valkey with IAM authentication instead of a password. `valkeygcp.NewClient` takes the same `valkey.ClientOption` as `valkey.NewClient`, as `valkeyotel.NewClient` does, fills in Memorystore-friendly defaults, and adds IAM credentials: `WithDefaultIAM()` uses Application Default Credentials (ADC), and `WithIAMOptions` lets you choose the token source, username and refresh settings. For instances with Token Auth, `WithTokenAuth` adds the auth token instead.
 
 ### 1.1 Features
 
 * **The valkey-go way:** pass any `valkey.ClientOption`, with as many addresses as you need in `InitAddress` and `Standalone.ReplicaAddress`.
 * **IAM authentication:** OAuth2 access tokens from ADC (GKE Workload Identity, the metadata server, or a service account key in `GOOGLE_APPLICATION_CREDENTIALS`), or from your own `oauth2.TokenSource`.
+* **Token Auth:** for instances with Token Auth, the auth token comes from Secret Manager (recommended), a fixed value or your own source, and is re-read regularly so a rotated token reaches live connections.
 * **Token rotation on live connections:** connections re-AUTH with a new token before the old one expires, spread out so they don't all re-AUTH at once.
 * **Refresh failure tolerance:** if a refresh fails, live connections keep the last valid token, and `OnCredentialError` reports the error.
 * **Bounded setup and token fetches:** `ctx` bounds setup, and every token fetch is capped by `FetchTimeout`.
@@ -100,6 +101,30 @@ client, err := valkeygcp.NewClient(ctx, valkey.ClientOption{
 | `MaxAuthPerSecond`       | 0 (off)                                                                | Limits how many AUTHs the client sends per second; N connections at once wait up to about N/rate seconds |
 | `OnCredentialError`      | none                                                                   | Receives token fetch errors while live connections keep the last valid token                             |
 
+#### Connect with Token Auth
+
+For an instance whose authorization mode is Token Auth, use `WithTokenAuth` instead of the IAM options. Memorystore issues the auth tokens for the instance's token auth users; keep the token in Secret Manager and point `SecretVersion` at it:
+
+```go
+client, err := valkeygcp.NewClient(ctx, valkey.ClientOption{
+	InitAddress: []string{"10.0.0.15:6379"}, // discovery endpoint
+}, valkeygcp.WithTokenAuth(valkeygcp.TokenAuthOptions{
+	SecretVersion:     "projects/my-project/secrets/valkey-token/versions/latest",
+	OnCredentialError: func(err error) { log.Printf("token re-read failed, keeping the last token: %v", err) },
+}))
+```
+
+| `TokenAuthOptions` field | Default                                        | Meaning                                                                                                                                                                |
+| :----------------------- | :--------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SecretVersion`          | none                                           | Secret Manager secret version that holds the token, global or regional (`projects/P/locations/L/...`), read with ADC. Use `versions/latest` so a rotation is picked up |
+| `Token`                  | none                                           | A fixed token, for local development; it can't follow a rotation                                                                                                       |
+| `Source`                 | none                                           | Your own reader, for example for another Secret Manager endpoint or other credentials; takes precedence over `SecretVersion` and `Token`                               |
+| `Username`               | `ClientOption.Username`, else the default user | The token auth user (`AUTH <user> <token>`); empty sends `AUTH default <token>`                                                                                        |
+| `ReloadInterval`         | 5m (`DefaultTokenReloadInterval`)              | How often live connections re-AUTH with the current token; the token is read at most once per half interval. At least 1s; negative turns reloading off                 |
+| `OnCredentialError`      | none                                           | Receives token read errors while live connections keep the last token that worked                                                                                      |
+
+Set exactly one source. `WithTokenAuth` can't be combined with `WithIAMOptions` or `WithDefaultIAM`.
+
 #### Use valkey.NewClient Directly
 
 `NewIAMTokenProvider` builds the IAM token provider on its own. Its `AuthCredentialsFn()` plugs into `valkey.ClientOption`:
@@ -155,22 +180,31 @@ Each of these follows Google's [Valkey client best practices](https://docs.cloud
 * **Custom token sources.** valkeygcp asks for a new token once the current one has less than `RefreshBuffer` left. A `CustomTokenSource` that caches tokens must hand out a new one by then; otherwise live connections re-AUTH with the old token.
 * **When a refresh fails.** Live connections keep the last valid token, and the refresh is retried about every 30 seconds. `OnCredentialError` receives each error. If the last token expires before a refresh succeeds, live connections stay authenticated (their re-AUTH is skipped), but new connections fail with `NOAUTH` until a token can be fetched again. Those `NOAUTH` errors go to the commands that opened the connections, not to `OnCredentialError`. With `DisableProactiveReauth`, an expired token isn't handed out at all: new connections fail with the token fetch error itself (`valkeygcp: token acquisition failed: …`), not `NOAUTH`, and `OnCredentialError` isn't called. The same happens before the first fetch has succeeded.
 * **Token fetches are capped.** Each fetch waits at most `FetchTimeout` (10s); a fetch that times out counts as a failed one. While a timed-out fetch is still hanging, the next fetches fail at once instead of waiting another `FetchTimeout`, and a new fetch is tried after 3×`FetchTimeout`.
-* **A rejected re-AUTH closes the connection.** If Memorystore rejects the re-AUTH of a live connection (for example with `ERR_IAM_EXHAUSTED`), valkey-go closes that connection and the next command dials a new one, although Memorystore would have kept the authenticated connection working.
+* **A rejected re-AUTH doesn't close the connection.** If Memorystore rejects the re-AUTH of a live connection (for example with `ERR_IAM_EXHAUSTED`), valkey-go ignores the reply and the connection keeps the login it already has. New connections still need a token that Memorystore accepts.
+
+#### Token Auth
+
+* **How a rotated token reaches clients.** Each live connection re-AUTHs with the current token every `ReloadInterval` (5m, minus up to 10% so connections spread out). The token is read from its source at most once per half interval, however many connections ask, so a new secret version reaches every live connection within about 1.5 × `ReloadInterval`.
+* **Rotating safely.** This applies when the token is re-read: `SecretVersion` or `Source`, with reloading on. A token auth user can have at most two auth tokens, so delete the old token at the end of each rotation. Create the new token, add it as a new version of the secret, and check that a newly started client logs in with it. Then wait at least 2 × `ReloadInterval` (10 minutes with the default) so live connections re-AUTH with it, and only then delete the old token. New connections can't log in with a deleted token; a live connection whose re-AUTH is rejected keeps the login it already has, because valkey-go ignores the reply. With a fixed `Token`, or with reloading off, restart the clients with the new token before deleting the old one.
+* **When a read fails.** Connections keep the last token that worked, and `OnCredentialError` receives each error. Until a read works again, live connections re-AUTH within 30 seconds instead of every `ReloadInterval`, so the read is retried within 30 seconds and the token it gets reaches them soon after. A failed read never closes a connection.
+* **Token reads are capped.** Reads while connecting or re-authenticating stop after 5 seconds, even when a `Source` ignores its `ctx`; a busy or unreachable Secret Manager is retried within that time. The first read stops when `NewClient`'s `ctx` ends, and after 15 seconds at most.
+* **How the secret is read.** `SecretVersion` is read over HTTPS from Secret Manager's REST API, at `secretmanager.googleapis.com`, or `secretmanager.LOCATION.rep.googleapis.com` for a regional secret, with Application Default Credentials. valkeygcp doesn't use the Secret Manager client library, so it adds no gRPC dependencies to your program. For another endpoint or other credentials, use `Source`.
 
 ### 1.6 Contexts and Setup Failures
 
-* **`NewClient`'s `ctx` bounds setup only.** Credential discovery stops when it is cancelled or its deadline passes, and after 15 seconds if it has no deadline; a `ctx` that has ended by then stops `NewClient` before it connects. Token refreshes never use it, because they run for the life of the client.
-* **Setup needs working credentials.** valkey-go connects and authenticates while it builds the client, so missing ADC fails `NewClient` immediately, with the underlying error. Without ADC, pass a token source in `IAMAuthOptions.CustomTokenSource`.
+* **`NewClient`'s `ctx` bounds setup only.** Credential discovery and the first Token Auth read stop when it is cancelled or its deadline passes, and after 15 seconds if it has no deadline; a `ctx` that has ended by then stops `NewClient` before it connects. Token refreshes never use it, because they run for the life of the client.
+* **Setup needs working credentials.** valkey-go connects and authenticates while it builds the client, so missing ADC fails `NewClient` immediately, with the underlying error. Without ADC, pass a token source in `IAMAuthOptions.CustomTokenSource`. With Token Auth, `NewClient` reads the token once before connecting, so a missing secret or permission fails it right away.
 * **`InitAddress` is required.** `NewClient` and `ResolveClientOption` return an error without it.
-* **Credentials on the `ClientOption`** (`Password` or `AuthCredentialsFn`) are used as is; passing them together with `WithIAMOptions` or `WithDefaultIAM` is an error. With an IAM option, `ClientOption.Username` is the IAM username unless `IAMAuthOptions.Username` sets one; if both are set, they must match.
+* **Credentials on the `ClientOption`** (`Password` or `AuthCredentialsFn`) are used as is; passing them together with `WithIAMOptions`, `WithDefaultIAM` or `WithTokenAuth` is an error. With one of those options, `ClientOption.Username` is the username it sends unless `IAMAuthOptions.Username` or `TokenAuthOptions.Username` sets one; if both are set, they must match.
 
 ### 1.7 Required Roles
 
-| Mechanism | Role                                                                       |
-| :-------- | :------------------------------------------------------------------------- |
-| IAM Auth  | `roles/memorystore.dbConnectionUser` (`memorystore.instances.connect`) |
+| Mechanism  | Role                                                                                  |
+| :--------- | :------------------------------------------------------------------------------------ |
+| IAM Auth   | `roles/memorystore.dbConnectionUser` (`memorystore.instances.connect`)                |
+| Token Auth | `roles/secretmanager.secretAccessor` on the token's secret, with `SecretVersion` only |
 
-Grant it to the identity behind the access tokens: the ADC identity, or the identity of `IAMAuthOptions.CustomTokenSource` when you set one.
+Grant it to the identity behind the access tokens: the ADC identity, or the identity of `IAMAuthOptions.CustomTokenSource` when you set one. With Token Auth the token itself is the credential, so connecting needs no Memorystore role; the Secret Manager role goes to the ADC identity.
 
 ### 1.8 Testing
 
@@ -180,7 +214,7 @@ Run the unit tests with Go's race detector:
 go test -v -race .
 ```
 
-The unit tests need no cloud access. `TestRefreshTolerance_LiveConnection` also runs against a local Valkey on `127.0.0.1:6379` (the repository's `docker compose` setup) and is skipped when none is running.
+The unit tests need no cloud access. `TestRefreshTolerance_LiveConnection` also runs against a local Valkey on `127.0.0.1:6379` (the repository's `docker compose` setup) and is skipped when none is running. `TestTokenAuth_LiveRotation` rotates a token on that local Valkey with an ACL user and a key named for each run, which it deletes afterwards, and checks with `ACL LOG` that no AUTH failed; set `VALKEYGCP_TEST_ADDR` to use another address.
 
 Programs for manual checks live in `examples/`, a separate Go module, so they aren't part of the `valkeygcp` module. Run them from the `examples` directory, for example `go run ./accelerated_test`:
 
@@ -189,3 +223,4 @@ Programs for manual checks live in `examples/`, a separate Go module, so they ar
 | `test_adc`         | Fetches one IAM access token through ADC and prints its type and expiry    | ADC                                                                              |
 | `accelerated_test` | Simulates token rotation with tokens that expire after 10 seconds          | Nothing                                                                          |
 | `live_e2e`         | Sends SET/GET traffic to an instance until stopped, across token rotations | ADC, network access to the instance, `MEMORYSTORE_TEST_DISCOVERY_ENDPOINT` set |
+| `token_e2e`        | The same with Token Auth, logging each token change and re-read error      | Network access to the instance, `MEMORYSTORE_TEST_DISCOVERY_ENDPOINT` and a token source set (see its package comment) |

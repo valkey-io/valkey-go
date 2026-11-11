@@ -14,6 +14,8 @@
 //   - WithDefaultIAM authenticates with IAM access tokens from Application Default
 //     Credentials, which are replaced on live connections before they expire.
 //   - WithIAMOptions does the same with your own token source, username or refresh settings.
+//   - WithTokenAuth authenticates with Token Auth, using a token from Secret Manager, a fixed
+//     value or your own source, re-read regularly so a rotated token reaches live connections.
 //
 // ResolveClientOption returns the same valkey.ClientOption without connecting, for
 // valkey.NewClient or other valkey-go modules such as valkeyotel.
