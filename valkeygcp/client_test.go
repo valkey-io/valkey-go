@@ -153,6 +153,47 @@ func TestResolveClientOption_CallerValuesWin(t *testing.T) {
 	}
 }
 
+// The three refresh defaults go together: they are filled unless the caller set one of them,
+// and other ClusterOption fields don't turn them off. Before, setting MaxMovedRedirections,
+// for example, also turned off the periodic refresh and the refresh through the discovery
+// endpoint.
+func TestResolveClientOption_ClusterDefaultsWithOtherFields(t *testing.T) {
+	defaults := valkey.ClusterOption{
+		ShardsRefreshInterval:    defaultShardsRefreshInterval,
+		PreferInitAddressRefresh: true,
+		PreferClusterShards:      true,
+	}
+	withMoved := defaults
+	withMoved.MaxMovedRedirections = 3
+	for _, tc := range []struct {
+		name   string
+		in     valkey.ClusterOption
+		expect valkey.ClusterOption
+	}{
+		{"nothing set", valkey.ClusterOption{}, defaults},
+		{"MaxMovedRedirections set", valkey.ClusterOption{MaxMovedRedirections: 3}, withMoved},
+		{"ShardsRefreshInterval set", valkey.ClusterOption{ShardsRefreshInterval: time.Minute},
+			valkey.ClusterOption{ShardsRefreshInterval: time.Minute}},
+		{"PreferInitAddressRefresh set", valkey.ClusterOption{PreferInitAddressRefresh: true},
+			valkey.ClusterOption{PreferInitAddressRefresh: true}},
+		{"PreferClusterShards and MaxMovedRedirections set", valkey.ClusterOption{PreferClusterShards: true, MaxMovedRedirections: 3},
+			valkey.ClusterOption{PreferClusterShards: true, MaxMovedRedirections: 3}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opt, err := ResolveClientOption(context.Background(), valkey.ClientOption{
+				InitAddress:   []string{"10.0.0.15:6379"},
+				ClusterOption: tc.in,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if opt.ClusterOption != tc.expect {
+				t.Errorf("ClusterOption = %+v, want %+v", opt.ClusterOption, tc.expect)
+			}
+		})
+	}
+}
+
 // Credentials set on the ClientOption are used as is; next to an IAM option they are an
 // error.
 func TestResolveClientOption_CallerCredentials(t *testing.T) {

@@ -99,17 +99,16 @@ func withDefaults(opt valkey.ClientOption) valkey.ClientOption {
 		if opt.SendToReplicas == nil {
 			opt.SendToReplicas = sendReadsToReplicas
 		}
-	} else if opt.ClusterOption == (valkey.ClusterOption{}) {
+	} else if co := opt.ClusterOption; co.ShardsRefreshInterval == 0 && !co.PreferInitAddressRefresh && !co.PreferClusterShards {
 		// Cluster mode, or not known before connecting. valkey-go reads these only in its
 		// cluster client, so they are harmless when it falls back to a single-node client.
-		// A false bool can't be told apart from an unset one, so ClusterOption is filled
-		// only when the caller left all of it at zero: setting any of its fields leaves the
-		// whole ClusterOption to the caller, who can then turn each of these off.
-		opt.ClusterOption = valkey.ClusterOption{
-			ShardsRefreshInterval:    defaultShardsRefreshInterval,
-			PreferInitAddressRefresh: true, // topology only through InitAddress
-			PreferClusterShards:      true,
-		}
+		// A false bool can't be told apart from an unset one, so the three are filled only
+		// when the caller left all three at zero: setting one of them leaves the three to
+		// the caller, who can then turn each of them off. Other ClusterOption fields, such
+		// as MaxMovedRedirections, are kept and don't turn them off.
+		opt.ClusterOption.ShardsRefreshInterval = defaultShardsRefreshInterval
+		opt.ClusterOption.PreferInitAddressRefresh = true // topology only through InitAddress
+		opt.ClusterOption.PreferClusterShards = true
 	}
 	if opt.RetryDelay == nil {
 		opt.RetryDelay = memorystoreRetryDelay // exponential backoff with full jitter
