@@ -120,12 +120,11 @@ type Tx interface {
 }
 
 func newTx(client valkey.DedicatedClient, cancel func()) *tx {
-	return &tx{CoreCmdable: NewAdapter(&txproxy{CoreClient: client}), dc: client, cancel: cancel}
+	return &tx{CoreCmdable: NewAdapter(&txproxy{CoreClient: client}), cancel: cancel}
 }
 
 type tx struct {
 	CoreCmdable
-	dc     valkey.DedicatedClient
 	cancel func()
 	once   sync.Once
 }
@@ -156,11 +155,12 @@ func (t *tx) Unwatch(ctx context.Context, _ ...string) *StatusCmd {
 // instead of going back to the pool. Like go-redis, Close returns nil.
 func (t *tx) Close(ctx context.Context) error {
 	t.once.Do(func() {
+		client := t.CoreCmdable.(*Compat).client
 		uctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), unwatchTimeout)
-		err := t.dc.Do(uctx, t.dc.B().Unwatch().Build()).Error()
+		err := client.Do(uctx, client.B().Unwatch().Build()).Error()
 		cancel()
 		if err != nil {
-			t.dc.Close()
+			client.Close()
 		}
 		t.cancel()
 	})
