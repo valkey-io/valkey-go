@@ -27,13 +27,17 @@
 // names the quota project when the credentials are a user's rather than a service account's.
 //
 // Every 200ms it writes a key, reads it back, reads a hot key through the client-side cache
-// (DoCache) and reads a key that doesn't exist. It logs the counts about once a minute.
+// (DoCache) and reads a key that doesn't exist. Each round stops after 5 seconds, so a network
+// outage shows up as failed rounds and Ctrl+C still works. The keys it writes carry a random
+// prefix of their own, so two copies don't overwrite each other's keys, and the hot key is set
+// again every 10 minutes, so it never expires. It logs the counts about once a minute.
 package main
 
 import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"os"
 	"os/signal"
 	"strconv"
@@ -100,13 +104,21 @@ func run() error {
 	defer client.Close()
 
 	const hotKey = "otel-e2e:hot"
-	if err := client.Do(ctx, client.B().Set().Key(hotKey).Value("hot").Ex(time.Hour).Build()).Error(); err != nil {
+	sctx, cancel := context.WithTimeout(ctx, roundTimeout)
+	err = setHotKey(sctx, client, hotKey)
+	cancel()
+	if err != nil {
 		return fmt.Errorf("initial SET failed: %w", err)
 	}
+	// The keys of this run, under a random prefix, so two copies can't overwrite each other's.
+	// service.instance.id wouldn't do: the control test gives both copies the same one.
+	keyPrefix := fmt.Sprintf("otel-e2e:%08x:key:", rand.Uint32())
 	log.Printf("✅ connected to %s; sending traffic (press Ctrl+C to stop)...", endpoint)
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	// Ctrl+C or SIGTERM ends the traffic, and the deferred Shutdown sends the last data. This
+	// stops listening first, so a second Ctrl+C during Shutdown quits at once.
+	sigCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	start := time.Now()
@@ -114,25 +126,51 @@ func run() error {
 	for {
 		select {
 		case <-ticker.C:
+			if sigCtx.Err() != nil {
+				continue // Ctrl+C came during the last round: stop instead of starting another
+			}
 			ticks++
-			if !tick(ctx, client, ticks, hotKey) {
+			if !tick(ctx, client, ticks, keyPrefix, hotKey) {
 				failed++
 			}
 			if ticks%300 == 0 {
 				log.Printf("[Elapsed: %v] %d rounds, %d failed", time.Since(start).Round(time.Second), ticks, failed)
 			}
-		case <-stop:
+		case <-sigCtx.Done():
 			log.Printf("Stopping: %d rounds, %d failed in %v", ticks, failed, time.Since(start).Round(time.Second))
 			return nil
 		}
 	}
 }
 
+// roundTimeout limits one round of commands. Without it, a network outage would keep
+// valkey-go retrying the reads indefinitely, so the loop could neither count the failure nor
+// notice Ctrl+C, and the last metrics and spans would never be sent.
+const roundTimeout = 5 * time.Second
+
+// hotKeyRefreshRounds is how often the hot key is set again, in rounds: 3000 rounds of 200ms
+// are 10 minutes, well within the key's 1-hour expiry.
+const hotKeyRefreshRounds = 3000
+
+// setHotKey writes the key that every round reads through the client-side cache. It expires
+// after an hour, so a stopped copy leaves nothing behind.
+func setHotKey(ctx context.Context, client valkey.Client, hotKey string) error {
+	return client.Do(ctx, client.B().Set().Key(hotKey).Value("hot").Ex(time.Hour).Build()).Error()
+}
+
 // tick sends one round of commands and reports whether all of them worked.
-func tick(ctx context.Context, client valkey.Client, n int, hotKey string) bool {
-	key := fmt.Sprintf("otel-e2e:key:%d", n%100)
-	val := strconv.Itoa(n)
+func tick(ctx context.Context, client valkey.Client, n int, keyPrefix, hotKey string) bool {
+	ctx, cancel := context.WithTimeout(ctx, roundTimeout)
+	defer cancel()
 	ok := true
+	if n%hotKeyRefreshRounds == 0 { // set the hot key again before it expires
+		if err := setHotKey(ctx, client, hotKey); err != nil {
+			log.Printf("❌ refreshing the hot key failed: %v", err)
+			ok = false
+		}
+	}
+	key := keyPrefix + strconv.Itoa(n%100)
+	val := strconv.Itoa(n)
 	if err := client.Do(ctx, client.B().Set().Key(key).Value(val).Ex(time.Minute).Build()).Error(); err != nil {
 		log.Printf("❌ SET failed: %v", err)
 		ok = false
