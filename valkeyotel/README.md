@@ -17,6 +17,8 @@ Client side command metrics:
  - `valkey_command_duration_seconds`: histogram of command duration
  - `valkey_command_errors`: number of command errors
 
+`valkeyotel.WithHistogramOption` sets the bucket boundaries, in seconds, of both latency histograms: `valkey_command_duration_seconds` and `valkey_dial_latency`.
+
 ```golang
 package main
 
@@ -63,5 +65,7 @@ func main() {
 ```
 
 See [valkeyhook](../valkeyhook) if you want more customizations.
+
+To send these metrics to Cloud Monitoring and the traces to Cloud Trace, see [valkeyotel/gcp](./gcp).
 
 Note: `valkeyotel.NewClient` is not supported on go1.18 and go1.19 builds. [Reference](https://github.com/redis/rueidis/issues/442#issuecomment-1886993707)
