@@ -143,6 +143,7 @@ client, err := valkeyotel.NewClient(option)
 | `RetryDelay`     | Exponential backoff with full jitter, up to 2s; stops after 20 retries                                                                                                                                                                                                                     |
 | `ClusterOption`  | Only when left entirely at zero: `ShardsRefreshInterval` 10s, `PreferInitAddressRefresh` and `PreferClusterShards` on, so the topology is refreshed through the discovery endpoint with `CLUSTER SHARDS`. Set any `ClusterOption` field and the whole `ClusterOption` is yours |
 | `SendToReplicas` | Read-only commands that don't block go to the replicas; set only with `Standalone.ReplicaAddress`                                                                                                                                                                                        |
+| `DialCtxFn`      | After a dial to an address fails, new dials to it fail at once with the same error for a random time: up to 50ms after the first failure, doubling with each failure in a row, up to 1s. A successful dial resets it, and so does a minute without failures there. Set only when you set neither `DialCtxFn` nor `DialFn` |
 
 The cluster settings are left out when `Standalone.ReplicaAddress` is set. valkey-go ignores them when it ends up with a single-node client.
 
