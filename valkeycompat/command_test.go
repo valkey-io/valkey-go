@@ -1572,6 +1572,107 @@ func TestZSliceSingleCmdFrom(t *testing.T) {
 	})
 }
 
+func TestTopKInfoCmdFrom(t *testing.T) {
+	t.Parallel()
+
+	want := TopKInfo{K: 3, Width: 8, Depth: 7, Decay: 0.9}
+
+	t.Run("RESP3 map", func(t *testing.T) {
+		res := mock.Result(mock.ValkeyMap(map[string]valkey.ValkeyMessage{
+			"k":     mock.ValkeyInt64(3),
+			"width": mock.ValkeyInt64(8),
+			"depth": mock.ValkeyInt64(7),
+			"decay": mock.ValkeyFloat64(0.9),
+		}))
+		cmd := newTopKInfoCmd(res)
+		if err := cmd.Err(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := cmd.Val(); got != want {
+			t.Fatalf("got %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("RESP2 flat array", func(t *testing.T) {
+		res := mock.Result(mock.ValkeyArray(
+			mock.ValkeyString("k"), mock.ValkeyInt64(3),
+			mock.ValkeyString("width"), mock.ValkeyInt64(8),
+			mock.ValkeyString("depth"), mock.ValkeyInt64(7),
+			mock.ValkeyString("decay"), mock.ValkeyString("0.9"),
+		))
+		cmd := newTopKInfoCmd(res)
+		if err := cmd.Err(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := cmd.Val(); got != want {
+			t.Fatalf("got %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("odd-length array", func(t *testing.T) {
+		res := mock.Result(mock.ValkeyArray(
+			mock.ValkeyString("k"), mock.ValkeyInt64(3), mock.ValkeyString("width"),
+		))
+		if err := newTopKInfoCmd(res).Err(); err == nil {
+			t.Fatal("expected an error")
+		}
+	})
+
+}
+
+func TestClusterShardsCmdFrom(t *testing.T) {
+	t.Parallel()
+
+	want := []ClusterShard{{
+		Slots: []SlotRange{{Start: 0, End: 5460}},
+		Nodes: []Node{{ID: "n1", Endpoint: "127.0.0.1", IP: "127.0.0.1", Port: 30001, Role: "master", ReplicationOffset: 72156, Health: "online"}},
+	}}
+
+	t.Run("RESP3 maps", func(t *testing.T) {
+		res := mock.Result(mock.ValkeyArray(mock.ValkeyMap(map[string]valkey.ValkeyMessage{
+			"slots": mock.ValkeyArray(mock.ValkeyInt64(0), mock.ValkeyInt64(5460)),
+			"nodes": mock.ValkeyArray(mock.ValkeyMap(map[string]valkey.ValkeyMessage{
+				"id":                 mock.ValkeyString("n1"),
+				"port":               mock.ValkeyInt64(30001),
+				"ip":                 mock.ValkeyString("127.0.0.1"),
+				"endpoint":           mock.ValkeyString("127.0.0.1"),
+				"role":               mock.ValkeyString("master"),
+				"replication-offset": mock.ValkeyInt64(72156),
+				"health":             mock.ValkeyString("online"),
+			})),
+		})))
+		cmd := newClusterShardsCmd(res)
+		if err := cmd.Err(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := cmd.Val(); !reflect.DeepEqual(got, want) {
+			t.Fatalf("got %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("RESP2 flat arrays", func(t *testing.T) {
+		res := mock.Result(mock.ValkeyArray(mock.ValkeyArray(
+			mock.ValkeyString("slots"), mock.ValkeyArray(mock.ValkeyInt64(0), mock.ValkeyInt64(5460)),
+			mock.ValkeyString("nodes"), mock.ValkeyArray(mock.ValkeyArray(
+				mock.ValkeyString("id"), mock.ValkeyString("n1"),
+				mock.ValkeyString("port"), mock.ValkeyInt64(30001),
+				mock.ValkeyString("ip"), mock.ValkeyString("127.0.0.1"),
+				mock.ValkeyString("endpoint"), mock.ValkeyString("127.0.0.1"),
+				mock.ValkeyString("role"), mock.ValkeyString("master"),
+				mock.ValkeyString("replication-offset"), mock.ValkeyInt64(72156),
+				mock.ValkeyString("health"), mock.ValkeyString("online"),
+			)),
+		)))
+		cmd := newClusterShardsCmd(res)
+		if err := cmd.Err(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got := cmd.Val(); !reflect.DeepEqual(got, want) {
+			t.Fatalf("got %+v, want %+v", got, want)
+		}
+	})
+}
+
 // TestCacheHitCmd tests the IsCacheHit and setIsCacheHit functionality for Cmd
 func TestCacheHitCmd(t *testing.T) {
 	cmd := &Cmd{}
