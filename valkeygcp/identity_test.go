@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/valkey-io/valkey-go"
@@ -52,10 +53,16 @@ func TestUsername_Strategies(t *testing.T) {
 	}
 }
 
-// On Google Cloud, when no credentials JSON names an email, the principal-email strategy
-// reads the email of the default service account from the metadata server.
+// On Google Cloud, when the credentials come from the metadata server (no credentials JSON),
+// the principal-email strategy reads the email of the default service account from it. A
+// credentials file that names no principal, such as user credentials from gcloud auth
+// application-default login, which Application Default Credentials prefer to the metadata
+// server, doesn't fall through to it: the metadata server would name the machine's account,
+// not the principal behind the tokens.
 func TestUsername_MetadataServer(t *testing.T) {
+	var requests atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
 		if r.Header.Get("Metadata-Flavor") != "Google" || r.URL.Path != "/computeMetadata/v1/instance/service-accounts/default/email" {
 			http.NotFound(w, r)
 			return
@@ -69,10 +76,18 @@ func TestUsername_MetadataServer(t *testing.T) {
 	if err != nil || got != "workload@p.iam.gserviceaccount.com" {
 		t.Fatalf("got %q, %v", got, err)
 	}
-	// User credentials JSON carries no email: fall through to the metadata server.
-	got, err = resolveUsername(context.Background(), IAMAuthOptions{UsernameStrategy: UsernamePrincipalEmail}, []byte(`{"type":"authorized_user"}`))
-	if err != nil || got != "workload@p.iam.gserviceaccount.com" {
-		t.Fatalf("authorized_user: got %q, %v", got, err)
+	for _, creds := range []string{
+		`{"type":"authorized_user","client_id":"c","refresh_token":"r"}`,
+		`{"type":"external_account","audience":"//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/q"}`,
+	} {
+		requests.Store(0)
+		got, err = resolveUsername(context.Background(), IAMAuthOptions{UsernameStrategy: UsernamePrincipalEmail}, []byte(creds))
+		if !errors.Is(err, errJSONPrincipal) || got != "" {
+			t.Errorf("%s: got %q, %v; want errJSONPrincipal", creds, got, err)
+		}
+		if n := requests.Load(); n != 0 {
+			t.Errorf("%s: the metadata server was asked %d times, want 0", creds, n)
+		}
 	}
 }
 
@@ -123,33 +138,69 @@ func TestCredTypeFromJSON(t *testing.T) {
 // An explicit IAM username must be "default" or the principal's email: Memorystore answers
 // any other username with ERR_IAM_OTHER. checkIAMUsername catches a mismatch during setup
 // instead of on every dial, and lets the username through when the principal is unknown.
+// valid tells a username known to be accepted from one that may still be wrong.
 func TestCheckIAMUsername(t *testing.T) {
 	fakeMetadata(t, nil) // not on GCE: principal unknown without JSON or impersonation
 	const saKey = `{"type":"service_account","client_email":"key@p.iam.gserviceaccount.com"}`
 	cases := []struct {
-		name    string
-		opt     IAMAuthOptions
-		json    string
-		wantErr bool
+		name      string
+		opt       IAMAuthOptions
+		json      string
+		wantValid bool
+		wantErr   bool
 	}{
-		{"empty", IAMAuthOptions{}, saKey, false},
-		{"default", IAMAuthOptions{Username: DefaultIAMUsername}, saKey, false},
-		{"key email", IAMAuthOptions{Username: "key@p.iam.gserviceaccount.com"}, saKey, false},
-		{"key email, other case", IAMAuthOptions{Username: "KEY@p.iam.gserviceaccount.com"}, saKey, false},
-		{"other email", IAMAuthOptions{Username: "other@p.iam.gserviceaccount.com"}, saKey, true},
-		{"not an email", IAMAuthOptions{Username: "app-user"}, saKey, true},
-		{"impersonated email", IAMAuthOptions{Username: "t@p.iam.gserviceaccount.com", ImpersonateSA: "t@p.iam.gserviceaccount.com"}, "", false},
-		{"impersonation mismatch", IAMAuthOptions{Username: "key@p.iam.gserviceaccount.com", ImpersonateSA: "t@p.iam.gserviceaccount.com"}, saKey, true},
-		{"custom source, principal unknown", IAMAuthOptions{Username: "app-user", CustomTokenSource: staticIAM().CustomTokenSource}, "", false},
-		{"principal unresolvable", IAMAuthOptions{Username: "app-user"}, "", false},
+		{"empty", IAMAuthOptions{}, saKey, true, false},
+		{"default", IAMAuthOptions{Username: DefaultIAMUsername}, saKey, true, false},
+		{"key email", IAMAuthOptions{Username: "key@p.iam.gserviceaccount.com"}, saKey, true, false},
+		{"key email, other case", IAMAuthOptions{Username: "KEY@p.iam.gserviceaccount.com"}, saKey, true, false},
+		{"other email", IAMAuthOptions{Username: "other@p.iam.gserviceaccount.com"}, saKey, false, true},
+		{"not an email", IAMAuthOptions{Username: "app-user"}, saKey, false, true},
+		{"impersonated email", IAMAuthOptions{Username: "t@p.iam.gserviceaccount.com", ImpersonateSA: "t@p.iam.gserviceaccount.com"}, "", true, false},
+		{"impersonation mismatch", IAMAuthOptions{Username: "key@p.iam.gserviceaccount.com", ImpersonateSA: "t@p.iam.gserviceaccount.com"}, saKey, false, true},
+		{"custom source, principal unknown", IAMAuthOptions{Username: "app-user", CustomTokenSource: staticIAM().CustomTokenSource}, "", false, false},
+		{"principal unresolvable", IAMAuthOptions{Username: "app-user"}, "", false, false},
 	}
 	for _, c := range cases {
-		err := checkIAMUsername(context.Background(), c.opt, []byte(c.json))
-		if (err != nil) != c.wantErr {
-			t.Errorf("%s: got %v, want error %v", c.name, err, c.wantErr)
+		valid, err := checkIAMUsername(context.Background(), c.opt, []byte(c.json))
+		if (err != nil) != c.wantErr || valid != c.wantValid {
+			t.Errorf("%s: got valid=%v, %v; want valid=%v, error %v", c.name, valid, err, c.wantValid, c.wantErr)
 		}
 		if err != nil && !strings.Contains(err.Error(), "isn't valid") {
 			t.Errorf("%s: unexpected message %v", c.name, err)
+		}
+	}
+}
+
+// On Google Cloud, the metadata server names the principal only when the credentials come
+// from it. A user's own email next to user credentials, or next to a federation file that
+// doesn't impersonate a service account, is let through, not compared with the machine's
+// service account. Without credentials JSON, the metadata server's account is the principal.
+func TestCheckIAMUsername_OnGoogleCloud(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("vm@p.iam.gserviceaccount.com"))
+	}))
+	defer srv.Close()
+	fakeMetadata(t, srv)
+	const (
+		user = `{"type":"authorized_user","client_id":"c","refresh_token":"r"}`
+		wif  = `{"type":"external_account","audience":"//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/p/providers/q"}`
+	)
+	cases := []struct {
+		name      string
+		username  string
+		json      string
+		wantValid bool
+		wantErr   bool
+	}{
+		{"user credentials, user's email", "me@example.com", user, false, false},
+		{"federation without impersonation", "me@example.com", wif, false, false},
+		{"metadata credentials, machine's account", "vm@p.iam.gserviceaccount.com", "", true, false},
+		{"metadata credentials, other email", "me@example.com", "", false, true},
+	}
+	for _, c := range cases {
+		valid, err := checkIAMUsername(context.Background(), IAMAuthOptions{Username: c.username}, []byte(c.json))
+		if (err != nil) != c.wantErr || valid != c.wantValid {
+			t.Errorf("%s: got valid=%v, %v; want valid=%v, error %v", c.name, valid, err, c.wantValid, c.wantErr)
 		}
 	}
 }
@@ -183,7 +234,7 @@ func TestUsername_GKENonEmailIdentifier(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "iam.gke.io/return-principal-id-as-email") {
 		t.Fatalf("got %v, want the GKE annotation hint", err)
 	}
-	if err := checkIAMUsername(context.Background(), IAMAuthOptions{Username: "sa@p.iam.gserviceaccount.com"}, nil); err != nil {
+	if _, err := checkIAMUsername(context.Background(), IAMAuthOptions{Username: "sa@p.iam.gserviceaccount.com"}, nil); err != nil {
 		t.Fatalf("explicit email rejected although the principal isn't known as an email: %v", err)
 	}
 }

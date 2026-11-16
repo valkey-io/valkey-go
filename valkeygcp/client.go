@@ -56,14 +56,17 @@ var errNoEndpoint = errors.New("valkeygcp: no endpoint: set ClientOption.InitAdd
 // ctx bounds credential setup and connecting. valkey-go connects and authenticates while it
 // builds the client, so setup needs working credentials. Memorystore IAM backend errors
 // (ERR_IAM_EXHAUSTED, ERR_IAM_OTHER) during the handshake are retried with backoff until ctx
-// ends, at most 15s when it has no earlier deadline. When an ACL rule refuses CLIENT
+// ends, at most 15s when it has no earlier deadline. Memorystore also answers an invalid
+// username with ERR_IAM_OTHER, so that error is retried only a few times for a username other
+// than "default" (or none) that setup couldn't check against the IAM principal, which includes
+// any such username of credentials set on the ClientOption. When an ACL rule refuses CLIENT
 // TRACKING, the error says so. Token refreshes never use ctx.
 func NewClient(ctx context.Context, option valkey.ClientOption, opts ...Option) (valkey.Client, error) {
-	opt, err := ResolveClientOption(ctx, option, opts...)
+	opt, usernameValid, err := resolveClientOption(ctx, option, opts...)
 	if err != nil {
 		return nil, err
 	}
-	return connect(ctx, opt)
+	return connect(ctx, opt, usernameValid)
 }
 
 // ResolveClientOption returns the valkey.ClientOption NewClient would connect with, without
@@ -73,27 +76,38 @@ func NewClient(ctx context.Context, option valkey.ClientOption, opts ...Option) 
 // NewClient's connect-time handling: the retries of Memorystore IAM backend errors during
 // the handshake, and the CLIENT TRACKING hint.
 func ResolveClientOption(ctx context.Context, option valkey.ClientOption, opts ...Option) (valkey.ClientOption, error) {
+	opt, _, err := resolveClientOption(ctx, option, opts...)
+	return opt, err
+}
+
+// resolveClientOption is ResolveClientOption. It also reports whether setup knows that
+// Memorystore accepts the IAM username (see checkIAMUsername), which tells connect how long to
+// retry ERR_IAM_OTHER. With credentials set on the ClientOption instead, such as the ones
+// ResolveClientOption returns, it doesn't know, and connect looks at the username they send.
+func resolveClientOption(ctx context.Context, option valkey.ClientOption, opts ...Option) (valkey.ClientOption, bool, error) {
 	cfg := newConfig(opts)
 	if len(option.InitAddress) == 0 {
-		return valkey.ClientOption{}, errNoEndpoint
+		return valkey.ClientOption{}, false, errNoEndpoint
 	}
 	if field := callerAuthField(option); field != "" && cfg.iam != nil {
-		return valkey.ClientOption{}, fmt.Errorf("valkeygcp: ClientOption.%s conflicts with WithIAMOptions, which supplies the AUTH token", field)
+		return valkey.ClientOption{}, false, fmt.Errorf("valkeygcp: ClientOption.%s conflicts with WithIAMOptions, which supplies the AUTH token", field)
 	}
 	opt := withDefaults(option)
+	usernameValid := false
 	if cfg.iam != nil {
 		iam, err := withCallerUsername(*cfg.iam, option.Username)
 		if err != nil {
-			return valkey.ClientOption{}, err
+			return valkey.ClientOption{}, false, err
 		}
-		p, err := NewIAMTokenProvider(ctx, iam)
+		p, err := newIAMTokenProvider(ctx, iam)
 		if err != nil {
-			return valkey.ClientOption{}, err
+			return valkey.ClientOption{}, false, err
 		}
 		opt.AuthCredentialsFn = p.AuthCredentialsFn()
 		installDialGate(&opt) // after an ERR_IAM_* rejection, new dials wait with backoff
+		usernameValid = p.usernameValid
 	}
-	return opt, nil
+	return opt, usernameValid, nil
 }
 
 // withDefaults fills the Memorystore defaults into the fields of opt left at their zero

@@ -6,8 +6,8 @@
 // off itself, in two places. NewClient retries the handshake with backoff until its ctx
 // ends. Once a client has connected, each new connection after an IAM error first waits at
 // the dial gate: a random delay of up to 250ms, with the limit doubling for each further
-// IAM error in a row, up to 10s. Without the gate, re-dials would follow the application's
-// request rate and add to the quota pressure.
+// round of IAM errors (connections dialed together count once), up to 10s. Without the gate,
+// re-dials would follow the application's request rate and add to the quota pressure.
 //
 // iamprobe runs a fake RESP server on loopback that answers HELLO with
 // "-ERR (ERR_IAM_EXHAUSTED) ...", so it needs no network, instance or credentials. Run it

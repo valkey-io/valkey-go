@@ -37,11 +37,22 @@ const setUsername = "set the username (ClientOption.Username or IAMAuthOptions.U
 // no CredentialsJSON: nothing tells whose tokens the source returns.
 var errCustomSourcePrincipal = errors.New("valkeygcp: UsernamePrincipalEmail can't tell whose tokens CustomTokenSource returns; " + setUsername + " to that principal's email, or CredentialsJSON to its credentials")
 
+// errJSONPrincipal is returned for UsernamePrincipalEmail when the credentials JSON names no
+// principal: user credentials (gcloud auth application-default login), or a federation
+// configuration that doesn't impersonate a service account.
+var errJSONPrincipal = errors.New("valkeygcp: UsernamePrincipalEmail can't find the principal email in the credentials JSON, which names none (user credentials, or federation without service account impersonation); " + setUsername + " to that principal's email")
+
 // resolveUsername returns the AUTH username: Username when set, otherwise the one
 // UsernameStrategy picks. For UsernamePrincipalEmail the email comes from, in order,
 // ImpersonateSA, the key file or federation file in credsJSON, and the metadata server.
 // credsJSON is IAMAuthOptions.CredentialsJSON or the JSON of the Application Default
 // Credentials (nil on the metadata server).
+//
+// The metadata server is asked only when there is no credentials JSON, that is when the
+// credentials come from it. Application Default Credentials prefer a credentials file to the
+// metadata server, so on Google Cloud a file that names no principal, such as user
+// credentials, sits next to a metadata server that names the machine's service account: not
+// the principal the tokens belong to.
 //
 // With a CustomTokenSource, only CredentialsJSON can name the principal: the tokens don't
 // come from ImpersonateSA, and the metadata server would name the machine's own account,
@@ -64,6 +75,9 @@ func resolveUsername(ctx context.Context, opt IAMAuthOptions, credsJSON []byte) 
 	}
 	if email := emailFromJSON(credsJSON); email != "" {
 		return email, nil
+	}
+	if len(credsJSON) > 0 {
+		return "", errJSONPrincipal
 	}
 	if metadataOnGCE(ctx) { // GCE, GKE Workload Identity, Cloud Run
 		email, err := metadataEmail(ctx, "default")
@@ -104,27 +118,34 @@ func emailFromJSON(b []byte) string {
 	return ""
 }
 
-// checkIAMUsername rejects an explicit IAM username that Memorystore would refuse with
-// ERR_IAM_OTHER: "If you specify a username, then you must use either the default
-// username or the IAM principal email address". It stays silent when the principal can't
-// be determined (a custom token source without credentials JSON, or user credentials off
-// Google Cloud), because the username may then be right.
-func checkIAMUsername(ctx context.Context, opt IAMAuthOptions, credsJSON []byte) error {
+// checkIAMUsername checks an explicit IAM username against the principal. Memorystore refuses
+// other usernames with ERR_IAM_OTHER: "If you specify a username, then you must use either
+// the default username or the IAM principal email address". A username that doesn't match a
+// known principal is an error.
+//
+// valid reports a username Memorystore accepts: none (UsernameStrategy then picks one),
+// "default", or the principal's email. When the principal can't be determined (a custom token
+// source without credentials JSON, credentials JSON that names no principal, or no metadata
+// server), the username may still be right: valid is false, and there is no error.
+func checkIAMUsername(ctx context.Context, opt IAMAuthOptions, credsJSON []byte) (valid bool, err error) {
 	if opt.Username == "" || opt.Username == DefaultIAMUsername {
-		return nil
+		return true, nil
 	}
 	if opt.CustomTokenSource != nil && len(credsJSON) == 0 {
-		return nil
+		return false, nil
 	}
-	email, err := resolveUsername(ctx, IAMAuthOptions{
+	email, lookupErr := resolveUsername(ctx, IAMAuthOptions{
 		UsernameStrategy:  UsernamePrincipalEmail,
 		ImpersonateSA:     opt.ImpersonateSA,
 		CustomTokenSource: opt.CustomTokenSource,
 	}, credsJSON)
-	if err != nil || !strings.Contains(email, "@") || strings.EqualFold(email, opt.Username) {
-		return nil // principal unknown, or not an email (resolveUsername rejects those)
+	if lookupErr != nil || !strings.Contains(email, "@") {
+		return false, nil // principal unknown, or not an email (resolveUsername rejects those)
 	}
-	return fmt.Errorf("valkeygcp: IAM username %q isn't valid for %s: use %q (or no username) or the principal's email", opt.Username, email, DefaultIAMUsername)
+	if strings.EqualFold(email, opt.Username) {
+		return true, nil
+	}
+	return false, fmt.Errorf("valkeygcp: IAM username %q isn't valid for %s: use %q (or no username) or the principal's email", opt.Username, email, DefaultIAMUsername)
 }
 
 // credTypeFromJSON reads the credential type (the "type" field) from credentials JSON, for

@@ -16,7 +16,7 @@
 * **IAM authentication:** OAuth2 access tokens from ADC (GKE Workload Identity, the metadata server, or a service account key in `GOOGLE_APPLICATION_CREDENTIALS`), or from your own `oauth2.TokenSource`.
 * **Other identities:** a service account key, or a Workload Identity Federation file that impersonates a service account (`CredentialsJSON`), or service account impersonation (`ImpersonateSA`, with `Delegates` and tokens lasting up to 12 hours), for workloads that don't run as the identity with access: cross-project access and key-based setups.
 * **The principal's email as the username:** `UsernamePrincipalEmail` sends the IAM principal's email instead of `"default"`; Memorystore accepts either. A username Memorystore would refuse fails at setup when the principal is known, and an ACL rule that blocks `CLIENT TRACKING` gets an error saying so.
-* **IAM backend errors:** Memorystore answers `ERR_IAM_EXHAUSTED` when its IAM backend is over quota, and `ERR_IAM_OTHER` for an invalid username or a transient IAM backend error; Google recommends retrying them with exponential backoff. `NewClient` retries those errors while connecting, with exponential backoff, and after such an error new connections wait before dialing.
+* **IAM backend errors:** Memorystore answers `ERR_IAM_EXHAUSTED` when its IAM backend is over quota, and `ERR_IAM_OTHER` for an invalid username or a transient IAM backend error; Google recommends retrying them with exponential backoff, `ERR_IAM_OTHER` once the username is valid. `NewClient` retries those errors while connecting, with exponential backoff, and after such an error new connections wait before dialing.
 * **Token rotation on live connections:** connections re-AUTH with a new token before the old one expires, spread out so they don't all re-AUTH at once.
 * **Refresh failure tolerance:** if a refresh fails, live connections keep the last valid token, and `OnCredentialError` reports the error.
 * **Bounded setup and token fetches:** `ctx` bounds setup, and every token fetch is capped by `FetchTimeout`.
@@ -197,9 +197,9 @@ Each of these follows Google's [Valkey client best practices](https://docs.cloud
 
 ### 1.6 Contexts and Setup Failures
 
-* **`NewClient`'s `ctx` bounds setup only.** Finding the credentials, impersonation, the principal-email lookup and connecting stop when it is cancelled or its deadline passes, and after 15 seconds if it has no deadline. Token refreshes never use it, because they run for the life of the client.
-* **IAM backend errors are retried while connecting.** `ERR_IAM_EXHAUSTED` and `ERR_IAM_OTHER` during the connection handshake are retried with exponential backoff (250ms doubling, up to 10s between attempts) within that time; the final error keeps Memorystore's reply.
-* **Re-dials wait after IAM errors.** After Memorystore rejects a new connection with `ERR_IAM_*`, the next connections wait with the same backoff before dialing, so re-dials don't add to the load that caused the error. This dial gate wraps `ClientOption.DialCtxFn`, and only applies after the client has connected once.
+* **`NewClient`'s `ctx` bounds setup only.** Finding the credentials, the principal-email lookup and connecting stop when it is cancelled or its deadline passes, and after 15 seconds if it has no deadline. Token refreshes never use it, because they run for the life of the client.
+* **IAM backend errors are retried while connecting.** `ERR_IAM_EXHAUSTED` and `ERR_IAM_OTHER` during the connection handshake are retried with exponential backoff (250ms doubling, up to 10s between attempts) within that time; the final error keeps Memorystore's reply. Memorystore also answers an invalid username with `ERR_IAM_OTHER`, so when setup couldn't check an explicit username against the IAM principal, `NewClient` gives up after 3 attempts that got `ERR_IAM_OTHER`, with an error that says to check the username. The same goes for credentials set on the `ClientOption`, such as the ones `ResolveClientOption` returns, unless they send `"default"` or no username.
+* **Re-dials wait after IAM errors.** After Memorystore rejects a new connection with `ERR_IAM_*`, the next connections wait with the same backoff before dialing, so re-dials don't add to the load that caused the error. Connections dialed together, which are rejected together, count as one step of the backoff. This dial gate wraps `ClientOption.DialCtxFn`, and only applies after the client has connected once.
 * **Setup needs working credentials.** valkey-go connects and authenticates while it builds the client, so missing ADC, an invalid key file or a denied impersonation fails `NewClient` immediately, with the underlying error. Without ADC, set `CredentialsJSON` or `CustomTokenSource`.
 * **`InitAddress` is required.** `NewClient` and `ResolveClientOption` return an error without it.
 * **Credentials on the `ClientOption`** (`Password` or `AuthCredentialsFn`) are used as is; passing them together with `WithIAMOptions` or `WithDefaultIAM` is an error. With an IAM option, `ClientOption.Username` is the IAM username unless `IAMAuthOptions.Username` sets one; if both are set, they must match.
@@ -211,11 +211,13 @@ The IAM username is `"default"` unless you set one. Memorystore accepts `"defaul
 1. the impersonated account (`ImpersonateSA`);
 2. the `client_email` of a service account key;
 3. the impersonation URL of a Workload Identity Federation file;
-4. the metadata server (Compute Engine, GKE Workload Identity, Cloud Run).
+4. the metadata server (Compute Engine, GKE Workload Identity, Cloud Run), when the credentials come from it.
+
+User credentials (`gcloud auth application-default login`) and federation files that don't impersonate a service account name no principal, so `UsernamePrincipalEmail` fails at setup with them: set `Username` to the principal's email instead. The metadata server isn't asked then, because Application Default Credentials use such a file before the metadata server, whose account isn't the one the tokens belong to.
 
 With a `CustomTokenSource`, valkeygcp can't tell whose tokens it returns: set `CredentialsJSON` too, to read the email from it, or set `Username`. On GKE, for a Kubernetes ServiceAccount linked to an IAM service account, the metadata server returns `NAME.svc.id.goog` instead of an email unless the Kubernetes ServiceAccount has the annotation `iam.gke.io/return-principal-id-as-email: "true"`.
 
-An explicit username, `IAMAuthOptions.Username` or `ClientOption.Username`, always wins. Memorystore accepts only `"default"` or the principal's email, so another value fails at setup when the principal is known.
+An explicit username, `IAMAuthOptions.Username` or `ClientOption.Username`, always wins. Memorystore accepts only `"default"` or the principal's email, so another value fails at setup when the principal is known. When it isn't known, `NewClient` stops retrying after 3 attempts that got `ERR_IAM_OTHER`, which Memorystore also sends for an invalid username.
 
 With an ACL policy, Memorystore matches its rules to the IAM principal that authenticates; Google recommends principal emails as the rules' usernames, and a principal without a rule gets the `default` user's permissions. A rule must also allow what valkey-go sends besides the application's commands: `client|tracking` on every new connection, unless `ClientOption.DisableCache` is set, and on cluster-mode instances `cluster|shards`, to read the topology. Without `client|tracking`, `NewClient` fails with an error that says so. Without `cluster|shards`, valkey-go falls back to a single-node client when `InitAddress` has one address, and keys on other shards then fail with `MOVED`.
 
@@ -226,7 +228,7 @@ With an ACL policy, Memorystore matches its rules to the IAM principal that auth
 | IAM Auth  | `roles/memorystore.dbConnectionUser` (`memorystore.instances.connect`) |
 | Impersonation | `roles/iam.serviceAccountTokenCreator` on the impersonated account       |
 
-Grant `roles/memorystore.dbConnectionUser` to the identity behind the access tokens: the ADC identity, the identity in `CredentialsJSON`, or the identity of `CustomTokenSource`. With `ImpersonateSA`, grant it to the impersonated account instead, and give the identity that impersonates (ADC, or `CredentialsJSON`) `roles/iam.serviceAccountTokenCreator` on that account. With `Delegates`, each service account in the chain needs that role on the next one, and the last one on the impersonated account.
+Grant `roles/memorystore.dbConnectionUser` to the identity behind the access tokens: the ADC identity, the identity in `CredentialsJSON`, or the identity of `CustomTokenSource`. With `ImpersonateSA`, grant it to the impersonated account instead, and give the identity that impersonates (ADC, or `CredentialsJSON`) `roles/iam.serviceAccountTokenCreator` on that account. With `Delegates`, the identity that impersonates needs that role on the first service account in the chain, each one on the next, and the last one on the impersonated account. valkeygcp gets the impersonated tokens from the IAM Service Account Credentials API (`generateAccessToken`) over HTTPS, so the identity that impersonates needs the `cloud-platform` scope, which a Compute Engine VM must have as an access scope.
 
 ### 1.9 Testing
 

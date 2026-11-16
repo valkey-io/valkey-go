@@ -21,6 +21,7 @@ import (
 
 const (
 	iamExhausted    = "-ERR (ERR_IAM_EXHAUSTED) Memorystore IAM authentication backend quota exceeded.\r\n"
+	iamOther        = "-ERR (ERR_IAM_OTHER) Memorystore IAM authentication backend error.\r\n"
 	clusterDisabled = "-ERR This instance has cluster support disabled\r\n"
 )
 
@@ -160,6 +161,102 @@ func TestNewClient_OtherHandshakeErrorsNotRetried(t *testing.T) {
 	}
 }
 
+// Memorystore answers ERR_IAM_OTHER for a transient IAM backend error and for a username that
+// isn't valid, and Google recommends retrying it once the username is valid. With a username
+// known to be valid, "default" or an email setup checked against CredentialsJSON, NewClient
+// retries it until ctx ends, like ERR_IAM_EXHAUSTED. With an explicit username that setup
+// couldn't check against the principal, it gives up after maxIAMOtherAttempts handshakes, and
+// the error says what to check.
+func TestNewClient_IAMOtherRetries(t *testing.T) {
+	srv := newScriptedValkey(t, func(conn int64, args []string) (string, bool) {
+		if strings.EqualFold(args[0], "HELLO") {
+			return iamOther, false
+		}
+		return standaloneReply(conn, args)
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
+	defer cancel()
+	_, err := NewClient(ctx, initOption(srv.addr()), WithIAMOptions(staticIAM()))
+	if err == nil || !strings.Contains(err.Error(), "ERR_IAM_OTHER") || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("default username: got %v, want ERR_IAM_OTHER retried until the deadline", err)
+	}
+
+	// CredentialsJSON names the principal, so setup checks the email and takes it as valid.
+	vouched := staticIAM()
+	vouched.Username = "someone@example.com"
+	vouched.CredentialsJSON = []byte(`{"type":"service_account","client_email":"someone@example.com"}`)
+	ctx, cancel = context.WithTimeout(context.Background(), 700*time.Millisecond)
+	defer cancel()
+	_, err = NewClient(ctx, initOption(srv.addr()), WithIAMOptions(vouched))
+	if err == nil || !strings.Contains(err.Error(), "ERR_IAM_OTHER") || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("checked username: got %v, want ERR_IAM_OTHER retried until the deadline", err)
+	}
+
+	before := srv.conns.Load()
+	unchecked := staticIAM()
+	unchecked.Username = "someone@example.com" // a custom token source names no principal
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	_, err = NewClient(ctx, initOption(srv.addr()), WithIAMOptions(unchecked))
+	if err == nil || !strings.Contains(err.Error(), "ERR_IAM_OTHER") || !strings.Contains(err.Error(), "username isn't valid") ||
+		errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("unchecked username: got %v, want ERR_IAM_OTHER with the username hint before the deadline", err)
+	}
+	if n := srv.conns.Load() - before; n != maxIAMOtherAttempts {
+		t.Fatalf("unchecked username: %d connections, want %d", n, maxIAMOtherAttempts)
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Fatalf("unchecked username: took %v, want well under the 10s deadline", elapsed)
+	}
+}
+
+// Credentials set on the ClientOption, such as the ones ResolveClientOption returns, weren't
+// checked by this NewClient. It then looks at the username the handshakes send: "default", or
+// none, is always accepted, so ERR_IAM_OTHER is retried until ctx ends; another username may
+// be invalid, so NewClient stops after maxIAMOtherAttempts handshakes.
+func TestNewClient_IAMOtherRetries_CallerCredentials(t *testing.T) {
+	srv := newScriptedValkey(t, func(conn int64, args []string) (string, bool) {
+		if strings.EqualFold(args[0], "HELLO") {
+			return iamOther, false
+		}
+		return standaloneReply(conn, args)
+	})
+	resolved := func(username string) valkey.ClientOption {
+		iam := staticIAM()
+		iam.Username = username
+		opt, err := ResolveClientOption(context.Background(), initOption(srv.addr()), WithIAMOptions(iam))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return opt
+	}
+	password := initOption(srv.addr())
+	password.Username, password.Password = "someone@example.com", "token"
+	for _, c := range []struct {
+		name   string
+		opt    valkey.ClientOption
+		capped bool
+	}{
+		{"ResolveClientOption, default username", resolved(""), false},
+		{"ResolveClientOption, unchecked email", resolved("someone@example.com"), true},
+		{"Password, unchecked email", password, true},
+	} {
+		ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
+		before := srv.conns.Load()
+		_, err := NewClient(ctx, c.opt) // no IAM option: the credentials on the ClientOption are used as they are
+		cancel()
+		n := srv.conns.Load() - before
+		switch {
+		case c.capped && (err == nil || !strings.Contains(err.Error(), "username isn't valid") || n != maxIAMOtherAttempts):
+			t.Errorf("%s: %d handshakes, %v; want %d, then the username hint", c.name, n, err, maxIAMOtherAttempts)
+		case !c.capped && !errors.Is(err, context.DeadlineExceeded):
+			t.Errorf("%s: %d handshakes, %v; want retries until the deadline", c.name, n, err)
+		}
+	}
+}
+
 // valkey-go sends CLIENT TRACKING on every new connection unless ClientOption.DisableCache
 // is set. When an ACL rule refuses it, the error says to allow it, keeps Memorystore's
 // NOPERM reply, which names the rule's user, and still wraps valkey.ErrNoCache. Another
@@ -186,32 +283,88 @@ func TestNewClient_ClientTrackingHint(t *testing.T) {
 
 func TestDialGate(t *testing.T) {
 	g := &dialGate{backoff: func(n int) time.Duration { return time.Duration(n+1) * time.Second }}
-	g.handshake(handshakeIAMError)
-	if d := g.delay(); d != 0 {
+	reject := func() { _, r := g.delay(); g.handshake(handshakeIAMError, r) } // one dial, then its rejection
+	reject()
+	if d, _ := g.delay(); d != 0 {
 		t.Fatalf("delay before the first successful handshake = %v, want 0", d)
 	}
-	g.handshake(handshakeOK)
-	g.handshake(handshakeIAMError)
-	g.handshake(handshakeIAMError)
-	if d := g.delay(); d != 2*time.Second {
-		t.Fatalf("delay after 2 IAM errors = %v, want backoff(1) = 2s", d)
+	g.handshake(handshakeOK, 0)
+	reject()
+	reject()
+	if d, _ := g.delay(); d != 2*time.Second {
+		t.Fatalf("delay after 2 rounds of IAM errors = %v, want backoff(1) = 2s", d)
 	}
-	g.handshake(handshakeOther) // WRONGPASS and the like don't change the count
-	if d := g.delay(); d != 2*time.Second {
+	_, r := g.delay()
+	g.handshake(handshakeOther, r) // WRONGPASS and the like don't change the count
+	if d, _ := g.delay(); d != 2*time.Second {
 		t.Fatalf("delay after another error = %v, want unchanged", d)
 	}
-	g.handshake(handshakeOK)
-	if d := g.delay(); d != 0 {
+	g.handshake(handshakeOK, r)
+	if d, _ := g.delay(); d != 0 {
 		t.Fatalf("delay after a successful handshake = %v, want 0", d)
 	}
 	// The real schedule stays within the IAM cap.
 	g = &dialGate{}
-	g.handshake(handshakeOK)
-	for i := 0; i < 30; i++ {
-		g.handshake(handshakeIAMError)
+	g.handshake(handshakeOK, 0)
+	for range 30 {
+		reject()
 	}
-	if d := g.delay(); d <= 0 || d > iamBackoffCap {
+	if d, _ := g.delay(); d <= 0 || d > iamBackoffCap {
 		t.Fatalf("delay = %v, want (0, %v]", d, iamBackoffCap)
+	}
+}
+
+// Connections dialed together are rejected together, as when a deploy opens many at once:
+// their IAM errors count as one round, so a burst moves the backoff one step, not one step
+// per connection. A dial that passes the gate after the round was counted starts the next
+// round.
+func TestDialGate_BurstCountsOnce(t *testing.T) {
+	g := &dialGate{backoff: func(n int) time.Duration { return time.Duration(n+1) * time.Second }}
+	g.handshake(handshakeOK, 0)
+	rounds := make([]uint64, 10)
+	for i := range rounds { // ten dials pass the gate before any of them is rejected
+		_, rounds[i] = g.delay()
+	}
+	for _, r := range rounds {
+		g.handshake(handshakeIAMError, r)
+	}
+	if d, _ := g.delay(); d != time.Second {
+		t.Fatalf("delay after a burst of 10 rejections = %v, want backoff(0) = 1s (one round)", d)
+	}
+	_, r := g.delay() // a re-dial after the burst
+	g.handshake(handshakeIAMError, r)
+	if d, _ := g.delay(); d != 2*time.Second {
+		t.Fatalf("delay after the next round = %v, want backoff(1) = 2s", d)
+	}
+}
+
+// gatedDialer hands each connection the round its dial joined, so the rejections that
+// connections dialed together read from Memorystore count once.
+func TestGatedDialer_ConcurrentRejectionsCountOnce(t *testing.T) {
+	g := &dialGate{}
+	g.handshake(handshakeOK, 0)
+	dial := gatedDialer(func(context.Context, string, *net.Dialer, *tls.Config) (net.Conn, error) {
+		return &chunkConn{chunks: []string{iamExhausted}}, nil
+	}, g, false)
+	var conns []net.Conn
+	for range 5 {
+		c, err := dial(context.Background(), "10.0.0.1:6379", &net.Dialer{}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		conns = append(conns, c)
+	}
+	buf := make([]byte, 128)
+	for _, c := range conns {
+		if _, err := c.Read(buf); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g.mu.Lock()
+	failures := g.failures
+	g.mu.Unlock()
+	if failures != 1 {
+		t.Fatalf("failures = %d after 5 connections dialed together were rejected, want 1", failures)
 	}
 }
 
@@ -301,15 +454,15 @@ func TestDialGate_SpacesOutRedials(t *testing.T) {
 	if elapsed := time.Since(start); elapsed < wait {
 		t.Fatalf("re-dial after the IAM error took %v, want at least the %v backoff", elapsed, wait)
 	}
-	if d := g.delay(); d != 0 {
+	if d, _ := g.delay(); d != 0 {
 		t.Fatalf("delay after the successful handshake = %v, want 0", d)
 	}
 }
 
 func TestGatedDialer_StopsWaitingWhenCtxEnds(t *testing.T) {
 	g := &dialGate{backoff: func(int) time.Duration { return time.Hour }}
-	g.handshake(handshakeOK)
-	g.handshake(handshakeIAMError)
+	g.handshake(handshakeOK, 0)
+	g.handshake(handshakeIAMError, 0)
 	dialed := false
 	dial := gatedDialer(func(context.Context, string, *net.Dialer, *tls.Config) (net.Conn, error) {
 		dialed = true

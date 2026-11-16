@@ -11,12 +11,16 @@ import (
 // Backoff settings: retryBase and retryCap for the errors valkey-go retries, iamBackoffBase
 // and iamBackoffCap for Memorystore IAM backend errors, which Google says to retry with
 // exponential backoff. After maxRetryAttempts attempts, memorystoreRetryDelay stops retrying.
+// After maxIAMOtherAttempts handshakes answered with ERR_IAM_OTHER, connect stops retrying
+// when the username isn't known to be valid: Memorystore also sends that error for an
+// invalid username, which no retry fixes.
 const (
-	retryBase        = 50 * time.Millisecond
-	retryCap         = 2 * time.Second
-	iamBackoffBase   = 250 * time.Millisecond
-	iamBackoffCap    = 10 * time.Second
-	maxRetryAttempts = 20
+	retryBase           = 50 * time.Millisecond
+	retryCap            = 2 * time.Second
+	iamBackoffBase      = 250 * time.Millisecond
+	iamBackoffCap       = 10 * time.Second
+	maxRetryAttempts    = 20
+	maxIAMOtherAttempts = 3
 )
 
 // memorystoreRetryDelay is exponential backoff with full jitter, so clients that lose their
@@ -42,6 +46,12 @@ func isIAMBackendError(err error) bool {
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "ERR_IAM_EXHAUSTED") || strings.Contains(msg, "ERR_IAM_OTHER")
+}
+
+// isIAMOtherError reports Memorystore's ERR_IAM_OTHER reply: a transient IAM backend error,
+// or an invalid username. Google says to retry it only when the username is valid.
+func isIAMOtherError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "ERR_IAM_OTHER")
 }
 
 // iamBackoff is the wait after the attempt-th consecutive IAM backend error: full jitter

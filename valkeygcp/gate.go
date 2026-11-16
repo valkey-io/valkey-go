@@ -26,11 +26,17 @@ type dialFunc = func(ctx context.Context, dst string, dialer *net.Dialer, cfg *t
 // gatedConn). It delays dials only after a first successful handshake, so a client that
 // can't connect at all still fails fast; connect backs off construction with the caller's
 // ctx instead.
+//
+// The backoff grows by rounds, not by rejections. IAM authentication limits how fast new
+// connections are accepted, and a surge of them, such as after a deploy, is rejected
+// together: counting each rejection would reach the 10s cap after one burst. Each dial joins
+// the round current when it passes the gate, and only the first rejection of a round counts.
 type dialGate struct {
 	armed    atomic.Bool
 	backoff  func(attempt int) time.Duration // nil means iamBackoff; tests fix it
 	mu       sync.Mutex
-	failures int // consecutive handshakes rejected with ERR_IAM_*
+	failures int    // consecutive rounds of handshakes rejected with ERR_IAM_*
+	round    uint64 // rejections counted so far; a dial keeps the value it passed the gate with
 }
 
 // handshake outcomes, read from the first reply on a new connection.
@@ -40,9 +46,11 @@ const (
 	handshakeOther           // another error reply, such as WRONGPASS: no change
 )
 
-// handshake records the outcome of one new connection's handshake. A success arms the gate
-// and clears the failure count; an IAM error adds to it.
-func (g *dialGate) handshake(outcome int) {
+// handshake records the outcome of one new connection's handshake; round is the gate's round
+// when the connection's dial passed it. A success arms the gate and clears the failure count.
+// An IAM error adds one, unless another rejection has been counted since this dial passed
+// the gate: connections dialed together are rejected together, and count as one round.
+func (g *dialGate) handshake(outcome int, round uint64) {
 	switch outcome {
 	case handshakeOK:
 		g.armed.Store(true)
@@ -51,27 +59,28 @@ func (g *dialGate) handshake(outcome int) {
 		g.mu.Unlock()
 	case handshakeIAMError:
 		g.mu.Lock()
-		g.failures++
+		if round == g.round {
+			g.failures++
+			g.round++
+		}
 		g.mu.Unlock()
 	}
 }
 
-// delay is how long the next dial waits: full jitter over the IAM backoff for the number of
-// consecutive IAM errors, so concurrent re-dials don't all fire at the same moment.
-func (g *dialGate) delay() time.Duration {
-	if !g.armed.Load() {
-		return 0
-	}
+// delay is how long the next dial waits, full jitter over the IAM backoff for the number of
+// consecutive rounds of IAM errors, so concurrent re-dials don't all fire at the same
+// moment, and the round the dial joins.
+func (g *dialGate) delay() (time.Duration, uint64) {
 	g.mu.Lock()
-	n := g.failures
+	n, round := g.failures, g.round
 	g.mu.Unlock()
-	if n == 0 {
-		return 0
+	if n == 0 || !g.armed.Load() {
+		return 0, round
 	}
 	if g.backoff != nil {
-		return g.backoff(n - 1)
+		return g.backoff(n - 1), round
 	}
-	return iamBackoff(n - 1)
+	return iamBackoff(n - 1), round
 }
 
 // installDialGate wraps opt's dialer with a new gate. It keeps a caller's DialCtxFn or
@@ -92,10 +101,11 @@ func installDialGate(opt *valkey.ClientOption) {
 // applies it here.
 func gatedDialer(base dialFunc, g *dialGate, noDelayOff bool) dialFunc {
 	if base == nil {
-		base = defaultDial
+		base = dialDirect
 	}
 	return func(ctx context.Context, dst string, dialer *net.Dialer, cfg *tls.Config) (net.Conn, error) {
-		if d := g.delay(); d > 0 {
+		d, round := g.delay()
+		if d > 0 {
 			t := time.NewTimer(d)
 			select {
 			case <-ctx.Done():
@@ -111,12 +121,12 @@ func gatedDialer(base dialFunc, g *dialGate, noDelayOff bool) dialFunc {
 		if noDelayOff {
 			disableNoDelay(conn)
 		}
-		return &gatedConn{Conn: conn, gate: g}, nil
+		return &gatedConn{Conn: conn, gate: g, round: round}, nil
 	}
 }
 
-// defaultDial dials like valkey-go does without a custom dialer.
-func defaultDial(ctx context.Context, dst string, dialer *net.Dialer, cfg *tls.Config) (net.Conn, error) {
+// dialDirect dials the way valkey-go does when ClientOption.DialCtxFn is not set.
+func dialDirect(ctx context.Context, dst string, dialer *net.Dialer, cfg *tls.Config) (net.Conn, error) {
 	if cfg != nil {
 		td := tls.Dialer{NetDialer: dialer, Config: cfg}
 		return td.DialContext(ctx, "tcp", dst)
@@ -141,9 +151,10 @@ const maxReplyPeek = 256
 // gate. Only valkey-go's reader goroutine calls Read, so the fields need no lock.
 type gatedConn struct {
 	net.Conn
-	gate *dialGate
-	seen bool
-	line []byte
+	gate  *dialGate
+	round uint64 // the gate's round when this connection was dialed
+	seen  bool
+	line  []byte
 }
 
 // Read reads from the connection, showing the bytes to peek until the first reply line has
@@ -177,10 +188,10 @@ func (c *gatedConn) peek(b []byte) {
 	switch {
 	case len(line) == 0:
 	case line[0] != '-':
-		c.gate.handshake(handshakeOK)
+		c.gate.handshake(handshakeOK, c.round)
 	case bytes.Contains(line, []byte("ERR_IAM_EXHAUSTED")) || bytes.Contains(line, []byte("ERR_IAM_OTHER")):
-		c.gate.handshake(handshakeIAMError)
+		c.gate.handshake(handshakeIAMError, c.round)
 	default:
-		c.gate.handshake(handshakeOther)
+		c.gate.handshake(handshakeOther, c.round)
 	}
 }

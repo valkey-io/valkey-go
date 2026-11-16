@@ -37,19 +37,23 @@ func TestRetryDelay_StopsAfterMaxAttempts(t *testing.T) {
 }
 
 // Memorystore IAM backend errors (ERR_IAM_EXHAUSTED, ERR_IAM_OTHER), which connect and the
-// dial gate back off, are recognized; other errors are not. Their backoff starts at most at
-// 250ms and can pass the 2s cap of memorystoreRetryDelay, up to 10s.
+// dial gate back off, are recognized; other errors are not. ERR_IAM_OTHER, which may mean an
+// invalid username, is told apart. Their backoff starts at most at 250ms and can pass the 2s
+// cap of memorystoreRetryDelay, up to 10s.
 func TestIAMBackoff(t *testing.T) {
-	for _, msg := range []string{
-		"ERR (ERR_IAM_EXHAUSTED) Memorystore IAM authentication backend quota exceeded.",
-		"ERR (ERR_IAM_OTHER) Memorystore IAM authentication backend error.",
+	for msg, other := range map[string]bool{
+		"ERR (ERR_IAM_EXHAUSTED) Memorystore IAM authentication backend quota exceeded.": false,
+		"ERR (ERR_IAM_OTHER) Memorystore IAM authentication backend error.":              true,
 	} {
 		if !isIAMBackendError(errors.New(msg)) {
 			t.Errorf("%q not recognized as an IAM backend error", msg)
 		}
+		if isIAMOtherError(errors.New(msg)) != other {
+			t.Errorf("%q: isIAMOtherError = %v, want %v", msg, !other, other)
+		}
 	}
 	for _, err := range []error{nil, errors.New("WRONGPASS invalid username-password pair"), errors.New("i/o timeout")} {
-		if isIAMBackendError(err) {
+		if isIAMBackendError(err) || isIAMOtherError(err) {
 			t.Errorf("%v recognized as an IAM backend error", err)
 		}
 	}
