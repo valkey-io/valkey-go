@@ -17,6 +17,13 @@ Client side command metrics:
  - `valkey_command_duration_seconds`: histogram of command duration
  - `valkey_command_errors`: number of command errors
 
+`valkey_command_duration_seconds` samples recorded by `DoCache`/`DoMultiCache` carry a
+`db.cache.source` attribute telling whether the response(s) came from the client side
+memory: `hit` (all from cache), `miss` (none from cache),
+or `mixed` (both, `DoMultiCache` only). Results with non-Valkey errors are not counted;
+if no result is counted, the sample carries no such attribute.
+Samples from plain `Do`/`DoMulti`/... have no such attribute either.
+
 ```golang
 package main
 

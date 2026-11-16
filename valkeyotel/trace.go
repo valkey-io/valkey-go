@@ -15,12 +15,13 @@ import (
 )
 
 var (
-	name      = "github.com/valkey-io/valkey-go"
-	kind      = trace.WithSpanKind(trace.SpanKindClient)
-	dbattr    = attribute.String("db.system", "valkey")
-	dbstmt    = attribute.Key("db.statement")
-	cacheHit  = attribute.Key("db.cache.hit")
-	cacheMiss = attribute.Key("db.cache.miss")
+	name        = "github.com/valkey-io/valkey-go"
+	kind        = trace.WithSpanKind(trace.SpanKindClient)
+	dbattr      = attribute.String("db.system", "valkey")
+	dbstmt      = attribute.Key("db.statement")
+	cacheHit    = attribute.Key("db.cache.hit")
+	cacheMiss   = attribute.Key("db.cache.miss")
+	cacheSource = attribute.Key("db.cache.source")
 )
 
 type contextKey struct{}
@@ -149,8 +150,8 @@ var (
 	}
 )
 
-func (c *commandMetrics) recordDuration(ctx context.Context, op string, startTime time.Time) {
-	count := len(c.recordOpts)
+func (c *commandMetrics) recordDuration(ctx context.Context, op string, startTime time.Time, extra ...attribute.KeyValue) {
+	count := len(c.recordOpts) + len(extra)
 
 	var opOpt metric.RecordOption
 	if c.opAttr {
@@ -181,6 +182,9 @@ func (c *commandMetrics) recordDuration(ctx context.Context, op string, startTim
 		}
 		if labelerOpt != nil {
 			*opts = append(*opts, labelerOpt)
+		}
+		if len(extra) > 0 {
+			*opts = append(*opts, metric.WithAttributeSet(attribute.NewSet(extra...)))
 		}
 	}
 
@@ -303,7 +307,7 @@ func (o *otelclient) DoMultiStream(ctx context.Context, multi ...valkey.Complete
 
 func (o *otelclient) DoCache(ctx context.Context, cmd valkey.Cacheable, ttl time.Duration) (resp valkey.ValkeyResult) {
 	op := o.opNameResolver.OpName(ctx, valkey.Completed(cmd))
-	defer o.recordDuration(ctx, op, time.Now())
+	startTime := time.Now()
 
 	ctx, span := o.start(ctx, op, sum(cmd.Commands()))
 	if o.dbStmtFunc != nil {
@@ -323,12 +327,19 @@ func (o *otelclient) DoCache(ctx context.Context, cmd valkey.Cacheable, ttl time
 	span.SetAttributes(cacheHit.Int(hitCount), cacheMiss.Int(missCount))
 	o.end(span, resp.Error())
 	o.recordError(ctx, op, resp.Error())
+
+	if cacheSourceAttr, ok := getCacheSourceAttr(hitCount, missCount); ok {
+		o.recordDuration(ctx, op, startTime, cacheSourceAttr)
+	} else {
+		o.recordDuration(ctx, op, startTime)
+	}
+
 	return
 }
 
 func (o *otelclient) DoMultiCache(ctx context.Context, multi ...valkey.CacheableTTL) (resps []valkey.ValkeyResult) {
 	op := o.opNameResolver.MultiCacheableOpName(ctx, multi)
-	defer o.recordDuration(ctx, op, time.Now())
+	startTime := time.Now()
 
 	ctx, span := o.start(ctx, op, multiCacheableSum(multi))
 	resps = o.client.DoMultiCache(ctx, multi...)
@@ -348,6 +359,13 @@ func (o *otelclient) DoMultiCache(ctx context.Context, multi ...valkey.Cacheable
 	err := firstError(resps)
 	o.end(span, err)
 	o.recordError(ctx, op, err)
+
+	if cacheSourceAttr, ok := getCacheSourceAttr(hitCount, missCount); ok {
+		o.recordDuration(ctx, op, startTime, cacheSourceAttr)
+	} else {
+		o.recordDuration(ctx, op, startTime)
+	}
+
 	return
 }
 
@@ -444,6 +462,21 @@ func (o *otelclient) recordCacheHitMiss(ctx context.Context, resp valkey.ValkeyR
 		o.cscHits.Add(ctx, 1, *opts...)
 	} else {
 		o.cscMiss.Add(ctx, 1, *opts...)
+	}
+}
+
+func getCacheSourceAttr(hitCount, missCount int) (attribute.KeyValue, bool) {
+	switch {
+	case hitCount+missCount <= 0:
+		return attribute.KeyValue{}, false
+	case hitCount > 0 && missCount > 0:
+		return cacheSource.String("mixed"), true
+	case hitCount > 0:
+		return cacheSource.String("hit"), true
+	case missCount > 0:
+		return cacheSource.String("miss"), true
+	default:
+		return attribute.KeyValue{}, false
 	}
 }
 
