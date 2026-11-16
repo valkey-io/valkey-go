@@ -5338,7 +5338,11 @@ func (c *Compat) Watch(ctx context.Context, fn func(Tx) error, keys ...string) e
 	if err := tx.Watch(ctx, keys...).Err(); err != nil {
 		return err
 	}
-	return fn(newTx(dc, cancel))
+	// Close clears the watched keys before the connection goes back to the
+	// pool, so a callback that returns without EXEC does not leave them
+	// watched for the next user of the connection.
+	defer tx.Close(ctx)
+	return fn(tx)
 }
 
 // Wait blocks until the specified number of replicas have acknowledged
