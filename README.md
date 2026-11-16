@@ -593,6 +593,8 @@ client, err := valkey.NewClient(valkey.ClientOption{
 })
 ```
 
+On Google Cloud, the `WithZoneAwareReads` option of [valkeygcp](./valkeygcp) detects the zone of the caller and sets these options for you.
+
 For deployments that only provide the availability zone via the INFO command (e.g. AWS ElastiCache for Valkey 7.2+), set the `AZFromInfo`
  option as well as `EnableReplicaAZInfo`.
 
