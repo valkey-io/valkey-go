@@ -53,14 +53,15 @@ var errNoEndpoint = errors.New("valkeygcp: no endpoint: set ClientOption.InitAdd
 // reader endpoint, if any. NewClient fills the Memorystore defaults into the fields left at
 // their zero value, adds the credentials opts ask for, and connects.
 //
-// ctx bounds credential setup and connecting. valkey-go connects and authenticates while it
-// builds the client, so setup needs working credentials. Memorystore IAM backend errors
-// (ERR_IAM_EXHAUSTED, ERR_IAM_OTHER) during the handshake are retried with backoff until ctx
-// ends, at most 15s when it has no earlier deadline. Memorystore also answers an invalid
-// username with ERR_IAM_OTHER, so that error is retried only a few times for a username other
-// than "default" (or none) that setup couldn't check against the IAM principal, which includes
-// any such username of credentials set on the ClientOption. When an ACL rule refuses CLIENT
-// TRACKING, the error says so. Token refreshes never use ctx.
+// ctx bounds credential setup and connecting, each of which also stops after 15s when ctx has
+// no earlier deadline; ctx is checked between connection attempts, not during one. valkey-go
+// connects and authenticates while it builds the client, so setup needs working credentials.
+// Memorystore IAM backend errors (ERR_IAM_EXHAUSTED, ERR_IAM_OTHER) during the handshake are
+// retried with backoff. Memorystore also answers an invalid username with ERR_IAM_OTHER, so
+// that error is retried only a few times for a username other than "default" (or none) that
+// setup couldn't check against the IAM principal, which includes any such username of
+// credentials set on the ClientOption. When an ACL rule refuses CLIENT TRACKING, the error
+// says so. Token refreshes never use ctx.
 func NewClient(ctx context.Context, option valkey.ClientOption, opts ...Option) (valkey.Client, error) {
 	opt, usernameValid, err := resolveClientOption(ctx, option, opts...)
 	if err != nil {

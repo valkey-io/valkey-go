@@ -39,8 +39,9 @@ var errCustomSourcePrincipal = errors.New("valkeygcp: UsernamePrincipalEmail can
 
 // errJSONPrincipal is returned for UsernamePrincipalEmail when the credentials JSON names no
 // principal: user credentials (gcloud auth application-default login), or a federation
-// configuration that doesn't impersonate a service account.
-var errJSONPrincipal = errors.New("valkeygcp: UsernamePrincipalEmail can't find the principal email in the credentials JSON, which names none (user credentials, or federation without service account impersonation); " + setUsername + " to that principal's email")
+// configuration that doesn't impersonate a service account. A username only helps the first:
+// Memorystore supports user accounts and service accounts, not federated identities.
+var errJSONPrincipal = errors.New("valkeygcp: UsernamePrincipalEmail can't find the principal email in the credentials JSON, which names none: for user credentials, " + setUsername + " to the user's email; a federation configuration must impersonate a service account, since Memorystore supports only user accounts and service accounts")
 
 // resolveUsername returns the AUTH username: Username when set, otherwise the one
 // UsernameStrategy picks. For UsernamePrincipalEmail the email comes from, in order,

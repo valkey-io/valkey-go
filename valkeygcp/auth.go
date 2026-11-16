@@ -189,8 +189,16 @@ func withIAMDefaults(opt IAMAuthOptions) (IAMAuthOptions, error) {
 	}
 	// FetchTimeout needs no default here: fetchTimeout turns zero or negative into
 	// DefaultTokenFetchTimeout.
-	if opt.ImpersonateLifetime < 0 || (opt.ImpersonateLifetime > 0 && opt.ImpersonateLifetime <= opt.RefreshBuffer) {
-		return IAMAuthOptions{}, fmt.Errorf("valkeygcp: ImpersonateLifetime (%v) must be longer than RefreshBuffer (%v)", opt.ImpersonateLifetime, opt.RefreshBuffer)
+	//
+	// Impersonated tokens last ImpersonateLifetime, 1h when it is zero. The cache replaces a
+	// token RefreshBuffer before it expires, so a lifetime that isn't longer would make every
+	// fetch ask for a new token.
+	lifetime, note := opt.ImpersonateLifetime, ""
+	if lifetime == 0 && opt.ImpersonateSA != "" && opt.CustomTokenSource == nil {
+		lifetime, note = defaultImpersonateLifetime, ", the default"
+	}
+	if lifetime < 0 || (lifetime > 0 && lifetime <= opt.RefreshBuffer) {
+		return IAMAuthOptions{}, fmt.Errorf("valkeygcp: ImpersonateLifetime (%v%s) must be longer than RefreshBuffer (%v)", lifetime, note, opt.RefreshBuffer)
 	}
 	if opt.ImpersonateLifetime > maxImpersonateLifetime {
 		return IAMAuthOptions{}, fmt.Errorf("valkeygcp: ImpersonateLifetime (%v) must be at most 12h, the most the IAM Credentials API issues", opt.ImpersonateLifetime)

@@ -243,7 +243,12 @@ func TestNewClient_IAMOtherRetries_CallerCredentials(t *testing.T) {
 		{"ResolveClientOption, unchecked email", resolved("someone@example.com"), true},
 		{"Password, unchecked email", password, true},
 	} {
-		ctx, cancel := context.WithTimeout(context.Background(), 700*time.Millisecond)
+		timeout := 700 * time.Millisecond // retried until it ends
+		if c.capped {
+			// Longer than the backoff before the third handshake, at most 250ms + 500ms.
+			timeout = 10 * time.Second
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		before := srv.conns.Load()
 		_, err := NewClient(ctx, c.opt) // no IAM option: the credentials on the ClientOption are used as they are
 		cancel()

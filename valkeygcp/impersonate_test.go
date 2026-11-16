@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -146,7 +147,8 @@ func TestImpersonation_Request(t *testing.T) {
 // provider's cache decides when: a token within RefreshBuffer of expiring is replaced on the
 // next fetch. No token is kept from setup, so the first token handed out can't be one that
 // expired while the provider waited to be used. Setup refuses a negative lifetime, one not
-// longer than RefreshBuffer, and one over 12h, the API's maximum, before ADC is looked up.
+// longer than RefreshBuffer, including the 1h default, and one over 12h, the API's maximum,
+// before ADC is looked up.
 func TestImpersonation_RenewsTokens(t *testing.T) {
 	fakeADC(t, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "adc-token"}))
 	requests := fakeIAMCredentials(t, issueTokens(time.Minute)) // inside the 3m45s refresh buffer
@@ -177,6 +179,20 @@ func TestImpersonation_RenewsTokens(t *testing.T) {
 	} {
 		if _, err := NewIAMTokenProvider(context.Background(), IAMAuthOptions{ImpersonateSA: sa, ImpersonateLifetime: lifetime}); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("ImpersonateLifetime %v: got %v, want an error containing %q", lifetime, err, want)
+		}
+	}
+	// Zero means 1h, which must be longer than RefreshBuffer too, when the tokens are
+	// impersonated.
+	const want = "ImpersonateLifetime (1h0m0s, the default) must be longer than RefreshBuffer (2h0m0s)"
+	if _, err := NewIAMTokenProvider(context.Background(), IAMAuthOptions{ImpersonateSA: sa, RefreshBuffer: 2 * time.Hour}); err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("default lifetime: got %v, want an error containing %q", err, want)
+	}
+	for name, opt := range map[string]IAMAuthOptions{
+		"no ImpersonateSA":  {RefreshBuffer: 2 * time.Hour},
+		"CustomTokenSource": {RefreshBuffer: 2 * time.Hour, ImpersonateSA: sa, CustomTokenSource: oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "t"})},
+	} {
+		if _, err := withIAMDefaults(opt); err != nil {
+			t.Errorf("%s: got %v, want no lifetime check without impersonated tokens", name, err)
 		}
 	}
 }
@@ -306,6 +322,55 @@ func TestImpersonation_RequestTimeout(t *testing.T) {
 	}
 	if d := time.Since(start); d > 2*time.Second {
 		t.Fatalf("request took %v despite a 50ms FetchTimeout", d)
+	}
+}
+
+// oauth2's transport fetches the impersonating identity's token without a context, holding
+// its cache's lock. That fetch is capped by FetchTimeout too, so a hung one releases the lock:
+// the request gives up after FetchTimeout, and once the hung fetch is 3*FetchTimeout old, the
+// next request fetches the token again.
+func TestImpersonation_ImpersonatorTokenTimeout(t *testing.T) {
+	requests := fakeIAMCredentials(t, issueTokens(time.Hour))
+	release := make(chan struct{})
+	defer close(release)
+	var fetches atomic.Int32
+	src := newImpersonatedSource(context.Background(), tokenSourceFunc(func() (*oauth2.Token, error) {
+		if fetches.Add(1) == 1 {
+			<-release // the first fetch never answers
+		}
+		return &oauth2.Token{AccessToken: "adc-token", Expiry: time.Now().Add(time.Hour)}, nil
+	}), IAMAuthOptions{
+		ImpersonateSA: "sa@p.iam.gserviceaccount.com",
+		Scopes:        []string{DefaultCloudPlatformScope},
+		FetchTimeout:  50 * time.Millisecond,
+	})
+	token := func() (*oauth2.Token, error) { // fails the test instead of hanging with the fetch
+		type result struct {
+			tok *oauth2.Token
+			err error
+		}
+		done := make(chan result, 1)
+		go func() {
+			tok, err := src.Token()
+			done <- result{tok, err}
+		}()
+		select {
+		case r := <-done:
+			return r.tok, r.err
+		case <-time.After(2 * time.Second):
+			t.Fatal("Token is stuck behind the hung fetch")
+			return nil, nil
+		}
+	}
+	if _, err := token(); err == nil || !strings.Contains(err.Error(), "token fetch timed out") {
+		t.Fatalf("got %v, want the fetch timeout", err)
+	}
+	time.Sleep(200 * time.Millisecond) // the hung fetch is now older than 3*FetchTimeout
+	if tok, err := token(); err != nil || tok.AccessToken != "imp-1" {
+		t.Fatalf("got %v, %v; want imp-1, with a new fetch of the impersonating identity's token", tok, err)
+	}
+	if reqs := requests(); len(reqs) != 1 || reqs[0].auth != "Bearer adc-token" {
+		t.Fatalf("requests = %+v, want one, made with the impersonating identity's token", reqs)
 	}
 }
 

@@ -81,8 +81,10 @@ func newImpersonatedSource(ctx context.Context, src oauth2.TokenSource, opt IAMA
 	}
 	body, _ := json.Marshal(req) // strings only: it can't fail
 	return &impersonatedSource{
-		ctx:     ctx,
-		client:  oauth2.NewClient(ctx, src),
+		ctx: ctx,
+		// oauth2's transport fetches src's token without a context, holding its cache's lock,
+		// so that fetch is capped like any other: a hung one mustn't block later requests.
+		client:  oauth2.NewClient(ctx, withFetchTimeout(src, opt.FetchTimeout)),
 		reqURL:  iamCredentialsEndpoint + "/v1/" + serviceAccountName(url.PathEscape(opt.ImpersonateSA)) + ":generateAccessToken",
 		body:    body,
 		target:  opt.ImpersonateSA,
