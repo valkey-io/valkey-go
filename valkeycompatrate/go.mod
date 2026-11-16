@@ -4,6 +4,8 @@ go 1.26.0
 
 replace github.com/valkey-io/valkey-go => ../
 
+replace github.com/valkey-io/valkey-go/mock => ../mock
+
 replace github.com/valkey-io/valkey-go/valkeycompat => ../valkeycompat
 
 replace github.com/valkey-io/valkey-go/valkeylimiter => ../valkeylimiter
@@ -11,9 +13,9 @@ replace github.com/valkey-io/valkey-go/valkeylimiter => ../valkeylimiter
 require (
 	github.com/onsi/ginkgo/v2 v2.34.0
 	github.com/onsi/gomega v1.44.0
-	github.com/valkey-io/valkey-go v1.0.79
-	github.com/valkey-io/valkey-go/valkeycompat v1.0.79
-	github.com/valkey-io/valkey-go/valkeylimiter v1.0.79
+	github.com/valkey-io/valkey-go v1.0.80
+	github.com/valkey-io/valkey-go/valkeycompat v1.0.80
+	github.com/valkey-io/valkey-go/valkeylimiter v1.0.80
 )
 
 require (

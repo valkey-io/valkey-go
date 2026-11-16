@@ -5,7 +5,7 @@ go 1.26.0
 replace github.com/valkey-io/valkey-go => ../
 
 require (
-	github.com/valkey-io/valkey-go v1.0.79
+	github.com/valkey-io/valkey-go v1.0.80
 	golang.org/x/oauth2 v0.38.0
 )
 

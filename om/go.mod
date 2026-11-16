@@ -6,7 +6,7 @@ replace github.com/valkey-io/valkey-go => ../
 
 require (
 	github.com/oklog/ulid/v2 v2.1.2
-	github.com/valkey-io/valkey-go v1.0.79
+	github.com/valkey-io/valkey-go v1.0.80
 )
 
 require golang.org/x/sys v0.50.0 // indirect
