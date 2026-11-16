@@ -605,7 +605,7 @@ func TestStandalonePickReplica(t *testing.T) {
 
 	// Test that pick() returns the single replica
 	client := s.pick(0)
-	if client != s.replicas[0] {
+	if client != s.state.Load().replicas[0] {
 		t.Errorf("expected replica client, got different client")
 	}
 }
@@ -622,7 +622,7 @@ func TestNewStandaloneClientWithReplicasPartialFailure(t *testing.T) {
 	replicaConn := &mockConn{
 		DialFn: func() error {
 			dialCount++
-			if dialCount == 2 { // Second replica fails
+			if dialCount == 2 { // Second replica fails to dial
 				return errors.New("replica 2 dial failed")
 			}
 			return nil
@@ -682,9 +682,10 @@ func TestStandalonePickMultipleReplicas(t *testing.T) {
 	defer s.Close()
 
 	// Test that pick() returns a valid replica for multiple replicas
+	st := s.state.Load()
 	for range 10 {
 		client := s.pick(0)
-		if client != s.replicas[0] && client != s.replicas[1] {
+		if client != st.replicas[0] && client != st.replicas[1] {
 			t.Errorf("expected one of the replica clients, got different client")
 		}
 	}
@@ -1225,7 +1226,7 @@ func TestStandaloneClientConnLifetime(t *testing.T) {
 		}
 		defer client.Close()
 
-		if err := client.redirectToPrimary("redirect"); err != nil {
+		if err := client.recreatePrimaryConn("redirect"); err != nil {
 			t.Fatalf("unexpected redirect err %v", err)
 		}
 
@@ -1239,4 +1240,675 @@ func TestStandaloneClientConnLifetime(t *testing.T) {
 			t.Fatalf("expected 2 attempts (1 errConnExpired + 1 retry), got %d", attempts)
 		}
 	})
+}
+
+func mockConnWithRole(addr, role string) *mockConn {
+	connRole := role
+	if role == "slave" {
+		connRole = "replica"
+	}
+	return &mockConn{
+		AddrFn: func() string { return addr },
+		AZFn:   func() string { return addr + "-az" },
+		// Role() reads the role label cached from HELLO; the constructor
+		// uses this for the cheap master dedup check.
+		RoleFn: func() string { return connRole },
+		DoFn: func(cmd Completed) ValkeyResult {
+			if cmd == cmds.RoleCmd {
+				return ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', role)})}
+			}
+			return ValkeyResult{}
+		},
+	}
+}
+
+func TestNewStandaloneClientReplicaAZInit(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	primaryConn := &mockConn{
+		AddrFn: func() string { return "primary" },
+		AZFn:   func() string { return "primary-az" },
+	}
+	r1 := mockConnWithRole("r1", "slave")
+	r2 := mockConnWithRole("r2", "slave")
+
+	c, err := newStandaloneClient(&ClientOption{
+		InitAddress: []string{"primary"},
+		Standalone: StandaloneOption{
+			ReplicaAddress: []string{"r1", "r2"},
+		},
+		SendToReplicas: func(cmd Completed) bool {
+			return cmd.IsReadOnly()
+		},
+		EnableReplicaAZInfo: true,
+		ReadNodeSelector: func(slot uint16, nodes []NodeInfo) int {
+			return 1
+		},
+	}, func(dst string, opt *ClientOption) conn {
+		switch dst {
+		case "primary":
+			return primaryConn
+		case "r1":
+			return r1
+		case "r2":
+			return r2
+		default:
+			return &mockConn{}
+		}
+	}, newRetryer(defaultRetryDelayFn))
+	if err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	defer c.Close()
+
+	st := c.state.Load()
+	if st == nil {
+		t.Fatal("expected non-nil state")
+	}
+	if len(st.replicas) != 2 {
+		t.Fatalf("expected 2 replicas, got %d", len(st.replicas))
+	}
+	if c.primary.Load().conn != primaryConn {
+		t.Fatal("primary should be InitAddress connection")
+	}
+	if st.nodes[0].Addr != "primary" || st.nodes[0].AZ != "primary-az" {
+		t.Fatalf("unexpected primary node info %+v", st.nodes[0])
+	}
+	if st.nodes[1].Addr != "r1" || st.nodes[2].Addr != "r2" {
+		t.Fatalf("unexpected replica node info %+v", st.nodes[1:])
+	}
+	if c.pick(0).conn != r1 {
+		t.Fatal("expected pick to select r1 via ReadNodeSelector")
+	}
+}
+
+func TestNewStandaloneClientReplicaAddressDedupPrimary(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	var dupClosed int32
+	dup := mockConnWithRole("dup", "master")
+	dup.CloseFn = func() {
+		atomic.AddInt32(&dupClosed, 1)
+	}
+	r1 := mockConnWithRole("r1", "slave")
+
+	// Lenient mode: a master listed in ReplicaAddress is silently deduped
+	// against the primary at init time.
+	c, err := newStandaloneClient(&ClientOption{
+		InitAddress: []string{"primary"},
+		Standalone: StandaloneOption{
+			ReplicaAddress:         []string{"dup", "r1"},
+			ReplicaRefreshInterval: time.Hour, // enable lenient mode without firing the monitor
+		},
+		SendToReplicas: func(cmd Completed) bool { return cmd.IsReadOnly() },
+	}, func(dst string, opt *ClientOption) conn {
+		switch dst {
+		case "primary":
+			return mockConnWithRole("primary", "master")
+		case "dup":
+			return dup
+		case "r1":
+			return r1
+		default:
+			return &mockConn{}
+		}
+	}, newRetryer(defaultRetryDelayFn))
+	if err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	defer c.Close()
+
+	if atomic.LoadInt32(&dupClosed) != 1 {
+		t.Fatalf("expected duplicate primary node conn closed once, got %d", dupClosed)
+	}
+	st := c.state.Load()
+	if len(st.replicas) != 1 {
+		t.Fatalf("expected 1 replica, got %d", len(st.replicas))
+	}
+}
+
+func TestNewStandaloneClientReplicaAddressDialErrorDropped(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+	v := errors.New("dial err")
+	primary := mockConnWithRole("primary", "master")
+	// Lenient mode: a replica that fails to dial is dropped silently.
+	c, err := newStandaloneClient(&ClientOption{
+		InitAddress: []string{"primary"},
+		Standalone: StandaloneOption{
+			ReplicaAddress:         []string{"r1", "r2"},
+			ReplicaRefreshInterval: time.Hour,
+		},
+		SendToReplicas: func(cmd Completed) bool { return cmd.IsReadOnly() },
+	}, func(dst string, opt *ClientOption) conn {
+		if dst == "primary" {
+			return primary
+		}
+		if dst == "r2" {
+			return &mockConn{DialFn: func() error { return v }}
+		}
+		return mockConnWithRole(dst, "slave")
+	}, newRetryer(defaultRetryDelayFn))
+	if err != nil {
+		t.Fatalf("expected init to succeed, got err %v", err)
+	}
+	defer c.Close()
+	st := c.state.Load()
+	if len(st.replicas) != 1 || st.nodes[1].Addr != "r1" {
+		t.Fatalf("expected only r1 in replica pool, got %+v", st.nodes[1:])
+	}
+}
+
+func TestNewStandaloneClientReplicaAddressRoleErrorTolerated(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+	v := errors.New("role err")
+	c, err := newStandaloneClient(&ClientOption{
+		InitAddress: []string{"primary"},
+		Standalone: StandaloneOption{
+			ReplicaAddress: []string{"r1"},
+		},
+		SendToReplicas: func(cmd Completed) bool { return cmd.IsReadOnly() },
+	}, func(dst string, opt *ClientOption) conn {
+		if dst == "r1" {
+			return &mockConn{
+				AddrFn: func() string { return "r1" },
+				DoFn: func(cmd Completed) ValkeyResult {
+					if cmd == cmds.RoleCmd {
+						return newErrResult(v)
+					}
+					return ValkeyResult{}
+				},
+			}
+		}
+		return &mockConn{AddrFn: func() string { return dst }}
+	}, newRetryer(defaultRetryDelayFn))
+	if err != nil {
+		t.Fatalf("expected init to tolerate ROLE error, got err %v", err)
+	}
+	defer c.Close()
+	if got := len(c.state.Load().replicas); got != 1 {
+		t.Fatalf("expected replica kept when ROLE errors, got %d replicas", got)
+	}
+}
+
+func TestStandaloneFailoverOnReadonly(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	var primaryRole atomic.Value
+	primaryRole.Store("master")
+	primary := &mockConn{
+		AddrFn: func() string { return "primary" },
+		DoFn: func(cmd Completed) ValkeyResult {
+			if cmd == cmds.RoleCmd {
+				return ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', primaryRole.Load().(string))})}
+			}
+			readonlyErr := ValkeyError(strmsg('-', "READONLY You can't write against a read only replica."))
+			return newErrResult(&readonlyErr)
+		},
+	}
+	var r1Role atomic.Value
+	r1Role.Store("slave")
+	r1 := &mockConn{
+		AddrFn: func() string { return "r1" },
+		DoFn: func(cmd Completed) ValkeyResult {
+			if cmd == cmds.RoleCmd {
+				return ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', r1Role.Load().(string))})}
+			}
+			return newResult(strmsg('+', "OK"), nil)
+		},
+	}
+	r2 := mockConnWithRole("r2", "slave")
+
+	// InitAddress[0] is a DNS endpoint that auto-resolves to the active
+	// primary (as cloud vendors do); start it pointing at primary.
+	var primaryDNS atomic.Pointer[mockConn]
+	primaryDNS.Store(primary)
+
+	c, err := newStandaloneClient(&ClientOption{
+		InitAddress: []string{"primary"},
+		Standalone: StandaloneOption{
+			ReplicaAddress:         []string{"r1", "r2"},
+			ReplicaRefreshInterval: time.Hour,
+		},
+		SendToReplicas: func(cmd Completed) bool { return cmd.IsReadOnly() },
+		DisableRetry:   true,
+	}, func(dst string, opt *ClientOption) conn {
+		switch dst {
+		case "primary":
+			return primaryDNS.Load()
+		case "r1":
+			return r1
+		case "r2":
+			return r2
+		default:
+			return &mockConn{}
+		}
+	}, newRetryer(defaultRetryDelayFn))
+	if err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	defer c.Close()
+
+	// Simulate failover: primary is demoted, r1 is promoted, and the
+	// DNS for the primary endpoint now resolves to r1.
+	primaryRole.Store("slave")
+	r1Role.Store("master")
+	primaryDNS.Store(r1)
+
+	if _, err := c.Do(context.Background(), c.B().Set().Key("k").Value("v").Build()).ToString(); err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	if c.primary.Load().conn != r1 {
+		t.Fatal("expected r1 to become primary after failover")
+	}
+	st := c.state.Load()
+	if st.nodes[0].Addr != "r1" {
+		t.Fatalf("expected nodes[0] to be r1, got %s", st.nodes[0].Addr)
+	}
+	foundPrimary := false
+	for _, rep := range st.replicas {
+		if rep.conn == primary {
+			foundPrimary = true
+		}
+		if rep.conn == r1 {
+			t.Fatal("r1 should not remain in replica pool")
+		}
+	}
+	if !foundPrimary {
+		t.Fatal("expected former primary in replica pool")
+	}
+}
+
+func TestStandaloneFailoverDropDownReplica(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	var primaryRole atomic.Value
+	primaryRole.Store("master")
+	primary := &mockConn{
+		AddrFn: func() string { return "primary" },
+		DoFn: func(cmd Completed) ValkeyResult {
+			if cmd == cmds.RoleCmd {
+				return ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', primaryRole.Load().(string))})}
+			}
+			readonlyErr := ValkeyError(strmsg('-', "READONLY"))
+			return newErrResult(&readonlyErr)
+		},
+	}
+	var r1Role atomic.Value
+	r1Role.Store("slave")
+	r1 := &mockConn{
+		AddrFn: func() string { return "r1" },
+		DoFn: func(cmd Completed) ValkeyResult {
+			if cmd == cmds.RoleCmd {
+				return ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', r1Role.Load().(string))})}
+			}
+			return newResult(strmsg('+', "OK"), nil)
+		},
+	}
+	var r2RoleCalls int32
+	r2 := &mockConn{
+		AddrFn: func() string { return "r2" },
+		DoFn: func(cmd Completed) ValkeyResult {
+			if cmd == cmds.RoleCmd {
+				if atomic.AddInt32(&r2RoleCalls, 1) > 1 {
+					return newErrResult(errors.New("down"))
+				}
+				return ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "slave")})}
+			}
+			return ValkeyResult{}
+		},
+	}
+
+	// InitAddress[0] is a DNS endpoint that auto-resolves to the active
+	// primary (as cloud vendors do); start it pointing at primary.
+	var primaryDNS atomic.Pointer[mockConn]
+	primaryDNS.Store(primary)
+
+	c, err := newStandaloneClient(&ClientOption{
+		InitAddress: []string{"primary"},
+		Standalone: StandaloneOption{
+			ReplicaAddress:         []string{"r1", "r2"},
+			ReplicaRefreshInterval: time.Hour,
+		},
+		SendToReplicas: func(cmd Completed) bool { return cmd.IsReadOnly() },
+		DisableRetry:   true,
+	}, func(dst string, opt *ClientOption) conn {
+		switch dst {
+		case "primary":
+			return primaryDNS.Load()
+		case "r1":
+			return r1
+		case "r2":
+			return r2
+		default:
+			return &mockConn{}
+		}
+	}, newRetryer(defaultRetryDelayFn))
+	if err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	defer c.Close()
+
+	// Simulate failover: primary is demoted, r1 is promoted, and the
+	// DNS for the primary endpoint now resolves to r1.
+	primaryRole.Store("slave")
+	r1Role.Store("master")
+	primaryDNS.Store(r1)
+
+	if _, err := c.Do(context.Background(), c.B().Set().Key("k").Value("v").Build()).ToString(); err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	st := c.state.Load()
+	if len(st.replicas) != 1 || st.replicas[0].conn != primary {
+		t.Fatalf("expected only demoted primary in replica pool, got %d replicas", len(st.replicas))
+	}
+}
+
+func TestStandaloneSelectorPrimaryAfterFailover(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	var primaryRole atomic.Value
+	primaryRole.Store("master")
+	primary := &mockConn{
+		AddrFn: func() string { return "primary" },
+		DoFn: func(cmd Completed) ValkeyResult {
+			if cmd == cmds.RoleCmd {
+				return ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', primaryRole.Load().(string))})}
+			}
+			readonlyErr := ValkeyError(strmsg('-', "READONLY"))
+			return newErrResult(&readonlyErr)
+		},
+	}
+	var r1Role atomic.Value
+	r1Role.Store("slave")
+	r1 := &mockConn{
+		AddrFn: func() string { return "r1" },
+		DoFn: func(cmd Completed) ValkeyResult {
+			if cmd == cmds.RoleCmd {
+				return ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', r1Role.Load().(string))})}
+			}
+			return newResult(strmsg('+', "OK"), nil)
+		},
+	}
+
+	// InitAddress[0] is a DNS endpoint that auto-resolves to the active
+	// primary (as cloud vendors do); start it pointing at primary.
+	var primaryDNS atomic.Pointer[mockConn]
+	primaryDNS.Store(primary)
+
+	var seenPrimary string
+	c, err := newStandaloneClient(&ClientOption{
+		InitAddress: []string{"primary"},
+		Standalone: StandaloneOption{
+			ReplicaAddress:         []string{"r1"},
+			ReplicaRefreshInterval: time.Hour,
+		},
+		SendToReplicas: func(cmd Completed) bool { return cmd.IsReadOnly() },
+		ReadNodeSelector: func(slot uint16, nodes []NodeInfo) int {
+			seenPrimary = nodes[0].Addr
+			return 0
+		},
+		DisableRetry: true,
+	}, func(dst string, opt *ClientOption) conn {
+		switch dst {
+		case "primary":
+			return primaryDNS.Load()
+		case "r1":
+			return r1
+		default:
+			return &mockConn{}
+		}
+	}, newRetryer(defaultRetryDelayFn))
+	if err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	defer c.Close()
+
+	// Simulate failover: primary is demoted, r1 is promoted, and the
+	// DNS for the primary endpoint now resolves to r1.
+	primaryRole.Store("slave")
+	r1Role.Store("master")
+	primaryDNS.Store(r1)
+	if _, err := c.Do(context.Background(), c.B().Set().Key("k").Value("v").Build()).ToString(); err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	c.Do(context.Background(), c.B().Get().Key("k").Build())
+	if seenPrimary != "r1" {
+		t.Fatalf("expected selector to see r1 as primary, got %q", seenPrimary)
+	}
+}
+
+func TestStandaloneReconcileNoop(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	primary := mockConnWithRole("primary", "master")
+	r1 := mockConnWithRole("r1", "slave")
+	c, err := newStandaloneClient(&ClientOption{
+		InitAddress: []string{"primary"},
+		Standalone: StandaloneOption{
+			ReplicaAddress:         []string{"r1"},
+			ReplicaRefreshInterval: time.Hour,
+		},
+		SendToReplicas: func(cmd Completed) bool { return cmd.IsReadOnly() },
+	}, func(dst string, opt *ClientOption) conn {
+		switch dst {
+		case "primary":
+			return primary
+		case "r1":
+			return r1
+		default:
+			return &mockConn{}
+		}
+	}, newRetryer(defaultRetryDelayFn))
+	if err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	defer c.Close()
+
+	stBefore := c.state.Load()
+	if err := c.reconcile(context.Background()); err != nil {
+		t.Fatalf("unexpected reconcile err %v", err)
+	}
+	if c.primary.Load().conn != primary {
+		t.Fatal("expected primary unchanged after noop reconcile")
+	}
+	stAfter := c.state.Load()
+	if stAfter.nodes[0].Addr != stBefore.nodes[0].Addr || len(stAfter.replicas) != len(stBefore.replicas) {
+		t.Fatal("expected state unchanged after noop reconcile")
+	}
+}
+
+func slaveRoleResp(state string) ValkeyResult {
+	return ValkeyResult{val: slicemsg('*', []ValkeyMessage{
+		strmsg('+', "slave"),
+		strmsg('+', "127.0.0.1"),
+		{typ: ':', intlen: 6379},
+		strmsg('+', state),
+		{typ: ':', intlen: 0},
+	})}
+}
+
+func TestNewStandaloneClientReplicaAddressDropsDisconnectedSlave(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	r1 := &mockConn{
+		AddrFn: func() string { return "r1" },
+		// HELLO reports it as a replica; ROLE later reveals it's not synced.
+		RoleFn: func() string { return "replica" },
+		DoFn: func(cmd Completed) ValkeyResult {
+			if cmd == cmds.RoleCmd {
+				return slaveRoleResp("connect") // not yet synced
+			}
+			return ValkeyResult{}
+		},
+	}
+	r2 := mockConnWithRole("r2", "slave")
+	primary := mockConnWithRole("primary", "master")
+
+	// Refresh interval triggers reconcile at init, which uses ROLE to detect
+	// the disconnected slave and exclude it from the routing pool.
+	c, err := newStandaloneClient(&ClientOption{
+		InitAddress: []string{"primary"},
+		Standalone: StandaloneOption{
+			ReplicaAddress:         []string{"r1", "r2"},
+			ReplicaRefreshInterval: time.Hour,
+		},
+		SendToReplicas: func(cmd Completed) bool { return cmd.IsReadOnly() },
+	}, func(dst string, opt *ClientOption) conn {
+		switch dst {
+		case "primary":
+			return primary
+		case "r1":
+			return r1
+		case "r2":
+			return r2
+		}
+		return &mockConn{}
+	}, newRetryer(defaultRetryDelayFn))
+	if err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	defer c.Close()
+
+	st := c.state.Load()
+	if len(st.replicas) != 1 || st.nodes[1].Addr != "r2" {
+		t.Fatalf("expected only r2 in replica pool, got %+v", st.nodes[1:])
+	}
+}
+
+func TestStandaloneReplicaRefreshMonitor(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	var r1State atomic.Value
+	r1State.Store("connected")
+	var r1Closed int32
+	r1 := &mockConn{
+		AddrFn:  func() string { return "r1" },
+		CloseFn: func() { atomic.AddInt32(&r1Closed, 1) },
+		DoFn: func(cmd Completed) ValkeyResult {
+			if cmd == cmds.RoleCmd {
+				return slaveRoleResp(r1State.Load().(string))
+			}
+			return ValkeyResult{}
+		},
+	}
+	primary := mockConnWithRole("primary", "master")
+
+	c, err := newStandaloneClient(&ClientOption{
+		InitAddress: []string{"primary"},
+		Standalone: StandaloneOption{
+			ReplicaAddress:         []string{"r1"},
+			ReplicaRefreshInterval: 25 * time.Millisecond,
+		},
+		SendToReplicas: func(cmd Completed) bool { return cmd.IsReadOnly() },
+	}, func(dst string, opt *ClientOption) conn {
+		switch dst {
+		case "primary":
+			return primary
+		case "r1":
+			return r1
+		}
+		return &mockConn{}
+	}, newRetryer(defaultRetryDelayFn))
+	if err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	defer c.Close()
+
+	if got := len(c.state.Load().replicas); got != 1 {
+		t.Fatalf("expected 1 replica after init, got %d", got)
+	}
+
+	// Simulate r1 falling out of sync (still alive but disconnected from primary).
+	r1State.Store("connect")
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(c.state.Load().replicas) == 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := len(c.state.Load().replicas); got != 0 {
+		t.Fatalf("expected monitor to drop disconnected replica, still %d", got)
+	}
+}
+
+func TestStandaloneReplicaRefreshMonitorPromotesNewPrimary(t *testing.T) {
+	defer ShouldNotLeak(SetupLeakDetection())
+
+	var primaryRole atomic.Value
+	primaryRole.Store("master")
+	primary := &mockConn{
+		AddrFn: func() string { return "primary" },
+		DoFn: func(cmd Completed) ValkeyResult {
+			if cmd == cmds.RoleCmd {
+				if primaryRole.Load().(string) == "master" {
+					return ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "master")})}
+				}
+				return slaveRoleResp("connected")
+			}
+			return ValkeyResult{}
+		},
+	}
+	var r1Role atomic.Value
+	r1Role.Store("slave")
+	r1 := &mockConn{
+		AddrFn: func() string { return "r1" },
+		DoFn: func(cmd Completed) ValkeyResult {
+			if cmd == cmds.RoleCmd {
+				if r1Role.Load().(string) == "master" {
+					return ValkeyResult{val: slicemsg('*', []ValkeyMessage{strmsg('+', "master")})}
+				}
+				return slaveRoleResp("connected")
+			}
+			return ValkeyResult{}
+		},
+	}
+
+	// InitAddress[0] is a DNS endpoint that auto-resolves to the active
+	// primary (as cloud vendors do); start it pointing at primary.
+	var primaryDNS atomic.Pointer[mockConn]
+	primaryDNS.Store(primary)
+
+	c, err := newStandaloneClient(&ClientOption{
+		InitAddress: []string{"primary"},
+		Standalone: StandaloneOption{
+			ReplicaAddress:         []string{"r1"},
+			ReplicaRefreshInterval: 25 * time.Millisecond,
+		},
+		SendToReplicas: func(cmd Completed) bool { return cmd.IsReadOnly() },
+	}, func(dst string, opt *ClientOption) conn {
+		switch dst {
+		case "primary":
+			return primaryDNS.Load()
+		case "r1":
+			return r1
+		}
+		return &mockConn{}
+	}, newRetryer(defaultRetryDelayFn))
+	if err != nil {
+		t.Fatalf("unexpected err %v", err)
+	}
+	defer c.Close()
+
+	if c.primary.Load().conn != primary {
+		t.Fatal("expected primary at start")
+	}
+
+	// Simulate failover before any READONLY happens — monitor should pick it up.
+	// DNS for the primary endpoint now resolves to r1.
+	primaryRole.Store("slave")
+	r1Role.Store("master")
+	primaryDNS.Store(r1)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if c.primary.Load().conn == r1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if c.primary.Load().conn != r1 {
+		t.Fatal("expected monitor to promote r1 to primary")
+	}
 }
