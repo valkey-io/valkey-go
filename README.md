@@ -507,7 +507,7 @@ client, err := valkey.NewClient(valkey.ClientOption{
     ClusterOption: valkey.ClusterOption{
         // Set this to periodically refresh the cluster topology.
         // Without it, newly added or removed replicas won't be picked up,
-        // because the topology is only refreshed on MOVED/ASK errors or connection closures.
+        // because the topology is otherwise only refreshed after errors, such as MOVED replies or broken connections.
         ShardsRefreshInterval: 10 * time.Second,
     },
 })
@@ -516,6 +516,23 @@ client, err := valkey.NewClient(valkey.ClientOption{
 Note that scaling the number of replicas on an existing shard (e.g. via ElastiCache modify-replication-group)
 neither moves slots nor closes existing connections, so without `ShardsRefreshInterval`
 the client never discovers the new replicas and continues reading the old shard.
+
+During a failover, the client learns the new owner of a slot from the first `MOVED` reply for it. While
+requests fail on a node, because it cannot be reached or its connection broke, the client refreshes the
+topology about every 250ms until it sees the change; the interval grows with the size of the cluster, up to
+1s at 1000 nodes. Other refreshes, after a `MOVED` reply or a `ShardsRefreshInterval` tick, start after a
+random delay of up to 250ms, 30s at 1000 nodes, that spreads the refreshes of many clients. To change the
+defaults, or to go back to the previous behavior with -1:
+
+```golang
+client, err := valkey.NewClient(valkey.ClientOption{
+    InitAddress: []string{"127.0.0.1:7001", "127.0.0.1:7002", "127.0.0.1:7003"},
+    ClusterOption: valkey.ClusterOption{
+        MinRefreshInterval: 500 * time.Millisecond, // refresh the topology at most every 500ms; -1: no limit
+        MaxRefreshDelay:    time.Second,            // start other refreshes within 1s; -1: as before
+    },
+})
+```
 
 ```golang
 // Connect to sentinels
