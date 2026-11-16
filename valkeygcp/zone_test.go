@@ -2,9 +2,12 @@ package valkeygcp
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -46,6 +49,85 @@ func TestWithZoneAwareReadsKeepsUserFunctions(t *testing.T) {
 	}
 	if option.SendToReplicas(cmds.NewBuilder(cmds.InitSlot).Get().Key("k").Build()) || option.ReadNodeSelector(0, nil) != 1 {
 		t.Fatal("SendToReplicas and ReadNodeSelector should be kept")
+	}
+}
+
+// valkey-go rejects a ReadNodeSelector next to a ReplicaSelector, so the ReplicaSelector picks the replica.
+func TestWithZoneAwareReadsKeepsReplicaSelector(t *testing.T) {
+	fakeMetadataServer(t, func(http.ResponseWriter, *http.Request) {
+		t.Error("unexpected metadata server request")
+	})
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close() // nothing listens there, so NewClient fails to dial once valkey-go has accepted the options
+	ctx := context.Background()
+	option := valkey.ClientOption{
+		InitAddress:     []string{addr},
+		ReplicaSelector: func(uint16, []valkey.NodeInfo) int { return 1 },
+	}
+	resolved, err := ResolveClientOption(ctx, option, WithZoneAwareReads())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.ReadNodeSelector != nil || resolved.ReplicaSelector(0, nil) != 1 {
+		t.Fatal("the ReplicaSelector should be kept, without a ReadNodeSelector")
+	}
+	if !resolved.EnableReplicaAZInfo || resolved.SendToReplicas == nil {
+		t.Fatal("EnableReplicaAZInfo and SendToReplicas should be set")
+	}
+	if _, err := NewClient(ctx, option, WithZoneAwareReads()); err == nil ||
+		errors.Is(err, valkey.ErrReplicaSelectorConflictWithReadNodeSelector) {
+		t.Fatalf("NewClient should fail to dial, not reject the options: %v", err)
+	}
+}
+
+// valkey-go rejects ReplicaOnly next to the SendToReplicas and ReadNodeSelector that WithZoneAwareReads sets.
+func TestWithZoneAwareReadsReplicaOnly(t *testing.T) {
+	fakeMetadataServer(t, func(http.ResponseWriter, *http.Request) {
+		t.Error("unexpected metadata server request")
+	})
+	ctx := context.Background()
+	option := valkey.ClientOption{InitAddress: []string{"127.0.0.1:7001"}, ReplicaOnly: true}
+	if _, err := ResolveClientOption(ctx, option, WithZoneAwareReads()); !errors.Is(err, errZoneAwareReadsReplicaOnly) {
+		t.Fatalf("ResolveClientOption: got %v, want %v", err, errZoneAwareReadsReplicaOnly)
+	}
+	if _, err := NewClient(ctx, option, WithZoneAwareReads()); !errors.Is(err, errZoneAwareReadsReplicaOnly) {
+		t.Fatalf("NewClient: got %v, want %v", err, errZoneAwareReadsReplicaOnly)
+	}
+	if _, err := ResolveClientOption(ctx, option); err != nil {
+		t.Fatalf("ReplicaOnly without WithZoneAwareReads: %v", err)
+	}
+	// With a reader endpoint, WithZoneAwareReads changes nothing, so it doesn't conflict with ReplicaOnly.
+	option.Standalone.ReplicaAddress = []string{"127.0.0.1:7002"}
+	if _, err := ResolveClientOption(ctx, option, WithZoneAwareReads()); err != nil {
+		t.Fatalf("ReplicaOnly with a reader endpoint: %v", err)
+	}
+}
+
+// Without a zone, WithZoneAwareReads fails rather than create a client that ignores zones.
+func TestWithZoneAwareReadsWithoutZone(t *testing.T) {
+	fakeMetadataServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	option := valkey.ClientOption{InitAddress: []string{"127.0.0.1:7001"}}
+	for name, connect := range map[string]func(context.Context) error{
+		"ResolveClientOption": func(ctx context.Context) error {
+			_, err := ResolveClientOption(ctx, option, WithZoneAwareReads())
+			return err
+		},
+		"NewClient": func(ctx context.Context) error {
+			_, err := NewClient(ctx, option, WithZoneAwareReads())
+			return err
+		},
+	} {
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		if err := connect(ctx); err == nil || !strings.Contains(err.Error(), "GCP_ZONE") {
+			t.Errorf("%s: got %v, want an error about the zone", name, err)
+		}
+		cancel()
 	}
 }
 
@@ -138,8 +220,8 @@ func TestDetectCurrentGCPZoneFromEnv(t *testing.T) {
 	} {
 		t.Setenv("GCP_ZONE", tc.gcpZone)
 		t.Setenv("CLOUD_ZONE", tc.cloudZone)
-		if got := DetectCurrentGCPZone(context.Background()); got != tc.want {
-			t.Errorf("GCP_ZONE=%q CLOUD_ZONE=%q: got %q, want %q", tc.gcpZone, tc.cloudZone, got, tc.want)
+		if got, err := DetectCurrentGCPZone(context.Background()); err != nil || got != tc.want {
+			t.Errorf("GCP_ZONE=%q CLOUD_ZONE=%q: got %q, %v, want %q", tc.gcpZone, tc.cloudZone, got, err, tc.want)
 		}
 	}
 }
@@ -149,7 +231,7 @@ func TestDetectCurrentGCPZoneFromMetadataServer(t *testing.T) {
 		name   string
 		status int
 		body   string
-		want   string
+		want   string // "" for an error
 	}{
 		{"resource path", http.StatusOK, "projects/987654321/zones/us-central1-f", "us-central1-f"},
 		{"trailing newline", http.StatusOK, "projects/987654321/zones/us-central1-a\n", "us-central1-a"},
@@ -168,10 +250,31 @@ func TestDetectCurrentGCPZoneFromMetadataServer(t *testing.T) {
 				w.WriteHeader(tc.status)
 				w.Write([]byte(tc.body))
 			})
-			if got := DetectCurrentGCPZone(context.Background()); got != tc.want {
-				t.Fatalf("got %q, want %q", got, tc.want)
+			// Failed lookups are retried until ctx ends.
+			ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+			defer cancel()
+			if got, err := DetectCurrentGCPZone(ctx); got != tc.want || (err != nil) != (tc.want == "") {
+				t.Fatalf("got %q, %v, want %q", got, err, tc.want)
 			}
 		})
+	}
+}
+
+// The GKE metadata server can take a few seconds to answer on a new Pod.
+func TestDetectCurrentGCPZoneRetries(t *testing.T) {
+	var requests atomic.Int32
+	fakeMetadataServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		if requests.Add(1) <= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Write([]byte("projects/987654321/zones/us-central1-f"))
+	})
+	if got, err := DetectCurrentGCPZone(context.Background()); err != nil || got != "us-central1-f" {
+		t.Fatalf("got %q, %v, want %q", got, err, "us-central1-f")
+	}
+	if n := requests.Load(); n != 3 {
+		t.Fatalf("got %d requests, want 3", n)
 	}
 }
 
@@ -191,12 +294,15 @@ func TestDetectCurrentGCPZoneTimeout(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fakeMetadataServer(t, tc.handler)
+			const timeout = 200 * time.Millisecond
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
 			start := time.Now()
-			if got := DetectCurrentGCPZone(context.Background()); got != "" {
-				t.Fatalf("got %q, want empty", got)
+			if got, err := DetectCurrentGCPZone(ctx); got != "" || !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("got %q, %v, want a deadline error", got, err)
 			}
-			if elapsed := time.Since(start); elapsed > time.Second {
-				t.Fatalf("took %v, want about %v", elapsed, metadataTimeout)
+			if elapsed := time.Since(start); elapsed > timeout+time.Second {
+				t.Fatalf("took %v, want about %v", elapsed, timeout)
 			}
 		})
 	}
@@ -207,8 +313,11 @@ func TestDetectCurrentGCPZoneUnreachable(t *testing.T) {
 	closed.Close()
 	for _, url := range []string{closed.URL, "://invalid"} {
 		setMetadataZoneURL(t, url)
-		if got := DetectCurrentGCPZone(context.Background()); got != "" {
-			t.Errorf("metadata server %q: got %q, want empty", url, got)
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		got, err := DetectCurrentGCPZone(ctx)
+		cancel()
+		if got != "" || err == nil {
+			t.Errorf("metadata server %q: got %q, %v, want an error", url, got, err)
 		}
 	}
 }

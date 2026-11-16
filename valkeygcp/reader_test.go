@@ -83,6 +83,68 @@ func TestNewClientReaderEndpointWithoutReplicas(t *testing.T) {
 	}
 }
 
+// A client created while the instance has no replicas switches to the reader endpoint once it accepts connections.
+func TestNewClientReaderEndpointReplicasAdded(t *testing.T) {
+	noMetadataServer(t)
+	shortReaderRetries(t)
+	ctx := context.Background()
+	for _, noReplicas := range []string{"ERR no replicas found", "ERR No replicas available"} {
+		t.Run(noReplicas, func(t *testing.T) {
+			primary, reader := newFakeEndpoint(t, ""), newFakeEndpoint(t, noReplicas)
+			client, err := NewClient(ctx, readerEndpointOption(primary, reader), WithReadYourWrites(time.Minute))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer client.Close()
+			if err := client.Do(ctx, client.B().Set().Key("{w}k").Value("v").Build()).Error(); err != nil {
+				t.Fatal(err)
+			}
+
+			reader.setErrReply("") // a replica is added
+			for deadline := time.Now().Add(5 * time.Second); !reader.got("GET", "k"); time.Sleep(10 * time.Millisecond) {
+				if time.Now().After(deadline) {
+					t.Fatal("reads should go to the reader endpoint once it accepts connections")
+				}
+				if err := client.Do(ctx, client.B().Get().Key("k").Build()).Error(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// The slot written before the switch is still pinned.
+			if err := client.Do(ctx, client.B().Get().Key("{w}k").Build()).Error(); err != nil {
+				t.Fatal(err)
+			}
+			if !primary.got("GET", "{w}k") || reader.got("GET", "{w}k") {
+				t.Error("a read of a key just written should go to the primary endpoint")
+			}
+		})
+	}
+}
+
+func TestNewClientReaderEndpointCloseStopsRetries(t *testing.T) {
+	noMetadataServer(t)
+	shortReaderRetries(t)
+	primary, reader := newFakeEndpoint(t, ""), newFakeEndpoint(t, "ERR no replicas found")
+	client, err := NewClient(context.Background(), readerEndpointOption(primary, reader))
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond) // a few tries
+	client.Close()
+	time.Sleep(200 * time.Millisecond) // a try under way at Close ends
+	tries := reader.count("HELLO")
+	time.Sleep(200 * time.Millisecond)
+	if n := reader.count("HELLO"); n != tries {
+		t.Fatalf("the reader endpoint got %d more tries after Close", n-tries)
+	}
+}
+
+// shortReaderRetries shortens the delays between the tries of the reader endpoint by clients created during the test.
+func shortReaderRetries(t *testing.T) {
+	minDelay, maxDelay := readerRetryMin, readerRetryMax
+	readerRetryMin, readerRetryMax = 10*time.Millisecond, 20*time.Millisecond
+	t.Cleanup(func() { readerRetryMin, readerRetryMax = minDelay, maxDelay })
+}
+
 func TestNewClientReaderEndpointError(t *testing.T) {
 	noMetadataServer(t)
 	primary, reader := newFakeEndpoint(t, ""), newFakeEndpoint(t, "ERR something else")
@@ -173,9 +235,27 @@ func (f *fakeEndpoint) got(cmd ...string) bool {
 
 // gotCommand reports whether the endpoint received a command named name.
 func (f *fakeEndpoint) gotCommand(name string) bool {
+	return f.count(name) > 0
+}
+
+// count returns how many commands named name the endpoint received.
+func (f *fakeEndpoint) count(name string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return slices.ContainsFunc(f.cmds, func(c []string) bool { return strings.EqualFold(c[0], name) })
+	n := 0
+	for _, c := range f.cmds {
+		if strings.EqualFold(c[0], name) {
+			n++
+		}
+	}
+	return n
+}
+
+// setErrReply makes the endpoint answer every command with errReply, or normally if errReply is empty.
+func (f *fakeEndpoint) setErrReply(errReply string) {
+	f.mu.Lock()
+	f.errReply = errReply
+	f.mu.Unlock()
 }
 
 func (f *fakeEndpoint) serve() {
@@ -199,11 +279,12 @@ func (f *fakeEndpoint) handle(c net.Conn) {
 		}
 		f.mu.Lock()
 		f.cmds = append(f.cmds, cmd)
+		errReply := f.errReply
 		f.mu.Unlock()
 		reply := "+OK\r\n"
 		switch {
-		case f.errReply != "":
-			reply = "-" + f.errReply + "\r\n"
+		case errReply != "":
+			reply = "-" + errReply + "\r\n"
 		case strings.EqualFold(cmd[0], "HELLO"):
 			reply = helloReply
 		}
