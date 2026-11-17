@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"strings"
 	"testing"
 
 	"golang.org/x/oauth2"
@@ -20,6 +21,7 @@ func TestResolveTarget(t *testing.T) {
 		mode     CredentialsMode
 		want     target // sig and endpoint aren't compared
 		wantErr  bool
+		errHas   string // part of the expected error
 	}{
 		{
 			name: "the Telemetry API by default",
@@ -86,9 +88,52 @@ func TestResolveTarget(t *testing.T) {
 			want: target{google: true, url: "https://telemetry.googleapis.com:443", host: telemetryHost},
 		},
 		{
-			name:     "Google over plaintext gets no credentials",
+			name:     "Google over plaintext is an error: Google needs TLS",
 			endpoint: "http://telemetry.googleapis.com:443",
+			wantErr:  true,
+			errHas:   "Google needs TLS",
+		},
+		{
+			name:    "so is the default endpoint with OTEL_EXPORTER_OTLP_INSECURE left over",
+			env:     map[string]string{"OTEL_EXPORTER_OTLP_INSECURE": "true"},
+			wantErr: true,
+			errHas:  "unset OTEL_EXPORTER_OTLP_INSECURE",
+		},
+		{
+			name:    "or with the per-signal INSECURE, which the error names",
+			env:     map[string]string{"OTEL_EXPORTER_OTLP_TRACES_INSECURE": "true"},
+			sig:     signalTraces,
+			wantErr: true,
+			errHas:  "OTEL_EXPORTER_OTLP_TRACES_INSECURE",
+		},
+		{
+			name:     "CredentialsOff allows Google over plaintext",
+			endpoint: "http://telemetry.googleapis.com:443",
+			mode:     CredentialsOff,
 			want:     target{google: true, url: "http://telemetry.googleapis.com:443", host: telemetryHost, insecure: true},
+		},
+		{
+			name: "OTEL_EXPORTER_OTLP_PROTOCOL=grpc is fine",
+			env:  map[string]string{"OTEL_EXPORTER_OTLP_PROTOCOL": "grpc"},
+			want: target{google: true, url: "https://telemetry.googleapis.com:443", host: telemetryHost, credentials: true},
+		},
+		{
+			name:    "another OTEL_EXPORTER_OTLP_PROTOCOL is an error",
+			env:     map[string]string{"OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf"},
+			wantErr: true,
+			errHas:  `OTEL_EXPORTER_OTLP_PROTOCOL="http/protobuf"`,
+		},
+		{
+			name: "the per-signal protocol wins",
+			env:  map[string]string{"OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf", "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL": "GRPC"},
+			want: target{google: true, url: "https://telemetry.googleapis.com:443", host: telemetryHost, credentials: true},
+		},
+		{
+			name:    "for its own signal only",
+			env:     map[string]string{"OTEL_EXPORTER_OTLP_TRACES_PROTOCOL": "http/json"},
+			sig:     signalTraces,
+			wantErr: true,
+			errHas:  `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL="http/json"`,
 		},
 		{
 			name:     "host:port with OTEL_EXPORTER_OTLP_INSECURE",
@@ -123,6 +168,9 @@ func TestResolveTarget(t *testing.T) {
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("got %+v, want an error", got)
+				}
+				if !strings.Contains(err.Error(), tc.errHas) {
+					t.Errorf("error %q doesn't say %q", err, tc.errHas)
 				}
 				return
 			}

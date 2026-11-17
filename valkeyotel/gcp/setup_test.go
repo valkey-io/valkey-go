@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"net"
 	"os"
@@ -132,8 +133,10 @@ var otelEnv = []string{
 	"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
 	"OTEL_EXPORTER_OTLP_INSECURE", "OTEL_EXPORTER_OTLP_METRICS_INSECURE", "OTEL_EXPORTER_OTLP_TRACES_INSECURE",
 	"OTEL_EXPORTER_OTLP_HEADERS", "OTEL_EXPORTER_OTLP_METRICS_HEADERS", "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+	"OTEL_EXPORTER_OTLP_PROTOCOL", "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL", "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL",
+	"OTEL_METRICS_EXPORTER", "OTEL_TRACES_EXPORTER",
 	"OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION",
-	"OTEL_METRIC_EXPORT_INTERVAL", "OTEL_TRACES_SAMPLER", "OTEL_TRACES_SAMPLER_ARG", CredentialsEnv, quotaProjectEnv,
+	"OTEL_METRIC_EXPORT_INTERVAL", "OTEL_TRACES_SAMPLER", "OTEL_TRACES_SAMPLER_ARG", CredentialsEnv, quotaProjectEnv, projectEnv,
 }
 
 // fakeGoogleCloud replaces Application Default Credentials (project "adc-project") and the
@@ -258,8 +261,17 @@ func TestNormalize(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Interval and sampling stay unset here: Setup leaves them to the OTEL_* variables first.
-	if opt.MetricInterval != 0 || opt.TraceSampleRatio != 0 || !slices.Equal(opt.LatencyBuckets, DefaultLatencyBuckets) || opt.GoogleCredentials != CredentialsAuto {
+	if opt.MetricInterval != 0 || opt.TraceSampleRatio != 0 || !slices.Equal(opt.LatencyBuckets, DefaultLatencyBuckets()) || opt.GoogleCredentials != CredentialsAuto {
 		t.Errorf("defaults = %+v", opt)
+	}
+	// DefaultLatencyBuckets returns a copy, so changing it changes no default.
+	changed := DefaultLatencyBuckets()
+	changed[0] = 42
+	if DefaultLatencyBuckets()[0] == 42 {
+		t.Error("changing the result of DefaultLatencyBuckets changed the default")
+	}
+	if opt, err := normalize(Options{}); err != nil || len(opt.LatencyBuckets) == 0 || opt.LatencyBuckets[0] == 42 {
+		t.Errorf("changing the result of DefaultLatencyBuckets changed Setup's buckets: %v, %v", opt.LatencyBuckets, err)
 	}
 
 	buckets := []float64{.001, .002}
@@ -360,6 +372,63 @@ func TestBuildResource(t *testing.T) {
 	}
 }
 
+// A schema URL conflict between detected resources, as when an application's go.mod moves the
+// SDK past the GCP detector's semantic conventions, keeps every attribute and isn't reported.
+// A detector that fails still is.
+func TestBuildResource_SchemaConflicts(t *testing.T) {
+	fakeGoogleCloud(t)
+	log := captureErrors(t)
+	oldSchemaRegion := resource.StringDetector("https://opentelemetry.io/schemas/1.0.0", "cloud.region", func() (string, error) { return "us-east1", nil })
+	detectors = func() []resource.Detector { return []resource.Detector{oldSchemaRegion} }
+	res, _ := buildResource(context.Background(), Options{ServiceName: "checkout"}, "adc-project")
+	if got := resourceString(res, "cloud.region"); got != "us-east1" {
+		t.Errorf("cloud.region = %q, want the detected one", got)
+	}
+	if got := resourceString(res, "telemetry.sdk.language"); got != "go" {
+		t.Errorf("telemetry.sdk.language = %q, want go", got)
+	}
+	if log.contains("Schema URL") {
+		t.Error("a schema URL conflict was reported")
+	}
+
+	failing := resource.StringDetector("", "host.name", func() (string, error) { return "", errors.New("metadata server down") })
+	detectors = func() []resource.Detector { return []resource.Detector{oldSchemaRegion, failing} }
+	res, _ = buildResource(context.Background(), Options{ServiceName: "checkout"}, "adc-project")
+	if !log.contains("metadata server down") {
+		t.Error("a failed detector wasn't reported")
+	}
+	if got := resourceString(res, "cloud.region"); got != "us-east1" {
+		t.Errorf("cloud.region = %q after a failed detector, want the detected one", got)
+	}
+}
+
+func TestOnlySchemaConflicts(t *testing.T) {
+	_, conflict := resource.Merge(
+		resource.NewWithAttributes("https://opentelemetry.io/schemas/1.0.0", attribute.String("a", "1")),
+		resource.NewWithAttributes("https://opentelemetry.io/schemas/1.1.0", attribute.String("b", "2")),
+	)
+	if conflict == nil {
+		t.Fatal("different schema URLs merged without a conflict")
+	}
+	failed := fmt.Errorf("%w: gce: metadata server down", resource.ErrPartialResource)
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"no error", nil, false},
+		{"a merge conflict", conflict, true},
+		{"conflicts joined, as resource.New returns them", fmt.Errorf("error detecting resource: %w", errors.Join(conflict, conflict)), true},
+		{"a conflict and a failed detector", fmt.Errorf("error detecting resource: %w", errors.Join(conflict, failed)), false},
+		{"a failed detector", failed, false},
+		{"another error", errors.New("boom"), false},
+	} {
+		if got := onlySchemaConflicts(tc.err); got != tc.want {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestNewResource(t *testing.T) {
 	f := fakeGoogleCloud(t)
 	withRegion(t)
@@ -379,6 +448,13 @@ func TestNewResource(t *testing.T) {
 	if got := resourceString(NewResource(context.Background(), Options{ProjectID: "mine"}), projectAttribute); got != "mine" {
 		t.Errorf("Options.ProjectID: got %q", got)
 	}
+	t.Setenv(projectEnv, "env-project")
+	if got := resourceString(NewResource(context.Background(), Options{}), projectAttribute); got != "env-project" {
+		t.Errorf("%s: got %q", projectEnv, got)
+	}
+	if _, _, lookups := f.targets(); lookups != 1 {
+		t.Errorf("%d credential lookups, want still 1: %s names the project", lookups, projectEnv)
+	}
 }
 
 func TestSetup_Project(t *testing.T) {
@@ -393,11 +469,13 @@ func TestSetup_Project(t *testing.T) {
 	})
 	t.Run("Options.ProjectID wins", func(t *testing.T) {
 		f := fakeGoogleCloud(t)
+		t.Setenv(projectEnv, "env-gcp")
+		t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "gcp.project_id=env-project")
 		tel := setup(t, Options{ProjectID: "my-project"})
 		recordOne(t, tel)
 		shutdown(t, tel)
 		if got := f.metrics.resourceValue(t, projectAttribute); got != "my-project" {
-			t.Errorf("%s = %q, want my-project", projectAttribute, got)
+			t.Errorf("%s = %q, want my-project over OTEL_RESOURCE_ATTRIBUTES, %s and the credentials", projectAttribute, got, projectEnv)
 		}
 	})
 	t.Run("no project anywhere", func(t *testing.T) {
@@ -424,6 +502,40 @@ func TestSetup_Project(t *testing.T) {
 		findCredentials = func(context.Context) (*google.Credentials, error) {
 			return &google.Credentials{TokenSource: oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "t"})}, nil
 		}
+		t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "gcp.project_id=env-project")
+		tel := setup(t, Options{})
+		recordOne(t, tel)
+		shutdown(t, tel)
+		if got := f.metrics.resourceValue(t, projectAttribute); got != "env-project" {
+			t.Errorf("%s = %q, want env-project", projectAttribute, got)
+		}
+	})
+	t.Run("GOOGLE_CLOUD_PROJECT is enough when the credentials name no project, as user credentials don't", func(t *testing.T) {
+		f := fakeGoogleCloud(t)
+		findCredentials = func(context.Context) (*google.Credentials, error) {
+			return &google.Credentials{TokenSource: oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "t"})}, nil
+		}
+		t.Setenv(projectEnv, "env-gcp")
+		tel := setup(t, Options{})
+		recordOne(t, tel)
+		shutdown(t, tel)
+		if got := f.metrics.resourceValue(t, projectAttribute); got != "env-gcp" {
+			t.Errorf("%s = %q, want env-gcp", projectAttribute, got)
+		}
+	})
+	t.Run("GOOGLE_CLOUD_PROJECT wins over the credentials", func(t *testing.T) {
+		f := fakeGoogleCloud(t)
+		t.Setenv(projectEnv, "env-gcp")
+		tel := setup(t, Options{})
+		recordOne(t, tel)
+		shutdown(t, tel)
+		if got := f.metrics.resourceValue(t, projectAttribute); got != "env-gcp" {
+			t.Errorf("%s = %q, want env-gcp over the credentials' adc-project", projectAttribute, got)
+		}
+	})
+	t.Run("OTEL_RESOURCE_ATTRIBUTES wins over GOOGLE_CLOUD_PROJECT", func(t *testing.T) {
+		f := fakeGoogleCloud(t)
+		t.Setenv(projectEnv, "env-gcp")
 		t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "gcp.project_id=env-project")
 		tel := setup(t, Options{})
 		recordOne(t, tel)
@@ -566,6 +678,101 @@ func TestSetup_Tracing(t *testing.T) {
 	}
 }
 
+func TestSetup_ExportersFromEnv(t *testing.T) {
+	ctx := context.Background()
+	t.Run("OTEL_METRICS_EXPORTER=none turns metrics off", func(t *testing.T) {
+		f := fakeGoogleCloud(t)
+		t.Setenv("OTEL_METRICS_EXPORTER", "none")
+		newMetricExporter = func(context.Context, target, *google.Credentials) (sdkmetric.Exporter, error) {
+			t.Error("a metric exporter was created with OTEL_METRICS_EXPORTER=none")
+			return &captureExporter{}, nil
+		}
+		tel := setup(t, Options{TraceSampleRatio: 1})
+		if _, ok := tel.MeterProvider().(metricnoop.MeterProvider); !ok {
+			t.Errorf("meter provider %T, want a no-op one", tel.MeterProvider())
+		}
+		_, span := tel.TracerProvider().Tracer("test").Start(ctx, "GET")
+		span.End()
+		shutdown(t, tel)
+		if n := len(f.spans.GetSpans()); n != 1 {
+			t.Errorf("%d spans, want 1: traces must still be sent", n)
+		}
+	})
+	t.Run("OTEL_TRACES_EXPORTER=none turns tracing off", func(t *testing.T) {
+		f := fakeGoogleCloud(t)
+		t.Setenv("OTEL_TRACES_EXPORTER", " NONE ")
+		newSpanExporter = func(context.Context, target, *google.Credentials) (sdktrace.SpanExporter, error) {
+			t.Error("a span exporter was created with OTEL_TRACES_EXPORTER=none")
+			return tracetest.NewInMemoryExporter(), nil
+		}
+		tel := setup(t, Options{TraceSampleRatio: 1})
+		_, span := tel.TracerProvider().Tracer("test").Start(ctx, "GET")
+		if span.IsRecording() {
+			t.Error("a span records with OTEL_TRACES_EXPORTER=none")
+		}
+		span.End()
+		recordOne(t, tel)
+		shutdown(t, tel)
+		if f.metrics.exports() == 0 {
+			t.Error("no metrics were sent: they must still be")
+		}
+	})
+	t.Run("both off: no exporter, credentials or resource", func(t *testing.T) {
+		f := fakeGoogleCloud(t)
+		t.Setenv("OTEL_METRICS_EXPORTER", "none")
+		t.Setenv("OTEL_TRACES_EXPORTER", "none")
+		newMetricExporter = func(context.Context, target, *google.Credentials) (sdkmetric.Exporter, error) {
+			t.Error("a metric exporter was created")
+			return &captureExporter{}, nil
+		}
+		tel := setup(t, Options{})
+		if _, _, lookups := f.targets(); lookups != 0 {
+			t.Errorf("%d credential lookups, want none", lookups)
+		}
+		if id := tel.ServiceInstanceID(); id != "" {
+			t.Errorf("ServiceInstanceID = %q, want none", id)
+		}
+		shutdown(t, tel)
+	})
+	t.Run("otlp is the same as unset", func(t *testing.T) {
+		f := fakeGoogleCloud(t)
+		t.Setenv("OTEL_METRICS_EXPORTER", "otlp")
+		t.Setenv("OTEL_TRACES_EXPORTER", "OTLP")
+		tel := setup(t, Options{TraceSampleRatio: 1})
+		recordOne(t, tel)
+		_, span := tel.TracerProvider().Tracer("test").Start(ctx, "GET")
+		span.End()
+		shutdown(t, tel)
+		if f.metrics.exports() == 0 || len(f.spans.GetSpans()) != 1 {
+			t.Errorf("%d metric exports and %d spans, want both sent", f.metrics.exports(), len(f.spans.GetSpans()))
+		}
+	})
+	t.Run("another exporter is an error, not ignored", func(t *testing.T) {
+		for _, env := range [][2]string{{"OTEL_METRICS_EXPORTER", "prometheus"}, {"OTEL_TRACES_EXPORTER", "console"}, {"OTEL_TRACES_EXPORTER", "otlp,console"}} {
+			t.Run(env[0]+"="+env[1], func(t *testing.T) {
+				fakeGoogleCloud(t)
+				t.Setenv(env[0], env[1])
+				if _, err := Setup(ctx, Options{}); err == nil || !strings.Contains(err.Error(), env[0]) {
+					t.Errorf("got %v, want an error naming %s", err, env[0])
+				}
+			})
+		}
+	})
+	t.Run("they don't apply to the application's own providers", func(t *testing.T) {
+		fakeGoogleCloud(t)
+		t.Setenv("OTEL_METRICS_EXPORTER", "prometheus")
+		t.Setenv("OTEL_TRACES_EXPORTER", "none")
+		mp, tp := sdkmetric.NewMeterProvider(), sdktrace.NewTracerProvider()
+		tel := setup(t, Options{MeterProvider: mp, TracerProvider: tp})
+		if tel.MeterProvider() != mp || tel.TracerProvider() != tp {
+			t.Error("Telemetry doesn't use the application's providers")
+		}
+		shutdown(t, tel)
+		_ = mp.Shutdown(ctx)
+		_ = tp.Shutdown(ctx)
+	})
+}
+
 func TestEnvSamplerValid(t *testing.T) {
 	fakeGoogleCloud(t)
 	for _, tc := range []struct {
@@ -700,6 +907,13 @@ func TestSetup_Errors(t *testing.T) {
 	if _, err := Setup(context.Background(), Options{Endpoint: "http://localhost:4317", GoogleCredentials: CredentialsOn}); err == nil {
 		t.Fatal("Google credentials over plaintext were accepted")
 	}
+	if _, err := Setup(context.Background(), Options{Endpoint: "http://telemetry.googleapis.com:443"}); err == nil || !strings.Contains(err.Error(), "Google needs TLS") {
+		t.Fatalf("got %v, want the plaintext Google endpoint error", err)
+	}
+	t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
+	if _, err := Setup(context.Background(), Options{}); err == nil || !strings.Contains(err.Error(), "OTEL_EXPORTER_OTLP_PROTOCOL") {
+		t.Fatalf("got %v, want the protocol error", err)
+	}
 }
 
 func TestSetup_LeavesGlobalsAlone(t *testing.T) {
@@ -793,6 +1007,105 @@ func TestSetup_SDKDisabled(t *testing.T) {
 	shutdown(t, tel)
 }
 
+// failingShutdown is a metric exporter whose Shutdown fails.
+type failingShutdown struct{ *captureExporter }
+
+func (failingShutdown) Shutdown(context.Context) error { return errors.New("exporter shutdown failed") }
+
+// Shutdown runs once. A second call, as from a defer after a signal handler already called it,
+// returns the first call's result and sends nothing more, and concurrent calls get the same.
+func TestTelemetry_ShutdownTwice(t *testing.T) {
+	ctx := context.Background()
+	t.Run("one after the other", func(t *testing.T) {
+		f := fakeGoogleCloud(t)
+		tel := setup(t, Options{})
+		recordOne(t, tel)
+		shutdown(t, tel)
+		sent := f.metrics.exports()
+		recordOne(t, tel) // dropped: the providers are shut down
+		if err := tel.Shutdown(ctx); err != nil {
+			t.Fatalf("second Shutdown: %v, want the first call's nil", err)
+		}
+		if got := f.metrics.exports(); got != sent {
+			t.Errorf("the second Shutdown sent %d more exports", got-sent)
+		}
+	})
+	t.Run("the first call's error is every call's", func(t *testing.T) {
+		fakeGoogleCloud(t)
+		newMetricExporter = func(context.Context, target, *google.Credentials) (sdkmetric.Exporter, error) {
+			return failingShutdown{&captureExporter{}}, nil
+		}
+		tel := setup(t, Options{})
+		first := tel.Shutdown(ctx)
+		if first == nil || !strings.Contains(first.Error(), "exporter shutdown failed") {
+			t.Fatalf("first Shutdown: %v, want the exporter's error", first)
+		}
+		if second := tel.Shutdown(ctx); second != first { // the very same error value
+			t.Errorf("second Shutdown: %v, want the first call's %v", second, first)
+		}
+	})
+	t.Run("at the same time", func(t *testing.T) {
+		f := fakeGoogleCloud(t)
+		tel := setup(t, Options{})
+		recordOne(t, tel)
+		errs := make(chan error, 2)
+		for range 2 {
+			go func() { errs <- tel.Shutdown(ctx) }()
+		}
+		for range 2 {
+			if err := <-errs; err != nil {
+				t.Errorf("Shutdown: %v", err)
+			}
+		}
+		if f.metrics.exports() != 1 {
+			t.Errorf("%d exports, want 1", f.metrics.exports())
+		}
+	})
+}
+
+// Flush sends what is recorded without stopping the providers, and does nothing after
+// Shutdown.
+func TestTelemetry_Flush(t *testing.T) {
+	ctx := context.Background()
+	f := fakeGoogleCloud(t)
+	tel := setup(t, Options{MetricInterval: time.Hour, TraceSampleRatio: 1})
+	recordOne(t, tel)
+	_, span := tel.TracerProvider().Tracer("test").Start(ctx, "GET")
+	span.End()
+	if err := tel.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if f.metrics.exports() != 1 || len(f.spans.GetSpans()) != 1 {
+		t.Fatalf("after Flush: %d metric exports and %d spans, want 1 and 1", f.metrics.exports(), len(f.spans.GetSpans()))
+	}
+	recordOne(t, tel) // the providers still work
+	if err := tel.Flush(ctx); err != nil || f.metrics.exports() != 2 {
+		t.Errorf("second Flush: %v, %d exports; want nil and 2", err, f.metrics.exports())
+	}
+	shutdown(t, tel)
+	sent := f.metrics.exports()
+	if err := tel.Flush(ctx); err != nil || f.metrics.exports() != sent {
+		t.Errorf("Flush after Shutdown: %v, %d more exports; want nil and none", err, f.metrics.exports()-sent)
+	}
+}
+
+// Flush leaves the application's own providers alone, as Shutdown does.
+func TestTelemetry_FlushLeavesOwnProviders(t *testing.T) {
+	fakeGoogleCloud(t)
+	own := &captureExporter{}
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewPeriodicReader(own, sdkmetric.WithInterval(time.Hour))))
+	defer func() { _ = mp.Shutdown(context.Background()) }()
+	tel := setup(t, Options{MeterProvider: mp, TraceSampleRatio: -1})
+	recordOne(t, tel)
+	if err := tel.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n := own.exports(); n != 0 {
+		t.Errorf("Flush made the application's meter provider send %d exports, want none", n)
+	}
+	shutdown(t, tel)
+}
+
 func TestSetup_ServiceInstanceID(t *testing.T) {
 	f := fakeGoogleCloud(t)
 	tel := setup(t, Options{})
@@ -802,10 +1115,11 @@ func TestSetup_ServiceInstanceID(t *testing.T) {
 	if id == "" || f.metrics.resourceValue(t, string(serviceInstanceIDKey)) != id {
 		t.Errorf("ServiceInstanceID %q, exported %q", id, f.metrics.resourceValue(t, string(serviceInstanceIDKey)))
 	}
+	// The generated ID is the process's: a second Setup in the same process gets it too.
 	other := setup(t, Options{})
 	shutdown(t, other)
-	if other.ServiceInstanceID() == id {
-		t.Errorf("two Setups share the service.instance.id %q", id)
+	if other.ServiceInstanceID() != id {
+		t.Errorf("a second Setup in the process got %q, want the process's %q", other.ServiceInstanceID(), id)
 	}
 	explicit := setup(t, Options{ServiceInstanceID: "copy-1"})
 	shutdown(t, explicit)
@@ -820,6 +1134,30 @@ func TestSetup_ServiceInstanceID(t *testing.T) {
 	shutdown(t, fromAttrs)
 	if got, exported := fromAttrs.ServiceInstanceID(), f.metrics.resourceValue(t, string(serviceInstanceIDKey)); got != "attr-id" || exported != "attr-id" {
 		t.Errorf("ServiceInstanceID %q, exported %q, want attr-id for both", got, exported)
+	}
+}
+
+// An application that builds its meter provider with NewResource and lets Setup create the
+// tracer provider sends one service.instance.id on both.
+func TestSetup_ServiceInstanceIDMixedProviders(t *testing.T) {
+	f := fakeGoogleCloud(t)
+	reader := sdkmetric.NewManualReader()
+	res := NewResource(context.Background(), Options{ServiceName: "checkout"})
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithResource(res), sdkmetric.WithReader(reader))
+	defer func() { _ = mp.Shutdown(context.Background()) }()
+	tel := setup(t, Options{ServiceName: "checkout", MeterProvider: mp, TraceSampleRatio: 1})
+	_, span := tel.TracerProvider().Tracer("test").Start(context.Background(), "GET")
+	span.End()
+	shutdown(t, tel)
+
+	metricsID := resourceString(res, string(serviceInstanceIDKey))
+	spans := f.spans.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("%d spans, want 1", len(spans))
+	}
+	spansID := resourceString(spans[0].Resource, string(serviceInstanceIDKey))
+	if metricsID == "" || spansID != metricsID || tel.ServiceInstanceID() != metricsID {
+		t.Errorf("service.instance.id: metrics %q, spans %q, ServiceInstanceID %q; want one ID", metricsID, spansID, tel.ServiceInstanceID())
 	}
 }
 
@@ -877,16 +1215,82 @@ func TestClientOptions(t *testing.T) {
 	if n := len(withInstance.ClientOptions()); n != 6 {
 		t.Errorf("%d options with an instance, want 6 (plus the metric and span attributes)", n)
 	}
+	withMetricAttrs := setup(t, Options{MetricAttributes: []attribute.KeyValue{attribute.String("env", "prod")}})
+	defer shutdown(t, withMetricAttrs)
+	if n := len(withMetricAttrs.ClientOptions()); n != 5 {
+		t.Errorf("%d options with metric attributes only, want 5 (plus the metric attributes)", n)
+	}
+	// valkeyotel.MetricAttrs and TraceAttrs replace earlier ones, so the instance and the
+	// extra attributes must share one option each.
+	withAll := setup(t, Options{
+		MemorystoreInstance: "inst-1",
+		MetricAttributes:    []attribute.KeyValue{attribute.String("env", "prod")},
+		TraceAttributes:     []attribute.KeyValue{attribute.String("env", "prod")},
+	})
+	defer shutdown(t, withAll)
+	if n := len(withAll.ClientOptions()); n != 6 {
+		t.Errorf("%d options with an instance and extra attributes, want 6: one metric and one span attribute option", n)
+	}
+}
+
+// optionAttributes merges Options.MetricAttributes and TraceAttributes with the instance
+// attribute, which wins over the same key, and keeps each key once. A live Valkey isn't needed:
+// TestTelemetry_LiveClient checks the same end to end.
+func TestOptionAttributes(t *testing.T) {
+	env := attribute.String("deployment.environment", "prod")
+	instance := attribute.String(InstanceAttribute, "inst-1")
+	for _, tc := range []struct {
+		name                   string
+		opt                    Options
+		wantMetrics, wantSpans []attribute.KeyValue
+	}{
+		{name: "nothing set"},
+		{name: "the instance only", opt: Options{MemorystoreInstance: "inst-1"}, wantMetrics: []attribute.KeyValue{instance}, wantSpans: []attribute.KeyValue{instance}},
+		{
+			name:        "extra attributes next to the instance, which wins over the same key",
+			opt:         Options{MemorystoreInstance: "inst-1", MetricAttributes: []attribute.KeyValue{env, attribute.String(InstanceAttribute, "other")}, TraceAttributes: []attribute.KeyValue{env}},
+			wantMetrics: []attribute.KeyValue{env, instance},
+			wantSpans:   []attribute.KeyValue{env, instance},
+		},
+		{
+			name:        "extra attributes without an instance, a repeated key keeping its last value",
+			opt:         Options{MetricAttributes: []attribute.KeyValue{attribute.String("deployment.environment", "dev"), env}},
+			wantMetrics: []attribute.KeyValue{env},
+		},
+	} {
+		metrics, spans := optionAttributes(tc.opt)
+		if len(metrics)+len(tc.wantMetrics) > 0 && !slices.Equal(metrics, tc.wantMetrics) {
+			t.Errorf("%s: metric attributes %v, want %v", tc.name, metrics, tc.wantMetrics)
+		}
+		if len(spans)+len(tc.wantSpans) > 0 && !slices.Equal(spans, tc.wantSpans) {
+			t.Errorf("%s: span attributes %v, want %v", tc.name, spans, tc.wantSpans)
+		}
+	}
+	// The caller's slice isn't changed by adding the instance.
+	attrs := make([]attribute.KeyValue, 1, 2)
+	attrs[0] = env
+	optionAttributes(Options{MemorystoreInstance: "inst-1", MetricAttributes: attrs})
+	if got := attrs[:2][1]; got.Key != "" {
+		t.Errorf("optionAttributes wrote %v into the caller's slice", got)
+	}
 }
 
 // TestTelemetry_LiveClient sends commands to a real Valkey and checks what Cloud Monitoring
-// and Cloud Trace would receive: the command and instance attributes, the latency buckets, the
-// client-side cache counters and the spans. It needs a local Valkey without a password, at
-// 127.0.0.1:6379 or VALKEYOTEL_GCP_TEST_ADDR, and is skipped without one.
+// and Cloud Trace would receive: the command and instance attributes, extra attributes from
+// Options next to the instance one, the latency buckets, the client-side cache counters and the
+// spans. It needs a local Valkey without a password, at 127.0.0.1:6379 or
+// VALKEYOTEL_GCP_TEST_ADDR, and is skipped without one.
 func TestTelemetry_LiveClient(t *testing.T) {
 	addr := cmp.Or(os.Getenv("VALKEYOTEL_GCP_TEST_ADDR"), "127.0.0.1:6379")
 	f := fakeGoogleCloud(t)
-	tel := setup(t, Options{MemorystoreInstance: "inst-1", TraceSampleRatio: 1})
+	env := attribute.String("deployment.environment", "prod")
+	tel := setup(t, Options{
+		MemorystoreInstance: "inst-1",
+		// The instance wins over an attribute with its key.
+		MetricAttributes: []attribute.KeyValue{env, attribute.String(InstanceAttribute, "other")},
+		TraceAttributes:  []attribute.KeyValue{env},
+		TraceSampleRatio: 1,
+	})
 	client, err := tel.NewClient(valkey.ClientOption{
 		InitAddress:       []string{addr},
 		ForceSingleClient: true,
@@ -918,8 +1322,11 @@ func TestTelemetry_LiveClient(t *testing.T) {
 		if v, _ := p.Attributes.Value(InstanceAttribute); v.AsString() != "inst-1" {
 			t.Errorf("latency point %v lacks %s=inst-1", p.Attributes.ToSlice(), InstanceAttribute)
 		}
-		if !slices.Equal(p.Bounds, DefaultLatencyBuckets) {
-			t.Errorf("command latency buckets = %v, want %v", p.Bounds, DefaultLatencyBuckets)
+		if v, _ := p.Attributes.Value(env.Key); v.AsString() != "prod" {
+			t.Errorf("latency point %v lacks the MetricAttributes %s=prod", p.Attributes.ToSlice(), env.Key)
+		}
+		if !slices.Equal(p.Bounds, DefaultLatencyBuckets()) {
+			t.Errorf("command latency buckets = %v, want %v", p.Bounds, DefaultLatencyBuckets())
 		}
 		op, _ := p.Attributes.Value("operation")
 		ops = append(ops, op.AsString())
@@ -927,8 +1334,8 @@ func TestTelemetry_LiveClient(t *testing.T) {
 	if !slices.Contains(ops, "SET") || !slices.Contains(ops, "GET") {
 		t.Errorf("operations = %v, want SET and GET", ops)
 	}
-	if p := histogramPoints(t, f.metrics.metric(t, "valkey_dial_latency"))[0]; !slices.Equal(p.Bounds, DefaultLatencyBuckets) {
-		t.Errorf("dial latency buckets = %v, want %v", p.Bounds, DefaultLatencyBuckets)
+	if p := histogramPoints(t, f.metrics.metric(t, "valkey_dial_latency"))[0]; !slices.Equal(p.Bounds, DefaultLatencyBuckets()) {
+		t.Errorf("dial latency buckets = %v, want %v", p.Bounds, DefaultLatencyBuckets())
 	}
 
 	hits, ok := f.metrics.metric(t, "valkey_do_cache_hits").Data.(metricdata.Sum[int64])
@@ -941,13 +1348,14 @@ func TestTelemetry_LiveClient(t *testing.T) {
 
 	traced := false
 	for _, s := range f.spans.GetSpans() {
+		var instance, environment bool
 		for _, a := range s.Attributes {
-			if a.Key == InstanceAttribute && a.Value.AsString() == "inst-1" {
-				traced = true
-			}
+			instance = instance || (a.Key == InstanceAttribute && a.Value.AsString() == "inst-1")
+			environment = environment || (a.Key == env.Key && a.Value.AsString() == "prod")
 		}
+		traced = traced || (instance && environment)
 	}
 	if !traced {
-		t.Error("no span carries the instance attribute")
+		t.Error("no span carries both the instance attribute and the TraceAttributes")
 	}
 }

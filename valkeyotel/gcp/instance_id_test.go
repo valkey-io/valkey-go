@@ -17,7 +17,21 @@ func fixHostAndProcess(t *testing.T, host string, hostErr error) {
 	hostname = func() (string, error) { return host, hostErr }
 	processID = func() int { return 42 }
 	randomHex = func() string { return "0a1b2c3d" }
-	t.Cleanup(func() { hostname, processID, randomHex = origHost, origPID, origRandom })
+	origProcessRandom := setProcessRandom("") // so the fixed random part is picked
+	t.Cleanup(func() {
+		hostname, processID, randomHex = origHost, origPID, origRandom
+		setProcessRandom(origProcessRandom)
+	})
+}
+
+// setProcessRandom replaces the random part chosen for this process, and returns the old one.
+// "" makes the next generated ID choose a new one, as a new process would.
+func setProcessRandom(v string) string {
+	processRandomMu.Lock()
+	defer processRandomMu.Unlock()
+	old := processRandom
+	processRandom = v
+	return old
 }
 
 func resourceWith(kv ...attribute.KeyValue) *resource.Resource { return resource.NewSchemaless(kv...) }
@@ -66,14 +80,21 @@ func TestChooseInstanceID(t *testing.T) {
 
 // TestChooseInstanceID_Unique checks what the two-copies test checks in Google Cloud: copies on
 // the same host get different IDs, even with the same PID, as containers that run as PID 1.
+// Each process chooses its own random part, and keeps it, so one process always generates the
+// same ID.
 func TestChooseInstanceID_Unique(t *testing.T) {
 	origHost, origPID := hostname, processID
 	hostname = func() (string, error) { return "same-host", nil }
 	processID = func() int { return 1 }
-	t.Cleanup(func() { hostname, processID = origHost, origPID })
+	origProcessRandom := setProcessRandom("")
+	t.Cleanup(func() {
+		hostname, processID = origHost, origPID
+		setProcessRandom(origProcessRandom)
+	})
 
 	seen := map[string]bool{}
 	for range 100 {
+		setProcessRandom("") // another process
 		id := chooseInstanceID("", nil)
 		if !strings.HasPrefix(id, "same-host-1-") || len(id) != len("same-host-1-")+8 {
 			t.Fatalf("id %q, want same-host-1-<8 hex digits>", id)
@@ -82,5 +103,8 @@ func TestChooseInstanceID_Unique(t *testing.T) {
 			t.Fatalf("id %q was generated twice", id)
 		}
 		seen[id] = true
+		if again := chooseInstanceID("", nil); again != id {
+			t.Fatalf("one process generated %q, then %q", id, again)
+		}
 	}
 }

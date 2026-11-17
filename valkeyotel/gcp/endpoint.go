@@ -51,16 +51,17 @@ const (
 	CredentialsDefault CredentialsMode = iota
 	// CredentialsAuto attaches Google credentials when the endpoint is a Google API host
 	// (*.googleapis.com, which includes the regional endpoints and Private Service Connect
-	// names such as telemetry-myendpoint.p.googleapis.com) reached over TLS. Any other
-	// endpoint, such as a local OpenTelemetry Collector, gets none, so a Google token is never
-	// sent to a server that isn't Google's.
+	// names such as telemetry-myendpoint.p.googleapis.com). Any other endpoint, such as a local
+	// OpenTelemetry Collector, gets none, so a Google token is never sent to a server that
+	// isn't Google's. A Google API host must use TLS: plaintext is an error, because Google
+	// would refuse every send.
 	CredentialsAuto
 	// CredentialsOn always attaches Google credentials. It is for Private Service Connect
 	// reached through a custom DNS name: the exporters then also send telemetry.googleapis.com
 	// as the TLS server name and :authority, as Google requires. The endpoint must use TLS.
 	CredentialsOn
 	// CredentialsOff never attaches Google credentials, for example when a collector
-	// authenticates to Google itself.
+	// authenticates to Google itself. It allows any endpoint, plaintext Google hosts included.
 	CredentialsOff
 )
 
@@ -108,8 +109,13 @@ type target struct {
 // OTEL_EXPORTER_OTLP_ENDPOINT and TelemetryEndpoint. A URL's scheme decides TLS (https) or
 // plaintext (http); a host:port endpoint uses TLS unless OTEL_EXPORTER_OTLP_<SIGNAL>_INSECURE
 // or OTEL_EXPORTER_OTLP_INSECURE says otherwise, as the OTLP exporters do. Google credentials
-// then follow mode (see CredentialsMode), whichever place the endpoint came from.
+// then follow mode (see CredentialsMode), whichever place the endpoint came from. The
+// exporters send OTLP over gRPC, so a protocol other than grpc in the environment is an
+// error, and so is a plaintext Google endpoint with CredentialsAuto or CredentialsOn.
 func resolveTarget(endpoint string, sig signal, mode CredentialsMode) (target, error) {
+	if err := checkProtocol(sig); err != nil {
+		return target{}, err
+	}
 	raw := cmp.Or(
 		strings.TrimSpace(endpoint),
 		strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_"+string(sig)+"_ENDPOINT")),
@@ -144,9 +150,29 @@ func resolveTarget(endpoint string, sig signal, mode CredentialsMode) (target, e
 		}
 	case CredentialsOff:
 	default: // CredentialsAuto
-		t.credentials = google && !t.insecure
+		if google && t.insecure {
+			// Google accepts only TLS: every send would fail, so say so now.
+			return target{}, fmt.Errorf("valkeyotel/gcp: endpoint %q is a Google API host but plaintext; Google needs TLS (use https://, or unset OTEL_EXPORTER_OTLP_INSECURE and OTEL_EXPORTER_OTLP_%s_INSECURE)", raw, sig)
+		}
+		t.credentials = google
 	}
 	return t, nil
+}
+
+// checkProtocol returns an error when OTEL_EXPORTER_OTLP_<SIGNAL>_PROTOCOL, or else
+// OTEL_EXPORTER_OTLP_PROTOCOL, asks for anything but grpc: the exporters send OTLP over gRPC
+// only, and ignoring the setting would send to the wrong port or format without a word.
+func checkProtocol(sig signal) error {
+	name := "OTEL_EXPORTER_OTLP_" + string(sig) + "_PROTOCOL"
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		name = "OTEL_EXPORTER_OTLP_PROTOCOL"
+		v = strings.TrimSpace(os.Getenv(name))
+	}
+	if v != "" && !strings.EqualFold(v, "grpc") {
+		return fmt.Errorf("valkeyotel/gcp: %s=%q: Setup sends OTLP over gRPC only; want grpc", name, v)
+	}
+	return nil
 }
 
 // envBool reads a boolean environment variable, or returns def when it is unset or invalid.

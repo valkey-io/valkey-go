@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -28,6 +29,23 @@ var (
 	}
 )
 
+// The random part of generated IDs, chosen once per process, so that NewResource and Setup
+// generate the same ID. Tests reset it.
+var (
+	processRandomMu sync.Mutex
+	processRandom   string
+)
+
+// processRandomHex returns the random part of this process's generated IDs.
+func processRandomHex() string {
+	processRandomMu.Lock()
+	defer processRandomMu.Unlock()
+	if processRandom == "" {
+		processRandom = randomHex()
+	}
+	return processRandom
+}
+
 // chooseInstanceID returns the service.instance.id of this process. res describes the process
 // without Options (see buildResource). The first value found wins:
 //
@@ -41,8 +59,10 @@ var (
 //     OpenTelemetry's error handler.
 //
 // The random part keeps the ID unique when processes share a host name and a PID, as the
-// containers of a pod do (each often runs as PID 1). The ID stays the same while the process
-// runs, and a restarted process gets a new one.
+// containers of a pod do (each often runs as PID 1). It is chosen once per process, so every
+// NewResource and Setup call in the process generates the same ID, and the metrics and spans
+// of one process agree even when the application creates one of the providers itself. The ID
+// stays the same while the process runs, and a restarted process gets a new one.
 func chooseInstanceID(explicit string, res *resource.Resource) string {
 	if explicit != "" {
 		return explicit
@@ -60,7 +80,7 @@ func chooseInstanceID(explicit string, res *resource.Resource) string {
 	if unknown {
 		host = "unknown"
 	}
-	id := fmt.Sprintf("%s-%d-%s", host, processID(), randomHex())
+	id := fmt.Sprintf("%s-%d-%s", host, processID(), processRandomHex())
 	if unknown {
 		otel.Handle(fmt.Errorf("valkeyotel/gcp: couldn't find a host name for service.instance.id; using %q. Set Options.ServiceInstanceID or service.instance.id in OTEL_RESOURCE_ATTRIBUTES to choose one", id))
 	}

@@ -33,24 +33,27 @@ For each setting, a value in `Options` wins, then the standard OpenTelemetry env
 
 | Setting | `Options` field | Environment variable | Default |
 |---|---|---|---|
-| Project that receives the data | `ProjectID` | `gcp.project_id` in `OTEL_RESOURCE_ATTRIBUTES` | The project of Application Default Credentials |
+| Project that receives the data | `ProjectID` | `gcp.project_id` in `OTEL_RESOURCE_ATTRIBUTES`, then `GOOGLE_CLOUD_PROJECT` | The project of Application Default Credentials |
 | Endpoint | `Endpoint` | `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, then `OTEL_EXPORTER_OTLP_ENDPOINT` | `telemetry.googleapis.com:443` |
 | Google credentials | `GoogleCredentials` | `VALKEYOTEL_GCP_CREDENTIALS` (`auto`, `on` or `off`) | `auto`: for `*.googleapis.com` endpoints only |
 | Service name (`job` label) | `ServiceName` | `OTEL_SERVICE_NAME`, or `service.name` in `OTEL_RESOURCE_ATTRIBUTES` | `unknown_service:<executable>` |
 | ID of this running copy (`instance` label) | `ServiceInstanceID` | `service.instance.id` in `OTEL_RESOURCE_ATTRIBUTES` | Generated; see [One ID per running copy](#one-id-per-running-copy) |
 | Other resource attributes | `ResourceAttributes` | `OTEL_RESOURCE_ATTRIBUTES` | The detected environment |
 | Memorystore instance label | `MemorystoreInstance` | — | None |
+| Extra labels on valkey-go metrics and spans | `MetricAttributes`, `TraceAttributes` | — | None |
 | How often metrics are sent | `MetricInterval` | `OTEL_METRIC_EXPORT_INTERVAL` (milliseconds) | 60 s; at least 5 s when sending to Google |
 | Share of new traces sampled | `TraceSampleRatio` (negative turns tracing off) | `OTEL_TRACES_SAMPLER` and `OTEL_TRACES_SAMPLER_ARG` | 1%, and always when the parent span is sampled |
-| Latency buckets | `LatencyBuckets` | — | 100 µs to 10 s |
+| Latency buckets | `LatencyBuckets` | — | 100 µs to 10 s (`DefaultLatencyBuckets()`) |
 | The application's own providers | `MeterProvider`, `TracerProvider` | — | Setup creates its own |
 | Also install as OpenTelemetry's global providers | `SetGlobal` | — | Off |
+| Turn metrics or traces off | — | `OTEL_METRICS_EXPORTER=none`, `OTEL_TRACES_EXPORTER=none` | — |
 | Turn everything off | — | `OTEL_SDK_DISABLED=true` | — |
 
 - `ResourceAttributes` win over `OTEL_RESOURCE_ATTRIBUTES`, and `ServiceName`, `ServiceInstanceID` and `ProjectID` win over the same attributes in `ResourceAttributes`.
+- `MetricAttributes` and `TraceAttributes` are added next to `valkey.instance`, which wins over one with the same key. Keep them few and fixed: each distinct set of values is its own time series. Don't pass `valkeyotel.MetricAttrs` or `valkeyotel.TraceAttrs` to `tel.NewClient`: they replace the attributes that came before them, `valkey.instance` included.
 - An invalid environment variable counts as unset. For example, an unknown `OTEL_TRACES_SAMPLER` gets the 1% default, rather than OpenTelemetry's fallback, which samples every trace.
 - The exporters read the other `OTEL_EXPORTER_OTLP_*` variables as usual: headers, timeout, compression, and `OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION=base2_exponential_bucket_histogram` for exponential latency histograms instead of fixed buckets.
-- Setup always sends OTLP over gRPC: it doesn't read `OTEL_EXPORTER_OTLP_PROTOCOL`, `OTEL_TRACES_EXPORTER` or `OTEL_METRICS_EXPORTER`. A collector must accept OTLP/gRPC, usually on port 4317.
+- Setup sends OTLP over gRPC. `OTEL_METRICS_EXPORTER` and `OTEL_TRACES_EXPORTER` can be `otlp`, the same as unset, or `none`, which turns that signal off. `OTEL_EXPORTER_OTLP_PROTOCOL`, and its `_METRICS_` and `_TRACES_` variants, can only be `grpc`. Any other value is an error rather than being ignored. A collector must accept OTLP/gRPC, usually on port 4317. None of these apply to providers passed in `Options`.
 
 **Why every 60 seconds:** it's OpenTelemetry's default. Nothing is sampled: every command is counted and timed in memory, and the interval only says how often the totals are sent. Cloud Monitoring charts work at the minute level, and every send costs one sample or more per time series. Use a shorter interval for tests.
 
@@ -66,9 +69,9 @@ Google credentials follow the endpoint that's actually used, wherever it was set
 | Private Service Connect behind a custom DNS name | Not attached, so a Google token never goes to a host that may not be Google's. Set `GoogleCredentials: gcp.CredentialsOn` or `VALKEYOTEL_GCP_CREDENTIALS=on`: the token is attached, and `telemetry.googleapis.com` is sent as the TLS server name and `:authority`, as Google requires |
 | A local OpenTelemetry Collector, such as `http://localhost:4317` | Not attached: the collector authenticates to Google itself |
 
-A URL uses TLS with `https://` and plaintext with `http://`. A `host:port` endpoint uses TLS, unless `OTEL_EXPORTER_OTLP_INSECURE=true`. Credentials are never sent in plaintext. Setup looks up the credentials and the project only when it attaches credentials, so an application that sends to a collector needs neither.
+A URL uses TLS with `https://` and plaintext with `http://`. A `host:port` endpoint uses TLS, unless `OTEL_EXPORTER_OTLP_INSECURE=true`. Credentials are never sent in plaintext. A plaintext Google endpoint, such as `http://telemetry.googleapis.com:443` or the default with `OTEL_EXPORTER_OTLP_INSECURE=true` left over from a collector setup, is an error, because Google accepts only TLS; `GoogleCredentials: gcp.CredentialsOff` allows it. Setup looks up the credentials and the project only when it attaches credentials, so an application that sends to a collector needs neither.
 
-**Quota project.** Service accounts, as on Compute Engine, GKE and Cloud Run, need nothing more. User credentials (`gcloud auth application-default login`), for example on a laptop, also need a quota project: set `GOOGLE_CLOUD_QUOTA_PROJECT`, or run `gcloud auth application-default set-quota-project PROJECT_ID`. Setup sends it in the `x-goog-user-project` header, unless `OTEL_EXPORTER_OTLP_HEADERS` already does: Google rejects requests that carry it twice.
+**Project and quota project.** Service accounts, as on Compute Engine, GKE and Cloud Run, need nothing more. User credentials (`gcloud auth application-default login`), for example on a laptop, name no project: set `GOOGLE_CLOUD_PROJECT` (or `Options.ProjectID`). They also need a quota project: set `GOOGLE_CLOUD_QUOTA_PROJECT`, or run `gcloud auth application-default set-quota-project PROJECT_ID`. Setup sends it in the `x-goog-user-project` header, unless `OTEL_EXPORTER_OTLP_HEADERS` already does: Google rejects requests that carry it twice.
 
 ## One ID per running copy
 
@@ -84,7 +87,7 @@ Google Cloud labels each time series with `instance`, taken from `service.instan
 
    Without any of them, or with only `localhost`, the host is `unknown` and Setup logs a warning.
 
-The generated ID is unique per process, even for processes that share a host and a PID, as containers running as PID 1 do. It stays the same while the process runs, and a restarted process gets a new one; an application that needs a stable ID sets 1 or 2. `tel.ServiceInstanceID()` returns the ID, so it can be logged.
+The generated ID is unique per process, even for processes that share a host and a PID, as containers running as PID 1 do. It stays the same while the process runs, and a restarted process gets a new one; an application that needs a stable ID sets 1 or 2. `gcp.NewResource` generates the same ID as Setup in one process, so metrics and spans agree when the application builds one of the providers itself. For the same reason, a second `Setup` in one process that sends the same metrics, with the same service name, needs its own `ServiceInstanceID`. `tel.ServiceInstanceID()` returns the ID, so it can be logged.
 
 ## Applications that already use OpenTelemetry
 
@@ -100,11 +103,11 @@ tp := sdktrace.NewTracerProvider(sdktrace.WithResource(res), sdktrace.WithBatche
 tel, err := gcp.Setup(ctx, gcp.Options{MeterProvider: mp, TracerProvider: tp, MemorystoreInstance: "my-instance"})
 ```
 
-Call `NewResource` once per process: unless an ID is set, each call generates a new one.
+`NewResource` and `Setup` generate the same `service.instance.id` in one process, so the providers the application builds and the ones Setup creates agree.
 
 ## Platform notes
 
-- **Cloud Run:** telemetry is sent in the background, so use instance-based billing (CPU always allocated). With request-based billing, the CPU is throttled between requests, and sends can be late or lost. Cloud Run sends `SIGTERM` 10 seconds before it stops an instance: call `tel.Shutdown` then, to send the last data.
+- **Cloud Run:** telemetry is sent in the background, so use instance-based billing (CPU always allocated). With request-based billing, the CPU is throttled between requests, and sends can be late or lost; calling `tel.Flush(ctx)` at the end of a request sends what's recorded so far while the CPU is allocated, at the cost of that time on the request. Cloud Run sends `SIGTERM` 10 seconds before it stops an instance: call `tel.Shutdown` then, to send the last data. `Shutdown` is safe to call more than once, so the `defer tel.Shutdown(...)` from the quickstart can stay.
 - **GKE:** the `namespace` label stays empty unless the pod sets `k8s.namespace.name` in `OTEL_RESOURCE_ATTRIBUTES`, for example from the Kubernetes downward API.
 - **Outside Google Cloud** (a laptop, CI or another cloud): set the location (see below) and, with user credentials, the quota project.
 
