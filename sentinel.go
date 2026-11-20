@@ -38,6 +38,14 @@ func newSentinelClient(opt *ClientOption, connFn connFn, retryer retryHandler) (
 		return nil, ErrReplicaOnlyConflict
 	}
 
+	if opt.ReplicaOnly && opt.ReadNodeSelector != nil {
+		return nil, ErrReplicaOnlyConflictWithReadNodeSelector
+	}
+
+	if opt.ReplicaSelector != nil && opt.ReadNodeSelector != nil {
+		return nil, ErrReplicaSelectorConflictWithReadNodeSelector
+	}
+
 	if opt.Sentinel.TopologyRefreshInterval < 0 {
 		return nil, ErrInvalidTopologyRefreshInterval
 	}
@@ -110,8 +118,9 @@ type sentinelClient struct {
 	stop         uint32
 	cmd          Builder
 	retry        bool
-	hasLftm      bool
-	replica      bool
+	hasLftm         bool
+	replica         bool
+	readFromPrimary atomic.Bool
 }
 
 func (c *sentinelClient) B() Builder {
@@ -411,7 +420,7 @@ func (c *sentinelClient) pick(cmd Completed) (cc conn) {
 	case c.replica:
 		cc = c.rConn.Load().(conn)
 	case c.mOpt.SendToReplicas != nil:
-		if c.mOpt.SendToReplicas(cmd) {
+		if c.mOpt.SendToReplicas(cmd) && !c.readFromPrimary.Load() {
 			cc = c.rConn.Load().(conn)
 		} else {
 			cc = c.mConn.Load().(conn)
@@ -427,7 +436,7 @@ func (c *sentinelClient) pickMulti(sendToReplica bool) (cc conn) {
 	case c.replica:
 		cc = c.rConn.Load().(conn)
 	case c.mOpt.SendToReplicas != nil:
-		if sendToReplica {
+		if sendToReplica && !c.readFromPrimary.Load() {
 			cc = c.rConn.Load().(conn)
 		} else {
 			cc = c.mConn.Load().(conn)
@@ -671,18 +680,29 @@ func (c *sentinelClient) _refresh() (err error) {
 				case c.replica:
 					err = c._switchTarget(replica, false)
 				case c.mOpt.SendToReplicas != nil:
-					errs := make(chan error, 1)
-					go func(errs chan error, master string) {
-						errs <- c._switchTarget(master, true)
-					}(errs, master)
-					go func(errs chan error, replica string) {
-						errs <- c._switchTarget(replica, false)
-					}(errs, replica)
+					if replica == "" {
+						err = c._switchTarget(master, true)
+						if err == nil {
+							c.readFromPrimary.Store(true)
+							c.rAddr.Store("")
+						}
+					} else {
+						errs := make(chan error, 2)
+						go func(errs chan error, master string) {
+							errs <- c._switchTarget(master, true)
+						}(errs, master)
+						go func(errs chan error, replica string) {
+							errs <- c._switchTarget(replica, false)
+						}(errs, replica)
 
-					for range 2 {
-						if e := <-errs; e != nil {
-							err = e
-							break
+						for range 2 {
+							if e := <-errs; e != nil {
+								err = e
+								break
+							}
+						}
+						if err == nil {
+							c.readFromPrimary.Store(false)
 						}
 					}
 				default:
@@ -802,7 +822,7 @@ func (c *sentinelClient) listWatch(cc conn) (master string, replica string, sent
 
 	// we return a slave address instead of master
 	if c.replica {
-		addr, err := pickReplica(resp.s[1], c.currentReplica())
+		addr, err := pickReplica(resp.s[1], "", c.currentReplica(), nil)
 		if err != nil {
 			return "", "", nil, err
 		}
@@ -810,9 +830,15 @@ func (c *sentinelClient) listWatch(cc conn) (master string, replica string, sent
 		return "", addr, sentinels, nil
 	}
 
+	m, err := resp.s[1].AsStrSlice()
+	if err != nil {
+		return "", "", nil, err
+	}
+	master = net.JoinHostPort(m[0], m[1])
+
 	var r string
 	if c.mOpt.SendToReplicas != nil {
-		addr, err := pickReplica(resp.s[2], c.currentReplica())
+		addr, err := pickReplica(resp.s[2], master, c.currentReplica(), c.mOpt.ReadNodeSelector)
 		if err != nil {
 			return "", "", nil, err
 		}
@@ -820,16 +846,16 @@ func (c *sentinelClient) listWatch(cc conn) (master string, replica string, sent
 		r = addr
 	}
 
-	m, err := resp.s[1].AsStrSlice()
-	if err != nil {
-		return "", "", nil, err
-	}
-	return net.JoinHostPort(m[0], m[1]), r, sentinels, nil
+	return master, r, sentinels, nil
 }
 
 // pickReplica chooses which replica to talk to. current is the address already
 // in use, if any: it is kept whenever it is still eligible, and only a client
 // that has none, or whose replica has gone away, draws a new one at random.
+//
+// When selector is non-nil, it is invoked with [primary, eligible replicas...]
+// (matching cluster and standalone ReadNodeSelector semantics). Returning 0 or
+// an out-of-range index selects the primary (returned as an empty replica addr).
 //
 // The random draw spreads clients over the replicas, but it belongs at the
 // point where a client needs a replica, not at every refresh. Refresh used to
@@ -838,7 +864,7 @@ func (c *sentinelClient) listWatch(cc conn) (master string, replica string, sent
 // the connection it replaces immediately, so a fresh draw on each tick would
 // tear down a working replica connection — and the requests in flight on it —
 // several times a minute for no reason.
-func pickReplica(resp ValkeyResult, current string) (string, error) {
+func pickReplica(resp ValkeyResult, master, current string, selector ReadNodeSelectorFunc) (string, error) {
 	replicas, err := resp.ToArray()
 	if err != nil {
 		return "", err
@@ -854,6 +880,19 @@ func pickReplica(resp ValkeyResult, current string) (string, error) {
 		if _, ok := replica["s-down-time"]; !ok {
 			eligible = append(eligible, replica)
 		}
+	}
+
+	if selector != nil {
+		nodes := make([]NodeInfo, 0, len(eligible)+1)
+		nodes = append(nodes, NodeInfo{Addr: master})
+		for _, m := range eligible {
+			nodes = append(nodes, NodeInfo{Addr: net.JoinHostPort(m["ip"], m["port"])})
+		}
+		idx := selector(0, nodes)
+		if idx <= 0 || idx >= len(nodes) {
+			return "", nil
+		}
+		return nodes[idx].Addr, nil
 	}
 
 	if len(eligible) == 0 {
