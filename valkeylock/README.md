@@ -67,7 +67,6 @@ When the `locker.WithContext` is invoked, it will:
 
 ### Disable Client Side Caching
 
-Some Valkey providers don't support client-side caching, ex. Google Cloud Memorystore.
 You can disable client-side caching by setting `ClientOption.DisableCache` to `true`.
 Please note that when the client-side caching is disabled, valkeylock will only try to re-acquire locks for every ExtendInterval.
 
