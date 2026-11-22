@@ -247,7 +247,6 @@ Please refer to the full example at [valkeyaside](https://github.com/valkey-io/v
 
 ### Disable Client-Side Caching
 
-Some Valkey providers don't support client-side caching, ex. Google Cloud Memorystore.
 You can disable client-side caching by setting `ClientOption.DisableCache` to `true`.
 This will also fall back `client.DoCache()` and `client.DoMultiCache()` to `client.Do()` and `client.DoMulti()`.
 
