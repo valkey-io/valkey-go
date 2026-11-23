@@ -758,7 +758,7 @@ func TestTokenProvider_TokenHonorsContext(t *testing.T) {
 // so ADC's own token cache renews at the same point as valkeygcp's cache and a re-AUTH gets
 // a new token, without relying on how oauth2's caches share token objects. A
 // CustomTokenSource is used as is, with no ADC lookup.
-func TestNewBaseSource_EarlyTokenRefresh(t *testing.T) {
+func TestNewBaseCreds_EarlyTokenRefresh(t *testing.T) {
 	orig := findDefaultCredentials
 	defer func() { findDefaultCredentials = orig }()
 	var got google.CredentialsParams
@@ -792,5 +792,19 @@ func TestNewBaseSource_EarlyTokenRefresh(t *testing.T) {
 	}
 	if _, err := NewIAMTokenProvider(context.Background(), IAMAuthOptions{CustomTokenSource: &mockTokenSource{}}); err != nil || looked.Load() {
 		t.Fatalf("CustomTokenSource: err = %v, ADC looked up = %v", err, looked.Load())
+	}
+}
+
+// NewIAMTokenProvider rejects malformed CredentialsJSON, also when it is the identity that
+// impersonates ImpersonateSA.
+func TestNewIAMTokenProvider_InvalidJSON(t *testing.T) {
+	ctx := context.Background()
+	for _, opt := range []IAMAuthOptions{
+		{CredentialsJSON: []byte(`{ invalid json`)},
+		{CredentialsJSON: []byte(`{ invalid json`), ImpersonateSA: "sa@p.iam.gserviceaccount.com"},
+	} {
+		if _, err := NewIAMTokenProvider(ctx, opt); err == nil || !strings.Contains(err.Error(), "invalid credentials JSON") {
+			t.Errorf("ImpersonateSA %q: got %v, want the invalid JSON error", opt.ImpersonateSA, err)
+		}
 	}
 }

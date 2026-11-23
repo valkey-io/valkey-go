@@ -35,16 +35,19 @@ const (
 // at the same moment.
 const credentialRetry = 30 * time.Second
 
-// IAMAuthOptions configures IAM authentication: where the access tokens come from, the
+// IAMAuthOptions configures IAM authentication: which identity gets the access tokens, the
 // username sent with them, and how they are refreshed. The zero value uses Application
 // Default Credentials (ADC) and the username "default".
 //
-// The access tokens come from CustomTokenSource, or from ADC when it is nil; that identity
-// needs roles/memorystore.dbConnectionUser on the instance.
+// The tokens come from CustomTokenSource, ImpersonateSA or CredentialsJSON, otherwise from
+// ADC. That identity (with ImpersonateSA, the impersonated account) needs
+// roles/memorystore.dbConnectionUser on the instance.
 type IAMAuthOptions struct {
 	// Username is sent with AUTH. Memorystore accepts only "default" or the email of the
-	// IAM principal. Empty means ClientOption.Username when NewClient or
-	// ResolveClientOption gets one, otherwise DefaultIAMUsername.
+	// IAM principal, so another value fails setup when the principal is known. When it isn't
+	// known, NewClient stops retrying after a few ERR_IAM_OTHER replies, which Memorystore
+	// also sends for an invalid username. When empty, NewClient and ResolveClientOption use
+	// ClientOption.Username; otherwise UsernameStrategy picks the username.
 	Username string
 	// RefreshBuffer is how long before a token expires a new one is used. Live connections
 	// re-AUTH with the new token at a random moment in the first half of this window, so
@@ -52,15 +55,41 @@ type IAMAuthOptions struct {
 	// margin makes re-AUTHs resend the old token (see CustomTokenSource). Zero or negative
 	// means DefaultRefreshBuffer.
 	RefreshBuffer time.Duration
-	// CustomTokenSource supplies the access tokens instead of Application Default
-	// Credentials, for tokens you get your own way. If it caches tokens, it must hand out a
-	// new one once the current token has less than RefreshBuffer left: valkeygcp asks for a
-	// new token then, and live connections would otherwise re-AUTH with the old one.
+	// CustomTokenSource supplies the access tokens, for tokens you get your own way. It
+	// takes precedence over ImpersonateSA and CredentialsJSON. If it caches tokens, it must
+	// hand out a new one once the current token has less than RefreshBuffer left: valkeygcp
+	// asks for a new token then, and live connections would otherwise re-AUTH with the old
+	// one. With UsernamePrincipalEmail, set CredentialsJSON too, to say whose tokens they
+	// are, or set Username.
 	CustomTokenSource oauth2.TokenSource
-	// Scopes are the OAuth2 scopes requested from Application Default Credentials;
-	// DefaultCloudPlatformScope when empty. They aren't used with CustomTokenSource.
+	// Scopes are the OAuth2 scopes requested for the access tokens; DefaultCloudPlatformScope
+	// when empty. They aren't used with CustomTokenSource.
 	Scopes []string
+	// CredentialsJSON is a service account key or a credential configuration (for example
+	// for Workload Identity Federation), used instead of Application Default Credentials.
+	// With ImpersonateSA, it is the identity that impersonates. Memorystore IAM
+	// authentication supports user accounts and service accounts, so a Workload Identity
+	// Federation configuration must impersonate a service account.
+	CredentialsJSON []byte
+	// ImpersonateSA is the email of a service account to impersonate: the tokens are issued
+	// for that account, for example to reach an instance in another project. The identity
+	// that impersonates it is CredentialsJSON when set, otherwise Application Default
+	// Credentials, and needs roles/iam.serviceAccountTokenCreator on the account, or with
+	// Delegates on the first account of the chain.
+	ImpersonateSA string
+	// Delegates is the delegation chain for ImpersonateSA, usually empty. Each service
+	// account in it needs roles/iam.serviceAccountTokenCreator on the next one, and the last
+	// one on ImpersonateSA.
+	Delegates []string
 
+	// UsernameStrategy picks the AUTH username when Username is empty: UsernameDefault sends
+	// "default", UsernamePrincipalEmail the email of the IAM principal.
+	UsernameStrategy UsernameStrategy
+	// ImpersonateLifetime is how long impersonated tokens last; they are renewed like any
+	// other token. Zero means 1h. It must exceed RefreshBuffer and be at most 12h, the most
+	// the IAM Credentials API issues; setup refuses other values. More than 1h also needs the
+	// org policy constraints/iam.allowServiceAccountCredentialLifetimeExtension.
+	ImpersonateLifetime time.Duration
 	// DisableProactiveReauth turns off re-AUTH on live connections. Every new connection
 	// still gets a fresh token, but a live connection keeps the token it authenticated with:
 	// the credentials carry no RefreshAfter, so valkey-go schedules no re-AUTH.
@@ -112,6 +141,7 @@ type tokenProvider struct {
 	source        oauth2.TokenSource // cached tokens; a new one RefreshBuffer before expiry
 	refreshBuffer time.Duration
 	username      string
+	usernameValid bool                         // Memorystore accepts username (see checkIAMUsername)
 	lastGood      atomic.Pointer[oauth2.Token] // the last token fetched successfully
 	disableReauth bool
 	limiter       *authLimiter
@@ -123,28 +153,79 @@ type tokenProvider struct {
 // cached and replaced RefreshBuffer before they expire, so a re-AUTH sends a new token, as
 // long as the token source hands one out by then (see IAMAuthOptions.CustomTokenSource).
 //
-// ctx bounds the one-off setup (finding the credentials), which also stops after 15s when
-// ctx has no earlier deadline. Token refreshes don't use ctx.
+// ctx bounds the one-off setup (finding the credentials, looking up the principal email),
+// which also stops after 15s when ctx has no earlier deadline. Token refreshes don't use ctx.
 func NewIAMTokenProvider(ctx context.Context, opt IAMAuthOptions) (IAMTokenProvider, error) {
-	if opt.Username == "" {
-		opt.Username = DefaultIAMUsername
+	p, err := newIAMTokenProvider(ctx, opt)
+	if err != nil {
+		return nil, err // not p: a nil *tokenProvider would make a non-nil interface
 	}
+	return p, nil
+}
+
+// newIAMTokenProvider is NewIAMTokenProvider, returning the concrete provider.
+func newIAMTokenProvider(ctx context.Context, opt IAMAuthOptions) (*tokenProvider, error) {
+	opt, err := withIAMDefaults(opt)
+	if err != nil {
+		return nil, err
+	}
+	setupCtx, cancel := context.WithTimeout(ctx, setupTimeout)
+	defer cancel()
+	base, err := setupBaseCreds(setupCtx, opt)
+	if err != nil {
+		return nil, err
+	}
+	return newTokenProvider(setupCtx, opt, base)
+}
+
+// withIAMDefaults fills the defaults into the IAMAuthOptions fields left empty and checks the
+// options.
+func withIAMDefaults(opt IAMAuthOptions) (IAMAuthOptions, error) {
 	if opt.RefreshBuffer <= 0 {
 		opt.RefreshBuffer = DefaultRefreshBuffer
 	}
 	if len(opt.Scopes) == 0 {
 		opt.Scopes = []string{DefaultCloudPlatformScope}
 	}
+	// FetchTimeout needs no default here: fetchTimeout turns zero or negative into
+	// DefaultTokenFetchTimeout.
+	//
+	// Impersonated tokens last ImpersonateLifetime, 1h when it is zero. The cache replaces a
+	// token RefreshBuffer before it expires, so a lifetime that isn't longer would make every
+	// fetch ask for a new token.
+	lifetime, note := opt.ImpersonateLifetime, ""
+	if lifetime == 0 && opt.ImpersonateSA != "" && opt.CustomTokenSource == nil {
+		lifetime, note = defaultImpersonateLifetime, ", the default"
+	}
+	if lifetime < 0 || (lifetime > 0 && lifetime <= opt.RefreshBuffer) {
+		return IAMAuthOptions{}, fmt.Errorf("valkeygcp: ImpersonateLifetime (%v%s) must be longer than RefreshBuffer (%v)", lifetime, note, opt.RefreshBuffer)
+	}
+	if opt.ImpersonateLifetime > maxImpersonateLifetime {
+		return IAMAuthOptions{}, fmt.Errorf("valkeygcp: ImpersonateLifetime (%v) must be at most 12h, the most the IAM Credentials API issues", opt.ImpersonateLifetime)
+	}
+	return opt, nil
+}
 
-	setupCtx, cancel := context.WithTimeout(ctx, setupTimeout)
-	defer cancel()
+// setupBaseCreds creates the token source of the identity opt names, giving up when ctx
+// ends. opt must already have its defaults filled in.
+func setupBaseCreds(ctx context.Context, opt IAMAuthOptions) (baseCreds, error) {
 	// Token sources refresh for as long as the client lives, so they must not inherit ctx's
-	// cancellation (a NewClient timeout would otherwise break every later refresh). The
-	// setup itself still stops when setupCtx ends: callWithContext stops waiting for it.
+	// cancellation (a NewClient timeout would otherwise break every later refresh). The setup
+	// itself still stops when ctx ends: callWithContext stops waiting for it.
 	srcCtx := context.WithoutCancel(ctx)
-	base, err := callWithContext(setupCtx, "credential setup", func() (oauth2.TokenSource, error) {
-		return newBaseSource(srcCtx, opt)
+	return callWithContext(ctx, "credential setup", func() (baseCreds, error) {
+		return newBaseCreds(srcCtx, opt)
 	})
+}
+
+// newTokenProvider builds the token provider for opt on top of base, the token source of
+// opt's identity, and settles the AUTH username. ctx bounds the principal-email lookup.
+func newTokenProvider(ctx context.Context, opt IAMAuthOptions, base baseCreds) (*tokenProvider, error) {
+	username, err := resolveUsername(ctx, opt, base.json)
+	if err != nil {
+		return nil, err
+	}
+	valid, err := checkIAMUsername(ctx, opt, base.json)
 	if err != nil {
 		return nil, err
 	}
@@ -154,12 +235,13 @@ func NewIAMTokenProvider(ctx context.Context, opt IAMAuthOptions) (IAMTokenProvi
 		// fetches a new one. Re-AUTHs are scheduled inside that window, so they send a new
 		// token. With the default 10s margin of oauth2.ReuseTokenSource they would
 		// resend the old token and reschedule at ever shorter intervals until it expired.
-		// For ADC, newBaseSource gives ADC's own cache the same margin, so the fetch gets a
+		// For ADC, newBaseCreds gives ADC's own cache the same margin, so the fetch gets a
 		// new token too. The fetch timeout sits under the cache, so it limits real fetches,
 		// not cache hits.
-		source:        oauth2.ReuseTokenSourceWithExpiry(nil, withFetchTimeout(base, opt.FetchTimeout), opt.RefreshBuffer),
+		source:        oauth2.ReuseTokenSourceWithExpiry(nil, withFetchTimeout(base.source, opt.FetchTimeout), opt.RefreshBuffer),
 		refreshBuffer: opt.RefreshBuffer,
-		username:      opt.Username,
+		username:      username,
+		usernameValid: valid,
 		disableReauth: opt.DisableProactiveReauth,
 		onErr:         opt.OnCredentialError,
 	}
@@ -170,31 +252,59 @@ func NewIAMTokenProvider(ctx context.Context, opt IAMAuthOptions) (IAMTokenProvi
 	return p, nil
 }
 
+// baseCreds is the token source of the configured identity, before any caching, and the
+// credentials JSON behind it when known.
+type baseCreds struct {
+	source oauth2.TokenSource
+	json   []byte // used to find the principal email for UsernamePrincipalEmail
+}
+
 // findDefaultCredentials looks up Application Default Credentials. It is a variable so tests
 // can check the parameters without a metadata server.
 var findDefaultCredentials = google.FindDefaultCredentialsWithParams
 
-// newBaseSource creates the token source the cache fetches from: CustomTokenSource when set,
-// otherwise Application Default Credentials. The source keeps ctx for later refreshes, so
-// the caller passes a context that is never cancelled.
-func newBaseSource(ctx context.Context, opt IAMAuthOptions) (oauth2.TokenSource, error) {
-	if opt.CustomTokenSource != nil {
-		return opt.CustomTokenSource, nil
+// newBaseCreds creates the token source of the identity opt names: CustomTokenSource,
+// ImpersonateSA, CredentialsJSON, or else Application Default Credentials. The source keeps
+// ctx for later refreshes, so the caller passes a context that is never cancelled.
+func newBaseCreds(ctx context.Context, opt IAMAuthOptions) (baseCreds, error) {
+	switch {
+	case opt.CustomTokenSource != nil:
+		return baseCreds{source: opt.CustomTokenSource, json: opt.CredentialsJSON}, nil
+	case opt.ImpersonateSA != "":
+		// Service account impersonation: the tokens are issued for ImpersonateSA, which can
+		// be in another project, by the IAM Service Account Credentials API. The identity
+		// that impersonates is CredentialsJSON when set, otherwise ADC.
+		src, err := impersonatorSource(ctx, opt)
+		if err != nil {
+			return baseCreds{}, err
+		}
+		return baseCreds{source: newImpersonatedSource(ctx, src, opt)}, nil
+	case len(opt.CredentialsJSON) > 0:
+		// google.CredentialsFromJSON is deprecated; CredentialsFromJSONWithType takes the
+		// credential type, read from the JSON.
+		creds, err := google.CredentialsFromJSONWithType(ctx, opt.CredentialsJSON, credTypeFromJSON(opt.CredentialsJSON), opt.Scopes...)
+		if err != nil {
+			return baseCreds{}, fmt.Errorf("valkeygcp: invalid credentials JSON: %w", err)
+		}
+		return baseCreds{source: creds.TokenSource, json: opt.CredentialsJSON}, nil
+	default:
+		// ADC keeps its own token cache, which renews tokens 10s before they expire unless
+		// told otherwise. EarlyTokenRefresh makes it renew at the same point as valkeygcp's
+		// cache, so a re-AUTH gets a new token. oauth2 honors it only for metadata-server
+		// credentials (Compute Engine, GKE, Cloud Run). Key files, user credentials and
+		// Workload Identity Federation keep the 10s cache, as does the CredentialsJSON case
+		// above; for them, early renewal still relies on oauth2's ReuseTokenSource sharing
+		// its token object with valkeygcp's cache. Impersonated tokens have no cache of
+		// their own: impersonatedSource asks for a new one on every call.
+		creds, err := findDefaultCredentials(ctx, google.CredentialsParams{
+			Scopes:            opt.Scopes,
+			EarlyTokenRefresh: opt.RefreshBuffer,
+		})
+		if err != nil {
+			return baseCreds{}, fmt.Errorf("valkeygcp: Application Default Credentials not found: %w", err)
+		}
+		return baseCreds{source: creds.TokenSource, json: creds.JSON}, nil
 	}
-	// ADC keeps its own token cache, which renews tokens 10s before they expire unless told
-	// otherwise. EarlyTokenRefresh makes it renew at the same point as valkeygcp's cache, so a
-	// re-AUTH gets a new token. oauth2 honors it only for metadata-server credentials
-	// (Compute Engine, GKE, Cloud Run). Key files, user credentials and Workload Identity
-	// Federation keep the 10s cache; for them, early renewal still relies on oauth2's
-	// ReuseTokenSource sharing its token object with valkeygcp's cache.
-	creds, err := findDefaultCredentials(ctx, google.CredentialsParams{
-		Scopes:            opt.Scopes,
-		EarlyTokenRefresh: opt.RefreshBuffer,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("valkeygcp: Application Default Credentials not found: %w", err)
-	}
-	return creds.TokenSource, nil
 }
 
 // Token returns the cached token, or fetches a new one when the cached one is within
@@ -343,10 +453,16 @@ func callWithContext[T any](ctx context.Context, what string, fn func() (T, erro
 // Zero or negative means DefaultTokenFetchTimeout: an unbounded fetch would hold the token
 // cache's lock, and so block every new connection and re-AUTH, for as long as it hangs.
 func withFetchTimeout(src oauth2.TokenSource, timeout time.Duration) *timeoutSource {
-	if timeout <= 0 {
-		timeout = DefaultTokenFetchTimeout
+	return &timeoutSource{src: src, timeout: fetchTimeout(timeout)}
+}
+
+// fetchTimeout returns IAMAuthOptions.FetchTimeout, or DefaultTokenFetchTimeout when it is
+// zero or negative.
+func fetchTimeout(d time.Duration) time.Duration {
+	if d <= 0 {
+		return DefaultTokenFetchTimeout
 	}
-	return &timeoutSource{src: src, timeout: timeout}
+	return d
 }
 
 // timeoutSource stops waiting for a token fetch after timeout, so a token endpoint that hangs
@@ -422,6 +538,11 @@ func WithDefaultIAM() Option {
 
 // WithIAMOptions authenticates with IAM access tokens configured by iamOpt. NewClient's ctx
 // bounds the token setup (see NewIAMTokenProvider).
+//
+// When Memorystore rejects a new connection with an IAM backend error (ERR_IAM_EXHAUSTED or
+// ERR_IAM_OTHER), the next connections wait with exponential backoff before dialing, so
+// re-dials don't add to the load that caused the error. NewClient and ResolveClientOption do
+// this by wrapping the ClientOption's dialer, including your own DialCtxFn or DialFn.
 func WithIAMOptions(iamOpt IAMAuthOptions) Option {
 	return func(c *config) { c.iam = &iamOpt }
 }
