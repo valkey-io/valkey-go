@@ -2,6 +2,7 @@ package valkey
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -2767,5 +2768,32 @@ func TestCacheMarshalAllocs(t *testing.T) {
 	buf := make([]byte, 0, m.CacheSize())
 	if n := testing.AllocsPerRun(100, func() { m.CacheMarshal(buf) }); n != 0 {
 		t.Fatalf("CacheMarshal allocated %v times with a large enough buffer", n)
+	}
+}
+
+func TestCacheUnmarshalViewRejectsInvalidLengths(t *testing.T) {
+	// Each buffer has a 7-byte TTL header followed by a type byte and an
+	// 8-byte big-endian length. Malformed lengths must produce an error,
+	// never a panic or an out-of-bounds slice.
+	cases := []struct {
+		name string
+		typ  byte
+		size uint64
+	}{
+		{"negative array size", typeArray, uint64(math.MaxInt64) + 1},
+		{"negative blob string size", typeBlobString, uint64(math.MaxInt64) + 1},
+		{"huge blob string size", typeBlobString, math.MaxUint64 - 7},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			buf := make([]byte, 16)
+			buf[7] = tt.typ
+			binary.BigEndian.PutUint64(buf[8:16], tt.size)
+
+			var m ValkeyMessage
+			if err := m.CacheUnmarshalView(buf); err != ErrCacheUnmarshal {
+				t.Fatalf("expected ErrCacheUnmarshal, got %v", err)
+			}
+		})
 	}
 }
