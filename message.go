@@ -73,9 +73,17 @@ func (r *ValkeyError) IsNil() bool {
 }
 
 // IsMoved checks if it is a valkey MOVED message and returns the moved address.
+func redirectAddr(s string, field int) (string, bool) {
+	parts := strings.Fields(s)
+	if len(parts) <= field {
+		return "", false
+	}
+	return fixIPv6HostPort(parts[field]), true
+}
+
 func (r *ValkeyError) IsMoved() (addr string, ok bool) {
 	if ok = strings.HasPrefix(r.string(), "MOVED"); ok {
-		addr = fixIPv6HostPort(strings.Split(r.string(), " ")[2])
+		addr, ok = redirectAddr(r.string(), 2)
 	}
 	return
 }
@@ -83,7 +91,7 @@ func (r *ValkeyError) IsMoved() (addr string, ok bool) {
 // IsAsk checks if it is a valkey ASK message and returns ask address.
 func (r *ValkeyError) IsAsk() (addr string, ok bool) {
 	if ok = strings.HasPrefix(r.string(), "ASK"); ok {
-		addr = fixIPv6HostPort(strings.Split(r.string(), " ")[2])
+		addr, ok = redirectAddr(r.string(), 2)
 	}
 	return
 }
@@ -91,7 +99,7 @@ func (r *ValkeyError) IsAsk() (addr string, ok bool) {
 // IsRedirect checks if it is a valkey REDIRECT message and returns redirect address.
 func (r *ValkeyError) IsRedirect() (addr string, ok bool) {
 	if ok = strings.HasPrefix(r.string(), "REDIRECT"); ok {
-		addr = fixIPv6HostPort(strings.Split(r.string(), " ")[1])
+		addr, ok = redirectAddr(r.string(), 1)
 	}
 	return
 }
@@ -667,6 +675,11 @@ func (m *ValkeyMessage) unmarshalView(c int64, buf []byte) (int64, error) {
 	case typeInteger, typeNull, typeBool:
 		m.intlen = size
 	case typeArray, typeMap, typeSet:
+		// Each nested message needs at least a type byte and an 8-byte
+		// length. Reject negative and oversized lengths before make().
+		if size < 0 || size > (int64(len(buf))-c)/9 {
+			return 0, ErrCacheUnmarshal
+		}
 		m.setValues(make([]ValkeyMessage, size))
 		for i := range m.values() {
 			if c, err = m.values()[i].unmarshalView(c, buf); err != nil {
@@ -674,7 +687,7 @@ func (m *ValkeyMessage) unmarshalView(c int64, buf []byte) (int64, error) {
 			}
 		}
 	default:
-		if int64(len(buf)) < c+size {
+		if size < 0 || size > int64(len(buf))-c {
 			return 0, ErrCacheUnmarshal
 		}
 		m.setString(BinaryString(buf[c : c+size]))
