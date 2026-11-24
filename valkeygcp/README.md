@@ -212,3 +212,85 @@ Programs for manual checks live in `examples/`, a separate Go module, so they ar
 | `test_adc`         | Fetches one IAM access token through ADC and prints its type and expiry    | ADC                                                                              |
 | `accelerated_test` | Simulates token rotation with tokens that expire after 10 seconds          | Nothing                                                                          |
 | `live_e2e`         | Sends SET/GET traffic to an instance until stopped, across token rotations | ADC, network access to the instance, `MEMORYSTORE_TEST_DISCOVERY_ENDPOINT` set |
+| `live_tls`         | Connects over TLS, optionally with IAM, PINGs every node and runs SET/GET   | Network access to an instance with in-transit encryption, and its server CA file |
+
+---
+
+## 2. In-Transit Encryption (TLS)
+
+Instances with in-transit encryption turned on accept only TLS connections. valkey-go supports TLS through `ClientOption.TLSConfig`: set it to a `tls.Config` that trusts the instance's server CA certificates. `NewClient` and `ResolveClientOption` keep the `TLSConfig` you set, so TLS works the same with IAM authentication, without it, and with `valkey.NewClient`. TLS needs no extra role on the workload identity.
+
+### 2.1 Get the Server CA Certificates
+
+The instance's server CA mode decides where the certificates come from:
+
+```bash
+gcloud memorystore instances describe INSTANCE --location=REGION \
+  --format="value(transitEncryptionMode,serverCaMode,serverCaPool)"
+```
+
+Save them with the command for that mode. Keep every certificate the command returns:
+
+```bash
+# GOOGLE_MANAGED_PER_INSTANCE_CA, or empty on older instances
+gcloud memorystore instances get-certificate-authority INSTANCE --location=REGION --format=json \
+  | jq -r '.. | strings | select(contains("BEGIN CERTIFICATE"))' > server-ca.pem
+
+# GOOGLE_MANAGED_SHARED_CA
+gcloud memorystore instances get-shared-regional-certificate-authority --location=REGION --format=json \
+  | jq -r '.. | strings | select(contains("BEGIN CERTIFICATE"))' > server-ca.pem
+
+# CUSTOMER_MANAGED_CAS_CA (SERVER_CA_POOL is the instance's serverCaPool)
+gcloud privateca pools get-ca-certs SERVER_CA_POOL --output-file=server-ca.pem
+```
+
+The Memorystore commands need read access to the instance, for example `roles/memorystore.viewer`. The CA Service command needs `privateca.caPools.get` on the pool (`roles/privateca.poolReader`).
+
+### 2.2 Connect with TLS
+
+Build a `tls.Config` from the saved file:
+
+```go
+pem, err := os.ReadFile("/etc/memorystore/server-ca.pem")
+if err != nil {
+	return err
+}
+roots := x509.NewCertPool()
+if !roots.AppendCertsFromPEM(pem) {
+	return errors.New("server-ca.pem holds no certificate")
+}
+tlsConfig := &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
+```
+
+Then set it as `ClientOption.TLSConfig`:
+
+```go
+// Cluster mode with IAM authentication:
+client, err := valkeygcp.NewClient(ctx, valkey.ClientOption{
+	InitAddress: []string{"10.0.0.15:6379"}, // discovery endpoint
+	TLSConfig:   tlsConfig,
+}, valkeygcp.WithDefaultIAM())
+
+// Cluster mode disabled with a reader endpoint, no authentication:
+client, err := valkeygcp.NewClient(ctx, valkey.ClientOption{
+	InitAddress: []string{"10.0.0.2:6379"},                                         // primary endpoint
+	Standalone:  valkey.StandaloneOption{ReplicaAddress: []string{"10.0.0.3:6379"}}, // reader endpoint
+	TLSConfig:   tlsConfig,
+})
+```
+
+* **Every certificate in the file is trusted.** A file saved while the instance has more than one CA, for example during a server CA rotation, verifies nodes signed by any of them. `AppendCertsFromPEM` skips blocks it can't parse and only reports whether it added at least one certificate, so check that the file holds every certificate the command returned, for example with `grep -c 'BEGIN CERTIFICATE' server-ca.pem`.
+* **The file is read once**, when you build the `tls.Config`. After replacing it, create a new client. Per-instance CAs are valid for ten years and the next one can be downloaded about five years before the current one expires, so save the file again from time to time.
+* **Nodes are checked by IP address.** Leave `ServerName` empty: valkey-go then checks each node's certificate against the IP address it dials, including the node addresses it finds in cluster mode. Set `ServerName` only to check against another name.
+* **Keep verification on.** A certificate from another CA fails the handshake with `x509: certificate signed by unknown authority`. Don't set `InsecureSkipVerify`.
+
+### 2.3 Live Check
+
+`live_tls` (in `examples/`) builds its `TLSConfig` this way, connects to a real instance the way `NewClient` does, PINGs every node (each one a separate TLS handshake) and runs SET and GET. Run it from the `examples` directory, on a VM in the instance's VPC network:
+
+```bash
+go run ./live_tls -primary=10.0.0.2:6379 -reader=10.0.0.3:6379 -ca-file=server-ca.pem
+go run ./live_tls -discovery=10.0.0.15:6379 -ca-file=server-ca.pem -iam
+```
+
+The last line is `RESULT {"ok":true,...}` when every node answered over TLS. `-reader` is optional with `-primary`. `-duration=70m` keeps SET/GET traffic going and logs `STATS` every minute. With `-iam`, every login is logged as an `AUTH` line with a short hash of the token, never the token itself, so a long run shows when the token is renewed. `-conn-lifetime=5m` closes and reopens every connection every five minutes, so new logins and TLS handshakes keep happening during the run.
