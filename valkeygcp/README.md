@@ -141,11 +141,34 @@ client, err := valkeyotel.NewClient(option)
 | Field              | Default                                                                                                                                                                                                                                                                                    |
 | :----------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `RetryDelay`     | Exponential backoff with full jitter, up to 2s; stops after 20 retries                                                                                                                                                                                                                     |
-| `ClusterOption`  | Only when left entirely at zero: `ShardsRefreshInterval` 10s, `PreferInitAddressRefresh` and `PreferClusterShards` on, so the topology is refreshed through the discovery endpoint with `CLUSTER SHARDS`. Set any `ClusterOption` field and the whole `ClusterOption` is yours |
+| `ClusterOption`  | `ShardsRefreshInterval` 10s, `PreferInitAddressRefresh` on and `PreferClusterShards` on, so every 10s the client reads the cluster topology from the discovery endpoint with `CLUSTER SHARDS`. Used only if you set none of the three. Other `ClusterOption` fields, such as `MaxMovedRedirections`, don't affect this |
 | `SendToReplicas` | Read-only commands that don't block go to the replicas; set only with `Standalone.ReplicaAddress`                                                                                                                                                                                        |
 | `DialCtxFn`      | After a dial to an address fails, new dials to it fail at once with the same error for a random time: up to 50ms after the first failure, doubling with each failure in a row, up to 1s. A successful dial resets it, and so does a minute without dials there. A node that comes back at the same address can wait up to 1s for its first dial. The addresses in `InitAddress` and `Standalone.ReplicaAddress` (the discovery, primary and reader endpoints) are dialed as usual, without the wait. Set only when you set neither `DialCtxFn` nor `DialFn` |
 
 The cluster settings are left out when `Standalone.ReplicaAddress` is set. valkey-go ignores them when it ends up with a single-node client.
+
+If you set any of the three yourself, valkeygcp sets none of them, and the ones you leave out stay off. This is because valkeygcp can't tell a `false` you set from one you left out. For example, with only `ClusterOption{PreferClusterShards: true}`, the client doesn't refresh the topology every 10s and doesn't read it from the discovery endpoint. To change one of the three, set all three:
+
+```go
+option.ClusterOption = valkey.ClusterOption{
+	ShardsRefreshInterval:    30 * time.Second, // changed from 10s
+	PreferInitAddressRefresh: true,
+	PreferClusterShards:      true,
+}
+```
+
+To turn all three off, take the option that `ResolveClientOption` returns, set the three to zero, and build the client with `valkey.NewClient`:
+
+```go
+opt, err := valkeygcp.ResolveClientOption(ctx, option)
+if err != nil {
+	return err
+}
+opt.ClusterOption.ShardsRefreshInterval = 0
+opt.ClusterOption.PreferInitAddressRefresh = false
+opt.ClusterOption.PreferClusterShards = false
+client, err := valkey.NewClient(opt)
+```
 
 Each of these follows Google's [Valkey client best practices](https://docs.cloud.google.com/memorystore/docs/valkey/general-best-practices#valkey_client_best_practices): reconnect with exponential backoff and jitter, discover nodes through the discovery endpoint with `CLUSTER SHARDS`, refresh the topology periodically, and read from the reader endpoint. Timeouts are not changed: `Dialer.Timeout`, `Dialer.KeepAlive` and `ConnWriteTimeout` keep valkey-go's defaults (5s, 1s and 10s).
 
