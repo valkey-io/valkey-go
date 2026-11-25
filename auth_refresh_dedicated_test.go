@@ -102,11 +102,10 @@ func readRESPCommand(r *bufio.Reader) ([]string, error) {
 
 const silentAuthFirstRefresh = 200 * time.Millisecond
 
-// newSilentAuthClient connects a client to srv. With refresh set, each of its connections
-// refreshes its credentials once, shortly after it opens; without, none ever does.
+// newSilentAuthClient connects a client to srv. With refresh set, each of its connections asks
+// for the next credentials shortly after it opens and after every refresh; without, none ever does.
 func newSilentAuthClient(t *testing.T, srv *silentAuthServer, refresh, disableOnDedicated bool) valkey.Client {
 	t.Helper()
-	var calls atomic.Int64
 	client, err := valkey.NewClient(valkey.ClientOption{
 		InitAddress:       []string{"in-memory:6379"},
 		ForceSingleClient: true,
@@ -122,10 +121,11 @@ func newSilentAuthClient(t *testing.T, srv *silentAuthServer, refresh, disableOn
 		AuthCredentialsFn: func(valkey.AuthCredentialsContext) (valkey.AuthCredentials, error) {
 			creds := valkey.AuthCredentials{Username: "u", Password: "p"}
 			if refresh {
-				creds.RefreshAfter = time.Now().Add(time.Hour)
-				if calls.Add(1) <= 2 {
-					creds.RefreshAfter = time.Now().Add(silentAuthFirstRefresh)
-				}
+				// Every invocation asks for the next refresh shortly, so the test does not depend
+				// on the order in which the connections call back: a client-wide call count would
+				// let an early refresh of the shared connection consume the short deadline of the
+				// dedicated connection, whose timer is paused and would never refresh again.
+				creds.RefreshAfter = time.Now().Add(silentAuthFirstRefresh)
 			}
 			return creds, nil
 		},

@@ -2039,13 +2039,44 @@ func (p *pipe) stopLifetimeTimer() bool {
 // pool, still pauses the refresh: DoStream owns its connection synchronously
 // and cannot share it with a concurrent AUTH. A pipe of a client with
 // ClientOption.DisableAuthRefreshOnDedicated pauses it too, because its server
-// may leave the refresh AUTH unanswered on a subscribed connection.
+// may leave the refresh AUTH unanswered on a subscribed connection. A RESP2
+// pubsub connection is a separate pipe created lazily by a SUBSCRIBE, so the
+// pause reaches p.r2p too, also when that pipe is created during this checkout.
 func (p *pipe) StopTimer() bool {
 	stopped := p.stopLifetimeTimer()
-	if p.authTimer != nil && p.pauseAuthRefreshOnCheckout {
-		stopped = p.authTimer.Stop() && stopped
+	if p.pauseAuthRefreshOnCheckout {
+		if p.authTimer != nil {
+			stopped = p.pauseAuthRefresh() && stopped
+		}
+		// A RESP2 pubsub connection is a separate pipe created lazily by a SUBSCRIBE that can
+		// arrive while this pipe is checked out, so it has to stay paused too.
+		if p.r2p != nil {
+			p.r2p.pauseAuthRefresh()
+		}
 	}
 	return stopped
+}
+
+// pauseAuthRefresh stops the auth refresh timer of the pipe, if any.
+func (p *pipe) pauseAuthRefresh() bool {
+	if p.authTimer != nil {
+		return p.authTimer.Stop()
+	}
+	return true
+}
+
+// resumeAuthRefresh reschedules the auth refresh timer stopped by pauseAuthRefresh.
+func (p *pipe) resumeAuthRefresh() {
+	if p.authTimer == nil || p.Error() != nil {
+		return
+	}
+	if at := p.authRefreshAt.Load(); at != nil && !at.IsZero() {
+		p.authTimer.Reset(time.Until(*at))
+		// Same race as in ResetTimer, with Close or _background stopping authTimer.
+		if p.Error() != nil {
+			p.authTimer.Stop()
+		}
+	}
 }
 
 func (p *pipe) ResetTimer() bool {
@@ -2060,13 +2091,18 @@ func (p *pipe) ResetTimer() bool {
 			p.lftmTimer.Stop()
 		}
 	}
-	if p.authTimer != nil && p.pauseAuthRefreshOnCheckout {
-		if at := p.authRefreshAt.Load(); at != nil && !at.IsZero() {
-			reset = p.authTimer.Reset(time.Until(*at)) && reset
-			// Same race as above, with Close or _background stopping authTimer.
-			if p.Error() != nil {
-				p.authTimer.Stop()
+	if p.pauseAuthRefreshOnCheckout {
+		if p.authTimer != nil {
+			if at := p.authRefreshAt.Load(); at != nil && !at.IsZero() {
+				reset = p.authTimer.Reset(time.Until(*at)) && reset
+				// Same race as above, with Close or _background stopping authTimer.
+				if p.Error() != nil {
+					p.authTimer.Stop()
+				}
 			}
+		}
+		if p.r2p != nil {
+			p.r2p.resumeAuthRefresh()
 		}
 	}
 	return reset
@@ -2080,7 +2116,10 @@ func (p *pipe) expired() {
 type r2p struct {
 	f func(context.Context) (p *pipe, err error) // func to build pipe for resp2 pubsub
 	p *pipe                                      // internal pipe for resp2 pubsub only
-	m sync.RWMutex
+	// paused is set by the parent pipe while it is checked out, see pipe.StopTimer. It keeps the
+	// auth refresh of a pipe created during the checkout off until the parent is returned.
+	paused bool
+	m      sync.RWMutex
 }
 
 func (r *r2p) pipe(ctx context.Context) (r2p *pipe) {
@@ -2097,6 +2136,9 @@ func (r *r2p) pipe(ctx context.Context) (r2p *pipe) {
 				r2p = epipeFn(err)
 			} else {
 				r.p = r2p
+				if r.paused {
+					r2p.pauseAuthRefresh()
+				}
 			}
 		}
 		r.m.Unlock()
@@ -2110,6 +2152,27 @@ func (r *r2p) Close() {
 		r.p.Close()
 	}
 	r.m.RUnlock()
+}
+
+// pauseAuthRefresh stops the auth refresh timer of the RESP2 subscription pipe. A pipe created
+// after the call keeps its timer off too, until resumeAuthRefresh is called.
+func (r *r2p) pauseAuthRefresh() {
+	r.m.Lock()
+	r.paused = true
+	if r.p != nil {
+		r.p.pauseAuthRefresh()
+	}
+	r.m.Unlock()
+}
+
+// resumeAuthRefresh reschedules the auth refresh timer paused by pauseAuthRefresh.
+func (r *r2p) resumeAuthRefresh() {
+	r.m.Lock()
+	r.paused = false
+	if r.p != nil {
+		r.p.resumeAuthRefresh()
+	}
+	r.m.Unlock()
 }
 
 type pshks struct {

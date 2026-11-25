@@ -1060,6 +1060,110 @@ availability_zone:us-west-1a
 		n1.Close()
 		n2.Close()
 	})
+	t.Run("Auth Credentials Refresh Disabled On RESP2 Subscription Pipe", func(t *testing.T) {
+		const refresh = 200 * time.Millisecond
+		var calls atomic.Int64
+		// The first two calls are the initial AUTH of the checked out pipe and of the RESP2
+		// subscription pipe; the later ones are their refreshes.
+		newCreds := func() AuthCredentials {
+			creds := AuthCredentials{Username: "ua", Password: "pa2", RefreshAfter: time.Now().Add(refresh)}
+			if calls.Add(1) <= 2 {
+				creds.Password = "pa"
+			}
+			return creds
+		}
+		// A RESP2 pipe and the RESP2 pubsub connection it creates lazily both start with AUTH and HELLO 2.
+		serve := func(conn net.Conn) *valkeyMock {
+			mock := &valkeyMock{buf: bufio.NewReader(conn), conn: conn, t: t}
+			go func() {
+				mock.Expect("AUTH", "ua", "pa").ReplyString("OK")
+				mock.Expect("HELLO", "2").Reply(slicemsg(
+					'*',
+					[]ValkeyMessage{
+						strmsg('+', "proto"),
+						{typ: ':', intlen: 2},
+					},
+				))
+				mock.Expect("CLIENT", "SETINFO", "LIB-NAME", LibName).ReplyError("UNKNOWN COMMAND")
+				mock.Expect("CLIENT", "SETINFO", "LIB-VER", LibVer).ReplyError("UNKNOWN COMMAND")
+				// The refresh AUTHs and the PING that Close puts into the queue.
+				for {
+					m, err := mock.ReadMessage()
+					if err != nil {
+						return
+					}
+					values := m.values()
+					var reply string
+					switch {
+					case len(values) == 3 && values[0].string() == "AUTH" && values[1].string() == "ua" && values[2].string() == "pa2":
+						reply = "+OK\r\n"
+					case len(values) == 1 && values[0].string() == "PING":
+						reply = "+PONG\r\n"
+					default:
+						return
+					}
+					if _, err := io.WriteString(conn, reply); err != nil {
+						return
+					}
+				}
+			}()
+			return mock
+		}
+		n1, n2 := net.Pipe()
+		parentMock := serve(n2)
+		conns := []net.Conn{n1}
+		p, err := newPipe(context.Background(), func(ctx context.Context) (net.Conn, error) {
+			if len(conns) == 0 {
+				return nil, io.EOF
+			}
+			c := conns[0]
+			conns = conns[1:]
+			return c, nil
+		}, &ClientOption{
+			AlwaysRESP2:                   true,
+			DisableCache:                  true,
+			DisableAuthRefreshOnDedicated: true,
+			AuthCredentialsFn: func(context AuthCredentialsContext) (AuthCredentials, error) {
+				return newCreds(), nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("pipe setup failed: %v", err)
+		}
+		if p.r2p == nil {
+			t.Fatal("RESP2 pipe has no lazy pubsub pipe")
+		}
+		// A RESP2 SUBSCRIBE routes to the lazy p.r2p pipe, which is created while the parent is
+		// checked out and must inherit its paused auth refresh.
+		if !p.StopTimer() {
+			t.Fatal("StopTimer returned false")
+		}
+		n3, n4 := net.Pipe()
+		conns = append(conns, n3)
+		childMock := serve(n4)
+		child := p.r2p.pipe(context.Background())
+		if err := child.Error(); err != nil {
+			t.Fatalf("RESP2 subscription pipe setup failed: %v", err)
+		}
+		time.Sleep(3 * refresh)
+		if n := calls.Load(); n != 2 {
+			t.Fatalf("auth refresh ran on a subscription pipe created during checkout, got %d calls", n)
+		}
+		// Returning the pipe to the pool resumes the subscription pipe too.
+		p.ResetTimer()
+		for deadline := time.Now().Add(2 * time.Second); calls.Load() < 4; time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatal("auth refresh did not resume on the RESP2 subscription pipe")
+			}
+		}
+		p.Close()
+		parentMock.Close()
+		childMock.Close()
+		n1.Close()
+		n2.Close()
+		n3.Close()
+		n4.Close()
+	})
 	t.Run("Auth Credentials Refresh Behind Blocking Command", func(t *testing.T) {
 		n1, n2 := net.Pipe()
 		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
