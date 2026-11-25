@@ -97,6 +97,8 @@ type pipe struct {
 	r2ps            bool // identify this pipe is used for resp2 pubsub or not
 	noNoDelay       bool
 	optIn           bool
+	// pauseAuthRefreshOnCheckout stops the auth refresh timer in StopTimer and lets ResetTimer resume it.
+	pauseAuthRefreshOnCheckout bool
 }
 
 type pipeFn func(ctx context.Context, connFn func(ctx context.Context) (net.Conn, error), option *ClientOption) (p *pipe, err error)
@@ -126,6 +128,11 @@ func _newPipe(ctx context.Context, connFn func(context.Context) (net.Conn, error
 
 		r2ps:  r2ps,
 		optIn: isOptIn(option.ClientTrackingOptions),
+
+		// Both kinds of pipe must not refresh their credentials while checked out: a nobg pipe is owned
+		// synchronously by DoStream, and an opted-in dedicated pipe may be subscribed on a server that leaves
+		// the refresh AUTH unanswered. See ClientOption.DisableAuthRefreshOnDedicated.
+		pauseAuthRefreshOnCheckout: nobg || option.DisableAuthRefreshOnDedicated,
 	}
 	if !nobg {
 		switch queueTypeFromEnv {
@@ -863,7 +870,10 @@ func (p *pipe) refreshAuth(authFn func(AuthCredentialsContext) (AuthCredentials,
 		// (valkey-io/valkey#4862). The connection then keeps its current
 		// credentials and the server drops it when they expire, which is also
 		// what happens when the new credentials are really wrong. A connection
-		// that stopped replying is closed by the background PING.
+		// that stopped replying is closed by the background PING. A server that
+		// keeps the connection but drops the AUTH without any reply instead
+		// shifts every later reply to the command before it; that case is why
+		// ClientOption.DisableAuthRefreshOnDedicated exists.
 		p.Do(ctx, cmd)
 	}
 	p.scheduleAuthRefresh(auth.RefreshAfter)
@@ -2025,12 +2035,14 @@ func (p *pipe) stopLifetimeTimer() bool {
 // connection, a transaction is sent in one DoMulti so AUTH cannot land inside
 // it, and the reply of the refresh AUTH is ignored, see refreshAuth. A
 // dedicated pub/sub pipe would otherwise never be refreshed and be dropped by
-// the server once its credentials expire. Only a nobg pipe, as used by the
-// stream pool, still pauses the refresh: DoStream owns its connection
-// synchronously and cannot share it with a concurrent AUTH.
+// the server once its credentials expire. A nobg pipe, as used by the stream
+// pool, still pauses the refresh: DoStream owns its connection synchronously
+// and cannot share it with a concurrent AUTH. A pipe of a client with
+// ClientOption.DisableAuthRefreshOnDedicated pauses it too, because its server
+// may leave the refresh AUTH unanswered on a subscribed connection.
 func (p *pipe) StopTimer() bool {
 	stopped := p.stopLifetimeTimer()
-	if p.authTimer != nil && p.queue == nil {
+	if p.authTimer != nil && p.pauseAuthRefreshOnCheckout {
 		stopped = p.authTimer.Stop() && stopped
 	}
 	return stopped
@@ -2048,7 +2060,7 @@ func (p *pipe) ResetTimer() bool {
 			p.lftmTimer.Stop()
 		}
 	}
-	if p.authTimer != nil && p.queue == nil {
+	if p.authTimer != nil && p.pauseAuthRefreshOnCheckout {
 		if at := p.authRefreshAt.Load(); at != nil && !at.IsZero() {
 			reset = p.authTimer.Reset(time.Until(*at)) && reset
 			// Same race as above, with Close or _background stopping authTimer.

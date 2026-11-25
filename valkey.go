@@ -123,6 +123,21 @@ type ClientOption struct {
 	// support rotating credentials
 	AuthCredentialsFn func(AuthCredentialsContext) (AuthCredentials, error)
 
+	// DisableAuthRefreshOnDedicated stops the AuthCredentials refresh while a connection is checked out by
+	// Client.Dedicate or Client.Dedicated, and resumes it when the connection is returned to the pool. Note that a
+	// dedicated connection that stays checked out longer than its credentials live is then dropped by the server,
+	// which is what v1.0.79 did for every dedicated connection.
+	//
+	// This is for servers that do not reply to an AUTH sent on a subscribed RESP3 connection, such as Valkey 8.1 to
+	// 9.x releases that refuse module auth on a subscribed RESP3 client (valkey-io/valkey#4862) without replying.
+	// The reply of a refresh AUTH is ignored (see commit a5e16fd), which works when the server rejects the AUTH,
+	// because a rejection is still a reply on the wire. A server that keeps the connection but leaves the AUTH
+	// unanswered makes every later reply be matched to the command before it: commands get the reply of the next
+	// command, a background PING eventually times out, and a SUBSCRIBE confirmation can trip the out-of-order panic.
+	// Setting this option restores the v1.0.79 behavior for connections obtained from Dedicate(), so a single client
+	// can keep its ordinary connections refreshed while its dedicated subscriptions never send an AUTH.
+	DisableAuthRefreshOnDedicated bool
+
 	// RetryDelay is the function that returns the delay that should be used before retrying the attempt.
 	// The default is an exponential backoff with a maximum delay of 1 second.
 	// Only used when DisableRetry is false.
@@ -511,6 +526,9 @@ type AuthCredentials struct {
 	Username string
 	Password string
 	// RefreshAfter schedules AuthCredentialsFn to be called again at this time.
+	// A dedicated connection that is subscribed on a server which does not reply to an AUTH while
+	// subscribed must not refresh: set ClientOption.DisableAuthRefreshOnDedicated, or keep
+	// subscriptions on a separate client whose AuthCredentials carry a zero RefreshAfter.
 	RefreshAfter time.Time
 }
 
