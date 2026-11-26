@@ -211,6 +211,46 @@ func ExpectOK(t *testing.T, result ValkeyResult) {
 	}
 }
 
+// serveRESP2Auth serves the connection of a RESP2 pipe the way the auth refresh tests need it: the
+// initial AUTH and HELLO 2, then the refresh AUTHs and the PINGs of Close forever.
+// refreshes counts the refresh AUTHs that reached this connection.
+func serveRESP2Auth(t *testing.T, conn net.Conn, refreshes *atomic.Int64) *valkeyMock {
+	t.Helper()
+	mock := &valkeyMock{buf: bufio.NewReader(conn), conn: conn, t: t}
+	go func() {
+		mock.Expect("AUTH", "ua", "pa").ReplyString("OK")
+		mock.Expect("HELLO", "2").Reply(slicemsg(
+			'*',
+			[]ValkeyMessage{
+				strmsg('+', "proto"),
+				{typ: ':', intlen: 2},
+			},
+		))
+		mock.Expect("CLIENT", "SETINFO", "LIB-NAME", LibName).ReplyError("UNKNOWN COMMAND")
+		mock.Expect("CLIENT", "SETINFO", "LIB-VER", LibVer).ReplyError("UNKNOWN COMMAND")
+		for {
+			m, err := mock.ReadMessage()
+			if err != nil {
+				return
+			}
+			values := m.values()
+			var reply string
+			switch {
+			case len(values) == 3 && values[0].string() == "AUTH" && values[1].string() == "ua" && values[2].string() == "pa2":
+				refreshes.Add(1)
+				reply = "+OK\r\n"
+			case len(values) == 1 && values[0].string() == "PING":
+				reply = "+PONG\r\n"
+			default:
+				return
+			}
+			if _, err := io.WriteString(conn, reply); err != nil {
+				return
+			}
+		}
+	}()
+	return mock
+}
 func TestNewPipe(t *testing.T) {
 	defer ShouldNotLeak(SetupLeakDetection())
 	t.Run("Auth without Username", func(t *testing.T) {
@@ -1072,45 +1112,11 @@ availability_zone:us-west-1a
 			}
 			return creds
 		}
-		// A RESP2 pipe and the RESP2 pubsub connection it creates lazily both start with AUTH and HELLO 2.
-		serve := func(conn net.Conn) *valkeyMock {
-			mock := &valkeyMock{buf: bufio.NewReader(conn), conn: conn, t: t}
-			go func() {
-				mock.Expect("AUTH", "ua", "pa").ReplyString("OK")
-				mock.Expect("HELLO", "2").Reply(slicemsg(
-					'*',
-					[]ValkeyMessage{
-						strmsg('+', "proto"),
-						{typ: ':', intlen: 2},
-					},
-				))
-				mock.Expect("CLIENT", "SETINFO", "LIB-NAME", LibName).ReplyError("UNKNOWN COMMAND")
-				mock.Expect("CLIENT", "SETINFO", "LIB-VER", LibVer).ReplyError("UNKNOWN COMMAND")
-				// The refresh AUTHs and the PING that Close puts into the queue.
-				for {
-					m, err := mock.ReadMessage()
-					if err != nil {
-						return
-					}
-					values := m.values()
-					var reply string
-					switch {
-					case len(values) == 3 && values[0].string() == "AUTH" && values[1].string() == "ua" && values[2].string() == "pa2":
-						reply = "+OK\r\n"
-					case len(values) == 1 && values[0].string() == "PING":
-						reply = "+PONG\r\n"
-					default:
-						return
-					}
-					if _, err := io.WriteString(conn, reply); err != nil {
-						return
-					}
-				}
-			}()
-			return mock
-		}
 		n1, n2 := net.Pipe()
-		parentMock := serve(n2)
+		// Each server fixture counts the refresh AUTHs of its own connection. The aggregate
+		// callback count below also passes when only one of the two connections resumes.
+		var parentRefreshes, childRefreshes atomic.Int64
+		parentMock := serveRESP2Auth(t, n2, &parentRefreshes)
 		conns := []net.Conn{n1}
 		p, err := newPipe(context.Background(), func(ctx context.Context) (net.Conn, error) {
 			if len(conns) == 0 {
@@ -1140,7 +1146,7 @@ availability_zone:us-west-1a
 		}
 		n3, n4 := net.Pipe()
 		conns = append(conns, n3)
-		childMock := serve(n4)
+		childMock := serveRESP2Auth(t, n4, &childRefreshes)
 		child := p.r2p.pipe(context.Background())
 		if err := child.Error(); err != nil {
 			t.Fatalf("RESP2 subscription pipe setup failed: %v", err)
@@ -1149,12 +1155,18 @@ availability_zone:us-west-1a
 		if n := calls.Load(); n != 2 {
 			t.Fatalf("auth refresh ran on a subscription pipe created during checkout, got %d calls", n)
 		}
-		// Returning the pipe to the pool resumes the subscription pipe too.
+		if pr, cr := parentRefreshes.Load(), childRefreshes.Load(); pr != 0 || cr != 0 {
+			t.Fatalf("refresh AUTH sent on a checked out connection: parent %d, child %d", pr, cr)
+		}
+		// Returning the pipe to the pool resumes the subscription pipe too. Each connection needs a
+		// refresh AUTH of its own, so a parent-only resume does not pass.
 		p.ResetTimer()
-		for deadline := time.Now().Add(2 * time.Second); calls.Load() < 4; time.Sleep(10 * time.Millisecond) {
+		deadline := time.Now().Add(2 * time.Second)
+		for parentRefreshes.Load() == 0 || childRefreshes.Load() == 0 {
 			if time.Now().After(deadline) {
-				t.Fatal("auth refresh did not resume on the RESP2 subscription pipe")
+				t.Fatalf("auth refresh did not resume on both connections: parent %d, child %d", parentRefreshes.Load(), childRefreshes.Load())
 			}
+			time.Sleep(10 * time.Millisecond)
 		}
 		p.Close()
 		parentMock.Close()
@@ -1163,6 +1175,298 @@ availability_zone:us-west-1a
 		n2.Close()
 		n3.Close()
 		n4.Close()
+	})
+	t.Run("Auth Credentials Refresh Disabled While Checked Out With a Running Refresh", func(t *testing.T) {
+		// A refresh callback that started before the checkout keeps the credentials callback and the
+		// AUTH apart: Timer.Stop neither waits for it nor reports it. It must not send AUTH or re-arm
+		// the timer on the checked out connection.
+		const refresh = 20 * time.Millisecond
+		far := time.Now().Add(time.Hour)
+		refreshStarted := make(chan struct{})
+		unblock := make(chan struct{})
+		var calls atomic.Int64
+		n1, n2 := net.Pipe()
+		var parentRefreshes, childRefreshes atomic.Int64
+		parentMock := serveRESP2Auth(t, n2, &parentRefreshes)
+		conns := []net.Conn{n1}
+		p, err := newPipe(context.Background(), func(ctx context.Context) (net.Conn, error) {
+			if len(conns) == 0 {
+				return nil, io.EOF
+			}
+			c := conns[0]
+			conns = conns[1:]
+			return c, nil
+		}, &ClientOption{
+			AlwaysRESP2:                   true,
+			DisableCache:                  true,
+			DisableAuthRefreshOnDedicated: true,
+			AuthCredentialsFn: func(context AuthCredentialsContext) (AuthCredentials, error) {
+				switch n := calls.Add(1); {
+				case n == 1:
+					// The parent initial AUTH: no refresh during the test.
+					return AuthCredentials{Username: "ua", Password: "pa", RefreshAfter: far}, nil
+				case n == 2:
+					// The RESP2 subscription pipe initial AUTH: refresh almost immediately.
+					return AuthCredentials{Username: "ua", Password: "pa", RefreshAfter: time.Now().Add(refresh)}, nil
+				case n == 3:
+					// The refresh that runs while the pipe is checked out.
+					close(refreshStarted)
+					<-unblock
+					return AuthCredentials{Username: "ua", Password: "pa2", RefreshAfter: far}, nil
+				default:
+					return AuthCredentials{Username: "ua", Password: "pa2", RefreshAfter: far}, nil
+				}
+			},
+		})
+		if err != nil {
+			t.Fatalf("pipe setup failed: %v", err)
+		}
+		n3, n4 := net.Pipe()
+		conns = append(conns, n3)
+		childMock := serveRESP2Auth(t, n4, &childRefreshes)
+		child := p.r2p.pipe(context.Background())
+		if err := child.Error(); err != nil {
+			t.Fatalf("RESP2 subscription pipe setup failed: %v", err)
+		}
+		select {
+		case <-refreshStarted:
+		case <-time.After(time.Second):
+			t.Fatal("auth refresh did not start on the RESP2 subscription pipe")
+		}
+		if !p.StopTimer() {
+			t.Fatal("StopTimer returned false for a healthy pipe with a running refresh")
+		}
+		close(unblock)
+		time.Sleep(3 * refresh)
+		if n := parentRefreshes.Load(); n != 0 {
+			t.Fatalf("refresh AUTH sent on the checked out pipe: %d", n)
+		}
+		if n := childRefreshes.Load(); n != 0 {
+			t.Fatalf("refresh AUTH sent on the checked out subscription pipe: %d", n)
+		}
+		// Returning the pipe to the pool retries the refresh the checkout skipped.
+		p.ResetTimer()
+		deadline := time.Now().Add(2 * time.Second)
+		for childRefreshes.Load() == 0 {
+			if time.Now().After(deadline) {
+				t.Fatal("skipped auth refresh was not retried on the subscription pipe")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		p.Close()
+		parentMock.Close()
+		childMock.Close()
+		n1.Close()
+		n2.Close()
+		n3.Close()
+		n4.Close()
+	})
+	t.Run("Auth Credentials Refresh Disabled Rejects Checkout With a Refresh AUTH in Flight", func(t *testing.T) {
+		// Timer.Stop does not wait for the AUTH a running refresh already sent. Waiting for it would
+		// hold the checkout for up to ConnWriteTimeout, so the checkout is rejected and the pool
+		// closes the pipe instead of handing out one whose AUTH reply is still outstanding.
+		n1, n2 := net.Pipe()
+		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
+		refreshRead := make(chan struct{})
+		authReply := make(chan struct{})
+		refreshDone := make(chan struct{})
+		go func() {
+			mock.Expect("HELLO", "3", "AUTH", "ua", "pa").
+				Reply(slicemsg(
+					'%',
+					[]ValkeyMessage{
+						strmsg('+', "proto"),
+						{typ: ':', intlen: 3},
+					},
+				))
+			mock.Expect("CLIENT", "TRACKING", "ON", "OPTIN").
+				ReplyString("OK")
+			mock.Expect("CLIENT", "SETINFO", "LIB-NAME", LibName).
+				ReplyError("UNKNOWN COMMAND")
+			mock.Expect("CLIENT", "SETINFO", "LIB-VER", LibVer).
+				ReplyError("UNKNOWN COMMAND")
+			auth := mock.Expect("AUTH", "ua", "pa2")
+			close(refreshRead)
+			<-authReply
+			auth.ReplyString("OK")
+			close(refreshDone)
+		}()
+		far := time.Now().Add(time.Hour)
+		var calls atomic.Int64
+		p, err := newPipe(context.Background(), func(ctx context.Context) (net.Conn, error) { return n1, nil }, &ClientOption{
+			DisableAuthRefreshOnDedicated: true,
+			AuthCredentialsFn: func(context AuthCredentialsContext) (AuthCredentials, error) {
+				if calls.Add(1) == 1 {
+					return AuthCredentials{Username: "ua", Password: "pa", RefreshAfter: time.Now().Add(10 * time.Millisecond)}, nil
+				}
+				return AuthCredentials{Username: "ua", Password: "pa2", RefreshAfter: far}, nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("pipe setup failed: %v", err)
+		}
+		select {
+		case <-refreshRead:
+		case <-time.After(time.Second):
+			t.Fatal("auth refresh command was not sent")
+		}
+		// The callback is waiting for the reply inside its AUTH, holding authRefreshMu. The
+		// checkout must be rejected instead of waiting for the reply.
+		start := time.Now()
+		if p.StopTimer() {
+			t.Fatal("StopTimer accepted a pipe whose refresh AUTH is in flight")
+		}
+		if d := time.Since(start); d > 500*time.Millisecond {
+			t.Fatalf("StopTimer waited %v for the refresh AUTH in flight", d)
+		}
+		close(authReply)
+		select {
+		case <-refreshDone:
+		case <-time.After(time.Second):
+			t.Fatal("refresh AUTH reply was not consumed")
+		}
+		// The rejected checkout still paused the refresh: the finished callback must not re-arm
+		// the timer.
+		time.Sleep(50 * time.Millisecond)
+		if n := calls.Load(); n != 2 {
+			t.Fatalf("auth refresh re-armed after the rejected checkout, got %d calls", n)
+		}
+		p.Close()
+		mock.Close()
+		n1.Close()
+		n2.Close()
+	})
+	t.Run("Auth Credentials Refresh Disabled On RESP2 Subscription Pipe Created While Checked Out", func(t *testing.T) {
+		// The child starts its auth timer inside _newPipe. A child created during the checkout has to
+		// be built paused, so a refresh that fires before it could be paused cannot send AUTH.
+		const refresh = 20 * time.Millisecond
+		far := time.Now().Add(time.Hour)
+		var calls atomic.Int64
+		n1, n2 := net.Pipe()
+		var parentRefreshes, childRefreshes atomic.Int64
+		parentMock := serveRESP2Auth(t, n2, &parentRefreshes)
+		conns := []net.Conn{n1}
+		p, err := newPipe(context.Background(), func(ctx context.Context) (net.Conn, error) {
+			if len(conns) == 0 {
+				return nil, io.EOF
+			}
+			c := conns[0]
+			conns = conns[1:]
+			return c, nil
+		}, &ClientOption{
+			AlwaysRESP2:                   true,
+			DisableCache:                  true,
+			DisableAuthRefreshOnDedicated: true,
+			AuthCredentialsFn: func(context AuthCredentialsContext) (AuthCredentials, error) {
+				switch n := calls.Add(1); {
+				case n == 1:
+					// The parent initial AUTH: no refresh during the test.
+					return AuthCredentials{Username: "ua", Password: "pa", RefreshAfter: far}, nil
+				case n == 2:
+					// The initial AUTH of the subscription pipe asks for an immediate refresh;
+					// the refreshes themselves are far apart.
+					return AuthCredentials{Username: "ua", Password: "pa", RefreshAfter: time.Now().Add(refresh)}, nil
+				default:
+					return AuthCredentials{Username: "ua", Password: "pa2", RefreshAfter: far}, nil
+				}
+			},
+		})
+		if err != nil {
+			t.Fatalf("pipe setup failed: %v", err)
+		}
+		if !p.StopTimer() {
+			t.Fatal("StopTimer returned false")
+		}
+		n3, n4 := net.Pipe()
+		conns = append(conns, n3)
+		childMock := serveRESP2Auth(t, n4, &childRefreshes)
+		child := p.r2p.pipe(context.Background())
+		if err := child.Error(); err != nil {
+			t.Fatalf("RESP2 subscription pipe setup failed: %v", err)
+		}
+		if !child.authRefreshPaused.Load() {
+			t.Fatal("RESP2 subscription pipe created during checkout was not built paused")
+		}
+		time.Sleep(3 * refresh)
+		// Force the timer of the paused child to fire, as a refresh that was due when the checkout
+		// started does: it must neither call the credential callback nor send AUTH.
+		child.authTimer.Reset(0)
+		time.Sleep(3 * refresh)
+		if n := calls.Load(); n != 2 {
+			t.Fatalf("paused subscription pipe ran %d auth refresh callbacks during checkout", n-2)
+		}
+		if pr, cr := parentRefreshes.Load(), childRefreshes.Load(); pr != 0 || cr != 0 {
+			t.Fatalf("refresh AUTH sent on a checked out connection: parent %d, child %d", pr, cr)
+		}
+		// Returning the pipe to the pool retries the refresh of the child.
+		p.ResetTimer()
+		deadline := time.Now().Add(2 * time.Second)
+		for childRefreshes.Load() == 0 {
+			if time.Now().After(deadline) {
+				t.Fatal("skipped auth refresh was not retried on the subscription pipe")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		p.Close()
+		parentMock.Close()
+		childMock.Close()
+		n1.Close()
+		n2.Close()
+		n3.Close()
+		n4.Close()
+	})
+	t.Run("Auth Credentials Refresh Completed With No Deadline Keeps Checkout", func(t *testing.T) {
+		// A refresh that returns a zero RefreshAfter leaves the timer fired and inactive. There is
+		// nothing left to pause, so a checkout must not fail and close the healthy pipe.
+		n1, n2 := net.Pipe()
+		mock := &valkeyMock{buf: bufio.NewReader(n2), conn: n2, t: t}
+		go func() {
+			mock.Expect("HELLO", "3", "AUTH", "ua", "pa").
+				Reply(slicemsg(
+					'%',
+					[]ValkeyMessage{
+						strmsg('+', "proto"),
+						{typ: ':', intlen: 3},
+					},
+				))
+			mock.Expect("CLIENT", "TRACKING", "ON", "OPTIN").
+				ReplyString("OK")
+			mock.Expect("CLIENT", "SETINFO", "LIB-NAME", LibName).
+				ReplyError("UNKNOWN COMMAND")
+			mock.Expect("CLIENT", "SETINFO", "LIB-VER", LibVer).
+				ReplyError("UNKNOWN COMMAND")
+			mock.Expect("AUTH", "ua", "pa2").
+				ReplyString("OK")
+		}()
+		var calls atomic.Int64
+		p, err := newPipe(context.Background(), func(ctx context.Context) (net.Conn, error) { return n1, nil }, &ClientOption{
+			DisableAuthRefreshOnDedicated: true,
+			AuthCredentialsFn: func(context AuthCredentialsContext) (AuthCredentials, error) {
+				if calls.Add(1) == 1 {
+					return AuthCredentials{Username: "ua", Password: "pa", RefreshAfter: time.Now().Add(10 * time.Millisecond)}, nil
+				}
+				// refresh=false: no further refresh deadline.
+				return AuthCredentials{Username: "ua", Password: "pa2"}, nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("pipe setup failed: %v", err)
+		}
+		deadline := time.Now().Add(time.Second)
+		for at := p.authRefreshAt.Load(); at == nil || !at.IsZero(); at = p.authRefreshAt.Load() {
+			if time.Now().After(deadline) {
+				t.Fatal("auth refresh did not complete with no further deadline")
+			}
+			time.Sleep(time.Millisecond)
+		}
+		if !p.StopTimer() {
+			t.Fatal("StopTimer returned false for a healthy pipe whose refresh completed with no deadline")
+		}
+		p.ResetTimer()
+		p.Close()
+		mock.Close()
+		n1.Close()
+		n2.Close()
 	})
 	t.Run("Auth Credentials Refresh Behind Blocking Command", func(t *testing.T) {
 		n1, n2 := net.Pipe()
@@ -5278,7 +5582,7 @@ func TestPubSub(t *testing.T) {
 		p.version = 5
 		e := errors.New("any")
 		p.r2p = &r2p{
-			f: func(_ context.Context) (p *pipe, err error) {
+			f: func(_ context.Context, _ bool) (p *pipe, err error) {
 				return nil, e
 			},
 		}
