@@ -2,6 +2,7 @@ package valkeylock
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"math/rand"
 	"strconv"
@@ -865,4 +866,125 @@ func TestLocker_Flush(t *testing.T) {
 			test(t, true, true, nocsc)
 		})
 	}
+}
+
+func testBlobMessage(t *testing.T, s string) valkey.ValkeyMessage {
+	t.Helper()
+	buf := make([]byte, 7, 16+len(s))
+	buf = append(buf, '$')
+	buf = binary.BigEndian.AppendUint64(buf, uint64(len(s)))
+	buf = append(buf, s...)
+	var msg valkey.ValkeyMessage
+	if err := msg.CacheUnmarshalView(buf); err != nil {
+		t.Fatal(err)
+	}
+	return msg
+}
+
+func TestLocker_OnInvalidations(t *testing.T) {
+	newTestLocker := func(name string) (*locker, *gate) {
+		l := &locker{
+			prefix:   "valkeylock",
+			majority: 2,
+			totalcnt: 3,
+			gates:    make(map[string]*gate),
+		}
+		g := makegate(l.totalcnt)
+		l.gates[name] = g
+		return l, g
+	}
+
+	assertNoSignal := func(t *testing.T, g *gate) {
+		t.Helper()
+		select {
+		case <-g.ch:
+			t.Fatal("unexpected signal on gate.ch")
+		default:
+		}
+		for i, ch := range g.csc {
+			select {
+			case <-ch:
+				t.Fatalf("unexpected signal on gate.csc[%d]", i)
+			default:
+			}
+		}
+	}
+
+	ignoredCases := []struct {
+		name string
+		key  string
+	}{
+		{name: "exact prefix", key: "valkeylock"},
+		{name: "prefix without colon delimiter", key: "valkeylockX0:mylock"},
+		{name: "out-of-range positive slot", key: "valkeylock:99:mylock"},
+		{name: "negative slot", key: "valkeylock:-1:mylock"},
+		{name: "non-numeric slot", key: "valkeylock:abc:mylock"},
+	}
+
+	for _, tc := range ignoredCases {
+		t.Run(tc.name, func(t *testing.T) {
+			l, g := newTestLocker("mylock")
+			var panicVal any
+			func() {
+				defer func() {
+					panicVal = recover()
+				}()
+				l.onInvalidations([]valkey.ValkeyMessage{testBlobMessage(t, tc.key)})
+			}()
+			if panicVal != nil {
+				t.Fatalf("onInvalidations(%q) panicked: %v", tc.key, panicVal)
+			}
+			locked := make(chan struct{})
+			go func() {
+				l.mu.Lock()
+				l.mu.Unlock()
+				close(locked)
+			}()
+			select {
+			case <-locked:
+			case <-time.After(time.Second):
+				t.Fatalf("onInvalidations(%q) leaked m.mu.RLock", tc.key)
+			}
+			assertNoSignal(t, g)
+		})
+	}
+
+	t.Run("valid key with colons in lock name", func(t *testing.T) {
+		l, g := newTestLocker("my:lock")
+		l.onInvalidations([]valkey.ValkeyMessage{testBlobMessage(t, keyname(l.prefix, "my:lock", 1))})
+		select {
+		case <-g.ch:
+		default:
+			t.Fatal("expected signal on gate.ch")
+		}
+		for i, ch := range g.csc {
+			select {
+			case <-ch:
+				if i != 1 {
+					t.Fatalf("unexpected signal on gate.csc[%d]", i)
+				}
+			default:
+				if i == 1 {
+					t.Fatal("expected signal on gate.csc[1]")
+				}
+			}
+		}
+	})
+
+	t.Run("nil invalidations broadcast to all gates", func(t *testing.T) {
+		l, g := newTestLocker("mylock")
+		l.onInvalidations(nil)
+		select {
+		case <-g.ch:
+		default:
+			t.Fatal("expected signal on gate.ch")
+		}
+		for i, ch := range g.csc {
+			select {
+			case <-ch:
+			default:
+				t.Fatalf("expected signal on gate.csc[%d]", i)
+			}
+		}
+	})
 }
