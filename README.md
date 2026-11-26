@@ -90,15 +90,32 @@ func BenchmarkPipelining(b *testing.B, client valkey.Client) {
 }
 ```
 
-### Benchmark Comparison with go-redis v9
+### Benchmark Comparison with go-redis and GLIDE
 
-Compared to go-redis, valkey-go has higher throughput across 1, 8, and 64 parallelism settings.
+valkey-go had the highest throughput of the three clients in every case below. With 640 goroutines on a single server, it handled about 15 times the commands of go-redis, and 2.3 times go-redis with its experimental auto-pipelining. At a fixed, moderate request rate, its p99 latency was about the same as go-redis's, or lower.
 
-It is even able to achieve **~14x** throughput over go-redis in a local benchmark of MacBook Pro 16" M1 Pro 2021. (see `parallelism(64)-key(16)-value(64)-10`)
+**Throughput:** SET with 64-byte values on 1,024 keys, in commands per second, measured with [rueidis-benchmark](https://github.com/rueian/rueidis-benchmark), the harness behind this section's original chart, updated to today's clients.
 
-![client_test_set](https://github.com/rueian/rueidis-benchmark/blob/master/client_test_set_10.png)
+| Goroutines | valkey-go | go-redis | go-redis auto-pipelining | GLIDE |
+| :--- | ---: | ---: | ---: | ---: |
+| Single server, 10 | 74k | 54k | 59k | 36k |
+| Single server, 80 | 300k | 55k | 175k | 38k |
+| Single server, 640 | 853k | 55k | 370k | 37k |
+| 3-node cluster, 40 | 266k | 148k | 111k | 34k |
+| 3-node cluster, 160 | 851k | 157k | 241k | 43k |
+| 3-node cluster, 960 | 1,896k | 158k | 461k | 43k |
 
-Benchmark source code: https://github.com/rueian/rueidis-benchmark
+**p99 latency at a fixed request rate:** single server, 80% GET and 20% SET with 100-byte values.
+
+| Requests per second | valkey-go | go-redis | go-redis auto-pipelining | GLIDE |
+| :--- | ---: | ---: | ---: | ---: |
+| 2,000 | 0.38 ms | 0.37 ms | 2.64 ms | 0.52 ms |
+| 10,000 | 0.35 ms | 0.47 ms | 2.59 ms | 0.40 ms |
+| 20,000 | 0.22 ms | 0.28 ms | 2.79 ms | 0.56 ms |
+
+How it was measured: on Nov 23, 2026, on a 24-vCPU VM (AMD EPYC 7B12) with Valkey 9.0.8 in Docker (host networking), the server and the benchmark pinned to separate CPU cores, Go 1.27.3, medians of 10 runs. Clients: valkey-go v1.0.80, go-redis v9.23.0 (out of the box, and separately with auto-pipelining) and GLIDE for Go v2.6.1. They use their default settings, except that in the throughput test GLIDE's request timeout is 5 seconds, so slow replies don't count as errors. Absolute numbers depend on the machine: go-redis without auto-pipelining sends one command per round trip on each connection, so here it stays near the server's limit of about 52,000 such commands per second.
+
+Benchmark source code and raw results: https://github.com/mnalawade-10/valkey-go-gcp/tree/go-client-benchmark
 
 A benchmark result performed on two GCP n2-highcpu-2 machines also shows that valkey-go can achieve higher throughput with lower latencies: https://github.com/redis/rueidis/pull/93
 
