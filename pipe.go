@@ -114,10 +114,11 @@ type pipe struct {
 	// keeps refreshing: it only lasts as long as the command, while the pause covers connections a
 	// subscribed server may leave an AUTH unanswered on.
 	pauseAuthRefreshOnDedicated bool
-	// authRefreshReplyPending is set when a refresh AUTH was sent but its reply is still owed to the
-	// connection after ConnWriteTimeout. A checkout must not hand the pipe out in that state, see
-	// pauseAuthRefresh.
-	authRefreshReplyPending atomic.Bool
+	// authRefreshReplyPending counts the refresh AUTH replies the connection still owes after
+	// ConnWriteTimeout: two refreshes can time out before either late reply arrives, and the first
+	// reply must not clear the debt of the second. A checkout must not hand the pipe out while the
+	// count is not zero, see pauseAuthRefresh.
+	authRefreshReplyPending atomic.Int32
 }
 
 type pipeFn func(ctx context.Context, connFn func(ctx context.Context) (net.Conn, error), option *ClientOption) (p *pipe, err error)
@@ -918,9 +919,9 @@ func (p *pipe) refreshAuth(authFn func(AuthCredentialsContext) (AuthCredentials,
 }
 
 // doAuthRefresh sends the refresh AUTH and ignores its reply, as Do does. Unlike Do it also keeps
-// track of a reply that does not arrive before ConnWriteTimeout: Do leaves a goroutine behind to
-// consume that late reply, and authRefreshReplyPending tells a checkout that the connection still
-// owes one, see pauseAuthRefresh.
+// track of replies that do not arrive before ConnWriteTimeout: Do leaves a goroutine behind to
+// consume such a late reply, and authRefreshReplyPending counts the replies that a checkout would
+// still owe, see pauseAuthRefresh.
 func (p *pipe) doAuthRefresh(cmd Completed) {
 	ctx := context.Background()
 	var cancel context.CancelFunc = func() {}
@@ -941,12 +942,15 @@ func (p *pipe) doAuthRefresh(cmd Completed) {
 		return
 	}
 	if state == 0 && waits == 1 {
-		// Do sends the AUTH synchronously when it is the only command on the pipe, and its own
-		// ConnWriteTimeout bounds the read; a timeout fails the pipe, so no reply is left owed.
-		// Without a context deadline, a concurrent command that turns this Do into a queued one
-		// leaves the reply to be consumed by Do instead of abandoning it.
-		p.decrWaits()
-		p.Do(context.Background(), cmd)
+		// Send the AUTH synchronously while the waits slot stays held, as Do does for the only
+		// command on the pipe: ConnWriteTimeout bounds the read and a timeout fails the pipe, so no
+		// reply is left owed. Holding the slot keeps a concurrent command from queueing while this
+		// send is in flight; once the AUTH finishes, hand the waiting commands to a background
+		// worker, like Do does after its synchronous send.
+		p.syncDo(time.Time{}, false, cmd)
+		if left := p.decrWaitsAndIncrRecvs(); left != 0 {
+			p.background()
+		}
 		return
 	}
 	ch, err := p.queue.PutOne(ctx, cmd)
@@ -959,12 +963,12 @@ func (p *pipe) doAuthRefresh(cmd Completed) {
 		p.decrWaitsAndIncrRecvs()
 	case <-ctx.Done():
 		// The AUTH is queued, or on the wire, and the connection still owes its reply. Keep
-		// consuming the late reply, like Do's abort path, and report the debt until it is paid.
-		p.authRefreshReplyPending.Store(true)
+		// consuming the late reply, like Do's abort path, and count the debt until it is paid.
+		p.authRefreshReplyPending.Add(1)
 		go func() {
 			<-ch
 			p.decrWaitsAndIncrRecvs()
-			p.authRefreshReplyPending.Store(false)
+			p.authRefreshReplyPending.Add(-1)
 		}()
 	}
 }
@@ -2184,7 +2188,7 @@ func (p *pipe) pauseAuthRefresh() bool {
 	if p.authTimer != nil {
 		p.authTimer.Stop()
 	}
-	return p.Error() == nil && !p.authRefreshReplyPending.Load()
+	return p.Error() == nil && p.authRefreshReplyPending.Load() == 0
 }
 
 // resumeAuthRefresh resumes the auth refresh paused by pauseAuthRefresh. A refresh skipped during
@@ -2218,10 +2222,15 @@ func (p *pipe) ResetTimer() bool {
 			p.lftmTimer.Stop()
 		}
 	}
-	// Only a checkout that paused the refresh resumed it: a blocking checkout keeps it running, and
-	// waiting for an in-flight refresh here would stall the pool.
-	if (p.pauseAuthRefreshOnCheckout || p.pauseAuthRefreshOnDedicated) && p.authRefreshPaused.Load() {
-		p.resumeAuthRefresh()
+	// Only a checkout that paused the refresh resumes it: a blocking checkout keeps it running, and
+	// waiting for an in-flight refresh here would stall the pool. The RESP2 subscription pipe is
+	// resumed independently of the parent flag: a parent whose credentials carry no deadline has no
+	// timer to pause, while a child created during the same checkout can have one, and the child
+	// waits for a resume only when it was paused itself.
+	if p.pauseAuthRefreshOnCheckout || p.pauseAuthRefreshOnDedicated {
+		if p.authRefreshPaused.Load() {
+			p.resumeAuthRefresh()
+		}
 		if p.r2p != nil {
 			p.r2p.resumeAuthRefresh()
 		}
