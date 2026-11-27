@@ -169,4 +169,4 @@ go test -race ./gcp/...
 
 The unit tests replace Google Cloud with in-memory exporters and a local OTLP server. `TestTelemetry_LiveClient` also needs a local Valkey without a password at `127.0.0.1:6379` (or `VALKEYOTEL_GCP_TEST_ADDR`), and is skipped without one.
 
-`gcp/cmd/otel_e2e` sends traffic to a real instance, so the metrics and traces show up in the Console; its package comment lists the settings. To check the per-copy ID, run two copies on the same machine: both must appear, with different `instance` values. As a control, start both with `OTEL_RESOURCE_ATTRIBUTES=service.instance.id=same`: their points collide.
+`otel_e2e` sends traffic to a real instance, so the metrics and traces show up in the Console; its package comment lists the settings. It lives in `gcp/examples`, a separate Go module, so it isn't part of the `valkeyotel` module: run it from that directory with `go run ./otel_e2e`. To check the per-copy ID, run two copies on the same machine: both must appear, with different `instance` values. As a control, start both with `OTEL_RESOURCE_ATTRIBUTES=service.instance.id=same`: their points collide.

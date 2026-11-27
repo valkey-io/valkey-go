@@ -1,8 +1,9 @@
 // Command otel_e2e sends traffic to a Memorystore for Valkey instance through valkeyotel/gcp,
 // so valkey-go's metrics show up in Cloud Monitoring and its traces in Cloud Trace. Stop it
-// with Ctrl+C: it sends the last metrics and spans before it exits.
+// with Ctrl+C: it sends the last metrics and spans before it exits. Run it from the
+// valkeyotel/gcp/examples directory, a separate Go module:
 //
-//	MEMORYSTORE_TEST_DISCOVERY_ENDPOINT=10.0.0.15:6379 go run ./gcp/cmd/otel_e2e
+//	MEMORYSTORE_TEST_DISCOVERY_ENDPOINT=10.0.0.15:6379 go run ./otel_e2e
 //
 // Optional settings of this command:
 //   - MEMORYSTORE_TEST_TOKEN: a password or Token Auth token, sent as AUTH default <token>.
