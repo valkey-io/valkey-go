@@ -347,7 +347,7 @@ func TestPoolWithConnLifetime(t *testing.T) {
 		wires := []wire{
 			&mockWire{},
 			&mockWire{
-				StopTimerFn: func() bool {
+				StopTimerFn: func(bool) bool {
 					stopTimerCall++
 					return stopTimerCall != 2
 				}, // connection lifetime timer expires before reuse
@@ -401,7 +401,7 @@ func TestPoolWithConnLifetime(t *testing.T) {
 				CloseFn: func() {
 					staleClosed = true
 				},
-				StopTimerFn: func() bool {
+				StopTimerFn: func(bool) bool {
 					stopTimerCall++
 					return false
 				}, // connection lifetime timer is already fired
@@ -432,6 +432,21 @@ func TestPoolWithConnLifetime(t *testing.T) {
 			t.Errorf("list len must equal to 2, actual: %d", len(pool.list))
 		}
 		pool.cond.L.Unlock()
+	})
+
+	t.Run("Dedicated checkout passes its role to StopTimer", func(t *testing.T) {
+		var roles []bool
+		wires := []wire{
+			&mockWire{StopTimerFn: func(dedicated bool) bool { roles = append(roles, dedicated); return true }},
+			&mockWire{StopTimerFn: func(dedicated bool) bool { roles = append(roles, dedicated); return true }},
+		}
+		pool := setup(wires)
+		pool.Store(pool.Acquire(context.Background()))
+		pool.Store(pool.AcquireDedicated(context.Background()))
+
+		if len(roles) != 2 || roles[0] || !roles[1] {
+			t.Errorf("unexpected checkout roles passed to StopTimer: %v", roles)
+		}
 	})
 
 	t.Run("Reset timer when storing to pool", func(t *testing.T) {

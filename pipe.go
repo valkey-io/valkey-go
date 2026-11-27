@@ -59,7 +59,10 @@ type wire interface {
 	SetPubSubHooks(hooks PubSubHooks) <-chan error
 	GetPubSubHooks() PubSubHooks
 	SetOnCloseHook(fn func(error))
-	StopTimer() bool
+	// StopTimer stops the timers of a wire checked out from a pool. dedicated is set for a
+	// Client.Dedicate or Client.Dedicated checkout, which also pauses the auth refresh when
+	// ClientOption.DisableAuthRefreshOnDedicated is set. See pipe.StopTimer.
+	StopTimer(dedicated bool) bool
 	ResetTimer() bool
 }
 
@@ -85,31 +88,52 @@ type pipe struct {
 	lftmTimer       *time.Timer // lifetime timer, written once in _newPipe
 	info            map[string]ValkeyMessage
 	authRefreshAt   atomic.Pointer[time.Time]
-	timeout         time.Duration
-	pinggap         time.Duration
-	maxFlushDelay   time.Duration
-	lftm            time.Duration // lifetime
-	wrCounter       atomic.Uint64
-	version         int32
-	blcksig         int32
-	state           int32
-	bgState         int32
-	r2ps            bool // identify this pipe is used for resp2 pubsub or not
-	noNoDelay       bool
-	optIn           bool
+	// authRefreshPaused is set while the pipe is checked out and its auth refresh is paused, see
+	// pauseAuthRefresh. A refresh callback that runs then must neither send AUTH nor re-arm the timer.
+	authRefreshPaused atomic.Bool
+	// authRefreshMu serializes a refresh AUTH and the re-arming of the timer with the checkout pause
+	// and resume. It is not held while the credential callback runs, so that callback may block.
+	authRefreshMu sync.Mutex
+	timeout       time.Duration
+	pinggap       time.Duration
+	maxFlushDelay time.Duration
+	lftm          time.Duration // lifetime
+	wrCounter     atomic.Uint64
+	version       int32
+	blcksig       int32
+	state         int32
+	bgState       int32
+	r2ps          bool // identify this pipe is used for resp2 pubsub or not
+	noNoDelay     bool
+	optIn         bool
+	// pauseAuthRefreshOnCheckout stops the auth refresh on every checkout: a nobg pipe is owned
+	// synchronously by DoStream and cannot share its connection with a concurrent AUTH.
+	pauseAuthRefreshOnCheckout bool
+	// pauseAuthRefreshOnDedicated stops the auth refresh on a Client.Dedicate or Client.Dedicated
+	// checkout only, see ClientOption.DisableAuthRefreshOnDedicated. A blocking-command checkout
+	// keeps refreshing: it only lasts as long as the command, while the pause covers connections a
+	// subscribed server may leave an AUTH unanswered on.
+	pauseAuthRefreshOnDedicated bool
+	// authRefreshReplyPending counts the refresh AUTH replies the connection still owes after
+	// ConnWriteTimeout: two refreshes can time out before either late reply arrives, and the first
+	// reply must not clear the debt of the second. A checkout must not hand the pipe out while the
+	// count is not zero, see pauseAuthRefresh.
+	authRefreshReplyPending atomic.Int32
 }
 
 type pipeFn func(ctx context.Context, connFn func(ctx context.Context) (net.Conn, error), option *ClientOption) (p *pipe, err error)
 
 func newPipe(ctx context.Context, connFn func(ctx context.Context) (net.Conn, error), option *ClientOption) (p *pipe, err error) {
-	return _newPipe(ctx, connFn, option, false, false)
+	return _newPipe(ctx, connFn, option, false, false, false)
 }
 
 func newPipeNoBg(ctx context.Context, connFn func(context.Context) (net.Conn, error), option *ClientOption) (p *pipe, err error) {
-	return _newPipe(ctx, connFn, option, false, true)
+	return _newPipe(ctx, connFn, option, false, true, false)
 }
 
-func _newPipe(ctx context.Context, connFn func(context.Context) (net.Conn, error), option *ClientOption, r2ps, nobg bool) (p *pipe, err error) {
+// _newPipe builds a pipe. paused starts the auth refresh paused; the lazy RESP2 pubsub pipe is
+// created with it when its parent is checked out, see r2p.pipe.
+func _newPipe(ctx context.Context, connFn func(context.Context) (net.Conn, error), option *ClientOption, r2ps, nobg, paused bool) (p *pipe, err error) {
 	conn, err := connFn(ctx)
 	if err != nil {
 		return nil, err
@@ -126,7 +150,17 @@ func _newPipe(ctx context.Context, connFn func(context.Context) (net.Conn, error
 
 		r2ps:  r2ps,
 		optIn: isOptIn(option.ClientTrackingOptions),
+
+		// A nobg pipe must not refresh its credentials while checked out: DoStream owns it
+		// synchronously. A dedicated checkout of a client with
+		// ClientOption.DisableAuthRefreshOnDedicated pauses the refresh instead, while a blocking
+		// command keeps it running, see pipe.StopTimer.
+		pauseAuthRefreshOnCheckout:  nobg,
+		pauseAuthRefreshOnDedicated: option.DisableAuthRefreshOnDedicated,
 	}
+	// The timer below fires on its own schedule; a pipe created for a checked out parent must not
+	// start its refresh before the parent returns, see r2p.pipe.
+	p.authRefreshPaused.Store(paused)
 	if !nobg {
 		switch queueTypeFromEnv {
 		case queueTypeFlowBuffer:
@@ -366,8 +400,8 @@ func _newPipe(ctx context.Context, connFn func(context.Context) (net.Conn, error
 		}
 		if !r2ps {
 			p.r2p = &r2p{
-				f: func(ctx context.Context) (p *pipe, err error) {
-					return _newPipe(ctx, connFn, option, true, nobg)
+				f: func(ctx context.Context, paused bool) (p *pipe, err error) {
+					return _newPipe(ctx, connFn, option, true, nobg, paused)
 				},
 			}
 		}
@@ -816,9 +850,13 @@ func (p *pipe) backgroundPing() {
 	})
 }
 
+// scheduleAuthRefresh arms the timer for the next refresh. The caller holds authRefreshMu, so a
+// checkout pause either stops the timer armed here or is ordered before it and keeps it from being
+// armed at all, see pauseAuthRefresh. The pause is checked again because a pause that could not take
+// the mutex, see pauseAuthRefresh, may have been set while the caller was sending its AUTH.
 func (p *pipe) scheduleAuthRefresh(refreshAfter time.Time) {
 	p.authRefreshAt.Store(&refreshAfter)
-	if refreshAfter.IsZero() || p.Error() != nil || p.authTimer == nil {
+	if refreshAfter.IsZero() || p.Error() != nil || p.authTimer == nil || p.authRefreshPaused.Load() {
 		return
 	}
 	p.authTimer.Reset(time.Until(refreshAfter))
@@ -832,9 +870,23 @@ func (p *pipe) refreshAuth(authFn func(AuthCredentialsContext) (AuthCredentials,
 	if p.Error() != nil {
 		return
 	}
+	// Checked out pipes keep their refresh off, and the credential callback may be an expensive
+	// external call: skip it too. The paused state can change while it runs, so it is checked again
+	// under authRefreshMu before anything reaches the connection.
+	if p.authRefreshPaused.Load() {
+		return
+	}
 	auth, err := authFn(authContext)
 	if err != nil {
 		p._exit(err)
+		return
+	}
+	// The pause must cover the AUTH and the re-arm, not just the timer: a checkout can start while
+	// the credentials above are being fetched. pauseAuthRefresh takes the same mutex, so after it
+	// returns no refresh callback sends AUTH or arms the timer until resumeAuthRefresh.
+	p.authRefreshMu.Lock()
+	defer p.authRefreshMu.Unlock()
+	if p.authRefreshPaused.Load() {
 		return
 	}
 	if auth.Username != "" || auth.Password != "" {
@@ -848,12 +900,6 @@ func (p *pipe) refreshAuth(authFn func(AuthCredentialsContext) (AuthCredentials,
 		} else {
 			args = append(args, auth.Username, auth.Password)
 		}
-		ctx := context.Background()
-		var cancel context.CancelFunc
-		if p.timeout > 0 {
-			ctx, cancel = context.WithTimeout(ctx, p.timeout)
-			defer cancel()
-		}
 		cmd := cmds.NewCompleted(args)
 		// The reply is ignored. The AUTH can fail while the connection is
 		// still fine: behind a blocking command it hits ConnWriteTimeout, like
@@ -863,10 +909,68 @@ func (p *pipe) refreshAuth(authFn func(AuthCredentialsContext) (AuthCredentials,
 		// (valkey-io/valkey#4862). The connection then keeps its current
 		// credentials and the server drops it when they expire, which is also
 		// what happens when the new credentials are really wrong. A connection
-		// that stopped replying is closed by the background PING.
-		p.Do(ctx, cmd)
+		// that stopped replying is closed by the background PING. A server that
+		// keeps the connection but drops the AUTH without any reply instead
+		// shifts every later reply to the command before it; that case is why
+		// ClientOption.DisableAuthRefreshOnDedicated exists.
+		p.doAuthRefresh(cmd)
 	}
 	p.scheduleAuthRefresh(auth.RefreshAfter)
+}
+
+// doAuthRefresh sends the refresh AUTH and ignores its reply, as Do does. Unlike Do it also keeps
+// track of replies that do not arrive before ConnWriteTimeout: Do leaves a goroutine behind to
+// consume such a late reply, and authRefreshReplyPending counts the replies that a checkout would
+// still owe, see pauseAuthRefresh.
+func (p *pipe) doAuthRefresh(cmd Completed) {
+	ctx := context.Background()
+	var cancel context.CancelFunc = func() {}
+	if p.timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, p.timeout)
+	}
+	defer cancel()
+
+	if p.queue == nil {
+		// A nobg pipe sends commands synchronously: a timeout fails and closes the pipe, see syncDo.
+		p.Do(ctx, cmd)
+		return
+	}
+	waits := p.incrWaits()
+	state := atomic.LoadInt32(&p.state)
+	if state != 0 && state != 1 {
+		p.decrWaits()
+		return
+	}
+	if state == 0 && waits == 1 {
+		// Send the AUTH synchronously while the waits slot stays held, as Do does for the only
+		// command on the pipe: ConnWriteTimeout bounds the read and a timeout fails the pipe, so no
+		// reply is left owed. Holding the slot keeps a concurrent command from queueing while this
+		// send is in flight; once the AUTH finishes, hand the waiting commands to a background
+		// worker, like Do does after its synchronous send.
+		p.syncDo(time.Time{}, false, cmd)
+		if left := p.decrWaitsAndIncrRecvs(); left != 0 {
+			p.background()
+		}
+		return
+	}
+	ch, err := p.queue.PutOne(ctx, cmd)
+	if err != nil {
+		p.decrWaits()
+		return
+	}
+	select {
+	case <-ch:
+		p.decrWaitsAndIncrRecvs()
+	case <-ctx.Done():
+		// The AUTH is queued, or on the wire, and the connection still owes its reply. Keep
+		// consuming the late reply, like Do's abort path, and count the debt until it is paid.
+		p.authRefreshReplyPending.Add(1)
+		go func() {
+			<-ch
+			p.decrWaitsAndIncrRecvs()
+			p.authRefreshReplyPending.Add(-1)
+		}()
+	}
 }
 
 func (p *pipe) handlePush(values []ValkeyMessage) (reply bool, unsubscribe bool) {
@@ -2019,21 +2123,91 @@ func (p *pipe) stopLifetimeTimer() bool {
 	return true
 }
 
+// pausesAuthRefresh reports whether this checkout pauses the auth refresh. A nobg pipe, as used
+// by the stream pool, always pauses it: DoStream owns its connection synchronously and cannot share
+// it with a concurrent AUTH. ClientOption.DisableAuthRefreshOnDedicated pauses it only for a
+// Client.Dedicate or Client.Dedicated checkout, whose server may leave the refresh AUTH unanswered
+// on a subscribed connection; a blocking-command checkout keeps refreshing, because it only lasts
+// as long as the command.
+func (p *pipe) pausesAuthRefresh(dedicated bool) bool {
+	return p.pauseAuthRefreshOnCheckout || (dedicated && p.pauseAuthRefreshOnDedicated)
+}
+
 // StopTimer pauses the timers of a pipe checked out from a pool, and ResetTimer
 // resumes them when the pipe is returned. The auth refresh keeps running while
 // a pipe is checked out: AUTH is an ordinary request, also on a subscribed RESP3
 // connection, a transaction is sent in one DoMulti so AUTH cannot land inside
 // it, and the reply of the refresh AUTH is ignored, see refreshAuth. A
 // dedicated pub/sub pipe would otherwise never be refreshed and be dropped by
-// the server once its credentials expire. Only a nobg pipe, as used by the
-// stream pool, still pauses the refresh: DoStream owns its connection
-// synchronously and cannot share it with a concurrent AUTH.
-func (p *pipe) StopTimer() bool {
+// the server once its credentials expire, unless the client opted into
+// ClientOption.DisableAuthRefreshOnDedicated for it. A RESP2 pubsub connection
+// is a separate pipe created lazily by a SUBSCRIBE, so the pause reaches p.r2p
+// too, also when that pipe is created during this checkout.
+func (p *pipe) StopTimer(dedicated bool) bool {
 	stopped := p.stopLifetimeTimer()
-	if p.authTimer != nil && p.queue == nil {
-		stopped = p.authTimer.Stop() && stopped
+	if p.pausesAuthRefresh(dedicated) {
+		if p.authTimer != nil {
+			stopped = p.pauseAuthRefresh() && stopped
+		}
+		// A RESP2 pubsub connection is a separate pipe created lazily by a SUBSCRIBE that can
+		// arrive while this pipe is checked out, so it has to stay paused too. A child that cannot
+		// be paused fails the checkout, as before this change, so the pool does not hand out a pipe
+		// whose subscription connection may send AUTH while checked out.
+		if p.r2p != nil {
+			stopped = p.r2p.pauseAuthRefresh() && stopped
+		}
 	}
 	return stopped
+}
+
+// pauseAuthRefresh pauses the auth refresh of the pipe. Timer.Stop reports only whether the timer
+// was still waiting; it does not wait for a callback that has already started and returns false for
+// a timer that fired earlier and was not re-armed, such as one that completed a refresh with a zero
+// RefreshAfter. The pause therefore takes authRefreshMu, which refreshAuth holds around the AUTH and
+// the re-arm. A refresh that is still in the credential callback fetches nothing more: it sees the
+// pause under the mutex and returns without sending AUTH or arming the timer, so once this function
+// returns true no refresh callback can do either until resumeAuthRefresh. The timer is stopped after
+// that in case the refresh re-armed it. A fired timer is not by itself a reason to discard the pipe,
+// so the result reports the pipe health only. A refresh that already holds the mutex is inside its
+// AUTH and cannot be paused without waiting for it, see below. A refresh AUTH that did time out
+// earlier can still owe its reply to the connection, see doAuthRefresh; handing the pipe out then
+// would let a later SUBSCRIBE confirmation be matched to that AUTH, so the checkout is rejected too
+// and the pool closes the pipe.
+func (p *pipe) pauseAuthRefresh() bool {
+	if !p.authRefreshMu.TryLock() {
+		// A refresh is running and already past the pause check, so its AUTH is in flight. Stop
+		// does not wait for it and the AUTH cannot be unsent. Waiting here would hold the pool's
+		// checkout for up to ConnWriteTimeout, so only mark the pause: the callback finishes its
+		// AUTH, sees the pause and does not re-arm the timer. Report failure so the pool closes the
+		// pipe instead of handing out one whose AUTH reply would be applied on the next command.
+		p.authRefreshPaused.Store(true)
+		return false
+	}
+	defer p.authRefreshMu.Unlock()
+	p.authRefreshPaused.Store(true)
+	if p.authTimer != nil {
+		p.authTimer.Stop()
+	}
+	return p.Error() == nil && p.authRefreshReplyPending.Load() == 0
+}
+
+// resumeAuthRefresh resumes the auth refresh paused by pauseAuthRefresh. A refresh skipped during
+// the checkout is retried here: authRefreshAt keeps the deadline of the skipped refresh, so a
+// deadline that elapsed while checked out fires immediately.
+func (p *pipe) resumeAuthRefresh() {
+	if p.authTimer == nil || p.Error() != nil || !p.authRefreshPaused.Load() {
+		return
+	}
+	p.authRefreshMu.Lock()
+	defer p.authRefreshMu.Unlock()
+	p.authRefreshPaused.Store(false)
+	if at := p.authRefreshAt.Load(); at != nil && !at.IsZero() {
+		p.authTimer.Reset(time.Until(*at))
+		// Same race as in ResetTimer, with Close or _background stopping authTimer.
+		if p.Error() != nil {
+			p.authTimer.Stop()
+		}
+	}
 }
 
 func (p *pipe) ResetTimer() bool {
@@ -2048,13 +2222,17 @@ func (p *pipe) ResetTimer() bool {
 			p.lftmTimer.Stop()
 		}
 	}
-	if p.authTimer != nil && p.queue == nil {
-		if at := p.authRefreshAt.Load(); at != nil && !at.IsZero() {
-			reset = p.authTimer.Reset(time.Until(*at)) && reset
-			// Same race as above, with Close or _background stopping authTimer.
-			if p.Error() != nil {
-				p.authTimer.Stop()
-			}
+	// Only a checkout that paused the refresh resumes it: a blocking checkout keeps it running, and
+	// waiting for an in-flight refresh here would stall the pool. The RESP2 subscription pipe is
+	// resumed independently of the parent flag: a parent whose credentials carry no deadline has no
+	// timer to pause, while a child created during the same checkout can have one, and the child
+	// waits for a resume only when it was paused itself.
+	if p.pauseAuthRefreshOnCheckout || p.pauseAuthRefreshOnDedicated {
+		if p.authRefreshPaused.Load() {
+			p.resumeAuthRefresh()
+		}
+		if p.r2p != nil {
+			p.r2p.resumeAuthRefresh()
 		}
 	}
 	return reset
@@ -2066,9 +2244,14 @@ func (p *pipe) expired() {
 }
 
 type r2p struct {
-	f func(context.Context) (p *pipe, err error) // func to build pipe for resp2 pubsub
-	p *pipe                                      // internal pipe for resp2 pubsub only
-	m sync.RWMutex
+	f func(context.Context, bool) (p *pipe, err error) // func to build pipe for resp2 pubsub
+	p *pipe                                            // internal pipe for resp2 pubsub only
+	// paused is set by the parent pipe while it is checked out, see pipe.StopTimer. It keeps the
+	// auth refresh of a pipe created during the checkout off until the parent is returned, and the
+	// pipe is built with it: a child created here starts paused instead of being paused after
+	// _newPipe returned, so no refresh callback can run unpaused in between.
+	paused bool
+	m      sync.RWMutex
 }
 
 func (r *r2p) pipe(ctx context.Context) (r2p *pipe) {
@@ -2081,7 +2264,10 @@ func (r *r2p) pipe(ctx context.Context) (r2p *pipe) {
 			r2p = r.p
 		} else {
 			var err error
-			if r2p, err = r.f(ctx); err != nil {
+			// Build the child with the current pause state instead of pausing it afterwards: the
+			// auth timer starts inside _newPipe and a refresh callback that fires before the
+			// pause could otherwise escape the checkout.
+			if r2p, err = r.f(ctx, r.paused); err != nil {
 				r2p = epipeFn(err)
 			} else {
 				r.p = r2p
@@ -2098,6 +2284,36 @@ func (r *r2p) Close() {
 		r.p.Close()
 	}
 	r.m.RUnlock()
+}
+
+// pauseAuthRefresh pauses the auth refresh of the RESP2 subscription pipe and reports whether the
+// child, if it exists already, could be paused. A pipe created after the call is built paused too,
+// until resumeAuthRefresh is called.
+func (r *r2p) pauseAuthRefresh() bool {
+	r.m.Lock()
+	defer r.m.Unlock()
+	r.paused = true
+	if r.p != nil {
+		return r.p.pauseAuthRefresh()
+	}
+	return true
+}
+
+// resumeAuthRefresh reschedules the auth refresh timer paused by pauseAuthRefresh. It does nothing
+// when the parent checkout did not pause the child, which keeps the blocking-command checkout from
+// waiting for an in-flight refresh of the child.
+func (r *r2p) resumeAuthRefresh() {
+	r.m.Lock()
+	paused := r.paused
+	r.paused = false
+	var child *pipe
+	if paused {
+		child = r.p
+	}
+	r.m.Unlock()
+	if child != nil {
+		child.resumeAuthRefresh()
+	}
 }
 
 type pshks struct {

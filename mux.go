@@ -424,7 +424,10 @@ func (m *mux) Receive(ctx context.Context, subscribe Completed, fn func(message 
 }
 
 func (m *mux) Acquire(ctx context.Context) wire {
-	return m.dpool.Acquire(ctx)
+	// A dedicated connection may be subscribed on a server that leaves the refresh AUTH unanswered,
+	// so this checkout pauses the auth refresh when the client opted in. A blocking command does not
+	// pause it, see pool.AcquireDedicated.
+	return m.dpool.AcquireDedicated(ctx)
 }
 
 func (m *mux) Store(w wire) {
