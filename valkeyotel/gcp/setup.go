@@ -682,8 +682,10 @@ func (t *Telemetry) Shutdown(ctx context.Context) error {
 // Setup created, and waits until they are sent or ctx ends. It is for Cloud Run with
 // request-based billing, where the CPU is throttled between requests and background sends can
 // be late: calling Flush at the end of a request sends the data while the CPU is allocated,
-// at the cost of that time on the request. Providers passed in Options are left alone, and
-// after Shutdown has started, Flush does nothing.
+// at the cost of that time on the request. Don't call it more often than every 5 seconds:
+// Cloud Monitoring accepts at most one point per time series every 5 seconds and refuses the
+// rest. Providers passed in Options are left alone, and after Shutdown has started, Flush does
+// nothing.
 func (t *Telemetry) Flush(ctx context.Context) error {
 	if t.shutDown.Load() {
 		return nil

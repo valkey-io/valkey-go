@@ -107,7 +107,7 @@ tel, err := gcp.Setup(ctx, gcp.Options{MeterProvider: mp, TracerProvider: tp, Me
 
 ## Platform notes
 
-- **Cloud Run:** telemetry is sent in the background, so use instance-based billing (CPU always allocated). With request-based billing, the CPU is throttled between requests, and sends can be late or lost; calling `tel.Flush(ctx)` at the end of a request sends what's recorded so far while the CPU is allocated, at the cost of that time on the request. Cloud Run sends `SIGTERM` 10 seconds before it stops an instance: call `tel.Shutdown` then, to send the last data. `Shutdown` is safe to call more than once, so the `defer tel.Shutdown(...)` from the quickstart can stay.
+- **Cloud Run:** telemetry is sent in the background, so use instance-based billing (CPU always allocated). With request-based billing, the CPU is throttled between requests, and sends can be late or lost; calling `tel.Flush(ctx)` at the end of a request sends what's recorded so far while the CPU is allocated, at the cost of that time on the request. Call it at most once every 5 seconds, for example by skipping it when the last flush was less than 5 seconds ago: Cloud Monitoring refuses points on a time series that are closer together. Cloud Run sends `SIGTERM` 10 seconds before it stops an instance: call `tel.Shutdown` then, to send the last data. `Shutdown` is safe to call more than once, so the `defer tel.Shutdown(...)` from the quickstart can stay.
 - **GKE:** the `namespace` label stays empty unless the pod sets `k8s.namespace.name` in `OTEL_RESOURCE_ATTRIBUTES`, for example from the Kubernetes downward API.
 - **Outside Google Cloud** (a laptop, CI or another cloud): set the location (see below) and, with user credentials, the quota project.
 
