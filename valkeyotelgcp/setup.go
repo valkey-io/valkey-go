@@ -675,9 +675,10 @@ func (t *Telemetry) ServiceInstanceID() string {
 //
 // When metrics go to Cloud Monitoring, a final send that comes less than 5 seconds after the
 // previous one is refused, and the counts since then are lost, as no send follows it. On a
-// planned stop, such as Cloud Run's SIGTERM, call Flush, wait 5 seconds, then call Shutdown:
-// the flush restarts the timer of the periodic sends, so with a MetricInterval above 5 seconds
-// the final send is the next one.
+// planned stop, such as Cloud Run's SIGTERM, stop other calls to Flush and let running ones
+// finish, then call Flush once, wait 5 seconds and call Shutdown: the flush restarts the timer
+// of the periodic sends, so with a MetricInterval above 5 seconds the final send is the next
+// one.
 //
 // Shutdown is safe to call more than once, for example from a defer and from a signal
 // handler: the first call does the work, and every call returns its result, waiting for it
