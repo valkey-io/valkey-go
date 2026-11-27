@@ -1,7 +1,7 @@
-// Command otel_e2e sends traffic to a Memorystore for Valkey instance through valkeyotel/gcp,
+// Command otel_e2e sends traffic to a Memorystore for Valkey instance through valkeyotelgcp,
 // so valkey-go's metrics show up in Cloud Monitoring and its traces in Cloud Trace. Stop it
 // with Ctrl+C: it sends the last metrics and spans before it exits. Run it from the
-// valkeyotel/gcp/examples directory, a separate Go module:
+// valkeyotelgcp/examples directory, a separate Go module:
 //
 //	MEMORYSTORE_TEST_DISCOVERY_ENDPOINT=10.0.0.15:6379 go run ./otel_e2e
 //
@@ -12,7 +12,7 @@
 //   - VALKEYOTEL_GCP_TRACE_RATIO: the share of new traces sampled, for example 0.1 (default
 //     0.01); negative turns tracing off.
 //
-// valkeyotel/gcp also reads the standard OpenTelemetry variables, for example:
+// valkeyotelgcp also reads the standard OpenTelemetry variables, for example:
 //   - OTEL_SERVICE_NAME: the service name, the job label (default valkeyotel-gcp-e2e).
 //   - OTEL_RESOURCE_ATTRIBUTES=service.instance.id=copy-a: a fixed ID for this copy. Starting
 //     two copies with the same ID is the control case of the two-copies test: their points
@@ -46,7 +46,7 @@ import (
 	"time"
 
 	"github.com/valkey-io/valkey-go"
-	"github.com/valkey-io/valkey-go/valkeyotel/gcp"
+	"github.com/valkey-io/valkey-go/valkeyotelgcp"
 )
 
 func main() {
@@ -60,7 +60,7 @@ func run() error {
 	if endpoint == "" {
 		return fmt.Errorf("MEMORYSTORE_TEST_DISCOVERY_ENDPOINT must be set (e.g. 10.0.0.15:6379)")
 	}
-	opt := gcp.Options{MemorystoreInstance: os.Getenv("VALKEYOTEL_GCP_INSTANCE")}
+	opt := valkeyotelgcp.Options{MemorystoreInstance: os.Getenv("VALKEYOTEL_GCP_INSTANCE")}
 	if os.Getenv("OTEL_SERVICE_NAME") == "" {
 		opt.ServiceName = "valkeyotel-gcp-e2e" // otherwise Setup reads OTEL_SERVICE_NAME
 	}
@@ -80,7 +80,7 @@ func run() error {
 	}
 
 	ctx := context.Background()
-	tel, err := gcp.Setup(ctx, opt)
+	tel, err := valkeyotelgcp.Setup(ctx, opt)
 	if err != nil {
 		return fmt.Errorf("telemetry setup failed: %w", err)
 	}

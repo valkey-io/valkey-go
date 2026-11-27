@@ -1,4 +1,4 @@
-package gcp
+package valkeyotelgcp
 
 import (
 	"crypto/rand"
@@ -79,7 +79,7 @@ func chooseInstanceID(explicit string, res *resource.Resource) string {
 	}
 	generatedIDMu.Unlock()
 	if unknown { // once, when the ID is generated; outside the lock, as the handler is the application's
-		otel.Handle(fmt.Errorf("valkeyotel/gcp: couldn't find a host name for service.instance.id; using %q. Set Options.ServiceInstanceID or service.instance.id in OTEL_RESOURCE_ATTRIBUTES to choose one", id))
+		otel.Handle(fmt.Errorf("valkeyotelgcp: couldn't find a host name for service.instance.id; using %q. Set Options.ServiceInstanceID or service.instance.id in OTEL_RESOURCE_ATTRIBUTES to choose one", id))
 	}
 	return id
 }

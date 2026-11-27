@@ -1,12 +1,12 @@
-// Package gcp sends valkeyotel's metrics to Cloud Monitoring and its traces to Cloud Trace,
-// with defaults that suit Memorystore for Valkey.
+// Package valkeyotelgcp sends valkeyotel's metrics to Cloud Monitoring and its traces to Cloud
+// Trace, with defaults that suit Memorystore for Valkey.
 //
 // It uses the standard OpenTelemetry OTLP exporters with Google Cloud's OTLP endpoint, the
 // Telemetry API, and Application Default Credentials. Setup creates the meter and tracer
 // providers once per process. Its clients come from Telemetry.NewClient, or from
 // valkeyotel.NewClient with Telemetry.ClientOptions:
 //
-//	tel, err := gcp.Setup(ctx, gcp.Options{
+//	tel, err := valkeyotelgcp.Setup(ctx, valkeyotelgcp.Options{
 //		ServiceName:         "checkout",
 //		MemorystoreInstance: "my-instance",
 //	})
@@ -30,9 +30,9 @@
 // valkey_do_cache_hits. Cloud Monitoring stores them in Google Cloud Managed Service for
 // Prometheus, as prometheus.googleapis.com/<name>/<kind>, so PromQL can query them.
 //
-// The package lives in the valkeyotel module, but valkeyotel doesn't import it: applications
-// that don't import it don't link its exporters.
-package gcp
+// It is a module of its own, next to valkeyotel, so applications that use only valkeyotel
+// don't get its dependencies, such as gRPC, the OTLP exporters and the GCP resource detector.
+package valkeyotelgcp
 
 import (
 	"cmp"
@@ -271,7 +271,7 @@ func Setup(ctx context.Context, opt Options) (*Telemetry, error) {
 			return nil, err
 		}
 		if interval := cmp.Or(opt.MetricInterval, envMetricInterval()); metricTarget.google && interval > 0 && interval < MinMetricInterval {
-			return nil, fmt.Errorf("valkeyotel/gcp: metric interval %v is shorter than %v, the shortest interval Cloud Monitoring accepts", interval, MinMetricInterval)
+			return nil, fmt.Errorf("valkeyotelgcp: metric interval %v is shorter than %v, the shortest interval Cloud Monitoring accepts", interval, MinMetricInterval)
 		}
 	}
 	if sendTraces {
@@ -288,7 +288,7 @@ func Setup(ctx context.Context, opt Options) (*Telemetry, error) {
 		// The credentials refresh their tokens for the life of the process, so they must not
 		// inherit ctx's cancellation.
 		if creds, err = findCredentials(context.WithoutCancel(ctx)); err != nil {
-			return nil, fmt.Errorf("valkeyotel/gcp: Application Default Credentials not found: %w", err)
+			return nil, fmt.Errorf("valkeyotelgcp: Application Default Credentials not found: %w", err)
 		}
 		credsProject = creds.ProjectID
 	}
@@ -299,7 +299,7 @@ func Setup(ctx context.Context, opt Options) (*Telemetry, error) {
 		res, t.instanceID = buildResource(ctx, opt, credsProject)
 	}
 	if toGoogle && stringAttr(res, projectAttribute) == "" {
-		return nil, errors.New("valkeyotel/gcp: no project: set Options.ProjectID, GOOGLE_CLOUD_PROJECT or gcp.project_id in OTEL_RESOURCE_ATTRIBUTES, or use credentials that name a project")
+		return nil, errors.New("valkeyotelgcp: no project: set Options.ProjectID, GOOGLE_CLOUD_PROJECT or gcp.project_id in OTEL_RESOURCE_ATTRIBUTES, or use credentials that name a project")
 	}
 	if sendMetrics && metricTarget.google {
 		warnIfNoLocation(res)
@@ -313,7 +313,7 @@ func Setup(ctx context.Context, opt Options) (*Telemetry, error) {
 	default:
 		exporter, err := newMetricExporter(ctx, metricTarget, creds)
 		if err != nil {
-			return nil, fmt.Errorf("valkeyotel/gcp: metric exporter: %w", err)
+			return nil, fmt.Errorf("valkeyotelgcp: metric exporter: %w", err)
 		}
 		var readerOpts []sdkmetric.PeriodicReaderOption
 		if opt.MetricInterval > 0 { // otherwise the reader reads OTEL_METRIC_EXPORT_INTERVAL
@@ -335,7 +335,7 @@ func Setup(ctx context.Context, opt Options) (*Telemetry, error) {
 		exporter, err := newSpanExporter(ctx, traceTarget, creds)
 		if err != nil {
 			_ = t.Shutdown(ctx)
-			return nil, fmt.Errorf("valkeyotel/gcp: trace exporter: %w", err)
+			return nil, fmt.Errorf("valkeyotelgcp: trace exporter: %w", err)
 		}
 		tpOpts := []sdktrace.TracerProviderOption{sdktrace.WithResource(res), sdktrace.WithBatcher(exporter)}
 		if s := sampler(opt.TraceSampleRatio); s != nil { // otherwise OTEL_TRACES_SAMPLER decides
@@ -374,7 +374,7 @@ func exporterOff(sig signal) (bool, error) {
 	case "none":
 		return true, nil
 	default:
-		return false, fmt.Errorf("valkeyotel/gcp: %s=%q: Setup sends only OTLP; want otlp or none", name, v)
+		return false, fmt.Errorf("valkeyotelgcp: %s=%q: Setup sends only OTLP; want otlp or none", name, v)
 	}
 }
 
@@ -406,14 +406,14 @@ func normalize(opt Options) (Options, error) {
 		opt.MetricInterval = 0
 	}
 	if opt.TraceSampleRatio > 1 || math.IsNaN(opt.TraceSampleRatio) {
-		return Options{}, fmt.Errorf("valkeyotel/gcp: TraceSampleRatio %v is not between 0 and 1", opt.TraceSampleRatio)
+		return Options{}, fmt.Errorf("valkeyotelgcp: TraceSampleRatio %v is not between 0 and 1", opt.TraceSampleRatio)
 	}
 	if len(opt.LatencyBuckets) == 0 {
 		opt.LatencyBuckets = defaultLatencyBuckets
 	}
 	for i, b := range opt.LatencyBuckets {
 		if math.IsNaN(b) || math.IsInf(b, 0) || (i > 0 && b <= opt.LatencyBuckets[i-1]) {
-			return Options{}, errors.New("valkeyotel/gcp: LatencyBuckets must be finite and strictly increasing")
+			return Options{}, errors.New("valkeyotelgcp: LatencyBuckets must be finite and strictly increasing")
 		}
 	}
 	// Later changes to the caller's slices don't matter.
@@ -430,7 +430,7 @@ func normalize(opt Options) (Options, error) {
 		opt.GoogleCredentials = mode
 	case CredentialsAuto, CredentialsOn, CredentialsOff:
 	default:
-		return Options{}, fmt.Errorf("valkeyotel/gcp: unknown GoogleCredentials %d", opt.GoogleCredentials)
+		return Options{}, fmt.Errorf("valkeyotelgcp: unknown GoogleCredentials %d", opt.GoogleCredentials)
 	}
 	return opt, nil
 }
@@ -520,7 +520,7 @@ func lastValueWins(attrs []attribute.KeyValue) []attribute.KeyValue {
 // tell the copies of the application apart and file the data under the right project and
 // location:
 //
-//	mp := sdkmetric.NewMeterProvider(sdkmetric.WithResource(gcp.NewResource(ctx, opt)), ...)
+//	mp := sdkmetric.NewMeterProvider(sdkmetric.WithResource(valkeyotelgcp.NewResource(ctx, opt)), ...)
 //
 // Unless Options, ResourceAttributes or OTEL_RESOURCE_ATTRIBUTES set service.instance.id, the
 // generated one is the same for every NewResource and Setup call in the process. So an
@@ -553,11 +553,11 @@ func NewResource(ctx context.Context, opt Options) *resource.Resource {
 func buildResource(ctx context.Context, opt Options, credsProject string) (*resource.Resource, string) {
 	detected, err := resource.New(ctx, resource.WithDetectors(detectors()...), resource.WithTelemetrySDK())
 	if err != nil && !onlySchemaConflicts(err) {
-		otel.Handle(fmt.Errorf("valkeyotel/gcp: resource detection: %w", err))
+		otel.Handle(fmt.Errorf("valkeyotelgcp: resource detection: %w", err))
 	}
 	fromEnv, err := resource.New(ctx, resource.WithFromEnv())
 	if err != nil && !onlySchemaConflicts(err) {
-		otel.Handle(fmt.Errorf("valkeyotel/gcp: OTEL_RESOURCE_ATTRIBUTES: %w", err))
+		otel.Handle(fmt.Errorf("valkeyotelgcp: OTEL_RESOURCE_ATTRIBUTES: %w", err))
 	}
 	defaults := []attribute.KeyValue{attribute.String("service.name", "unknown_service:"+filepath.Base(os.Args[0]))}
 	if project := cmp.Or(strings.TrimSpace(os.Getenv(projectEnv)), credsProject); project != "" {
@@ -584,7 +584,7 @@ func mergeResources(layers ...*resource.Resource) *resource.Resource {
 	for _, layer := range layers {
 		var err error
 		if res, err = resource.Merge(res, layer); err != nil && !onlySchemaConflicts(err) {
-			otel.Handle(fmt.Errorf("valkeyotel/gcp: resource: %w", err))
+			otel.Handle(fmt.Errorf("valkeyotelgcp: resource: %w", err))
 		}
 	}
 	return res
@@ -626,7 +626,7 @@ func warnIfNoLocation(res *resource.Resource) {
 			return
 		}
 	}
-	otel.Handle(errors.New("valkeyotel/gcp: no location (cloud.region or cloud.availability_zone) was detected, and Google Cloud rejects metric points without one; outside Google Cloud, set it, for example OTEL_RESOURCE_ATTRIBUTES=cloud.region=us-east1"))
+	otel.Handle(errors.New("valkeyotelgcp: no location (cloud.region or cloud.availability_zone) was detected, and Google Cloud rejects metric points without one; outside Google Cloud, set it, for example OTEL_RESOURCE_ATTRIBUTES=cloud.region=us-east1"))
 }
 
 // ClientOptions returns the valkeyotel options that send a client's telemetry through t: the

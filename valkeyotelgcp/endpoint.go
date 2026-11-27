@@ -1,4 +1,4 @@
-package gcp
+package valkeyotelgcp
 
 import (
 	"context"
@@ -78,7 +78,7 @@ func credentialsFromEnv() (CredentialsMode, error) {
 	case "off":
 		return CredentialsOff, nil
 	default:
-		return 0, fmt.Errorf("valkeyotel/gcp: %s=%q: want auto, on or off", CredentialsEnv, v)
+		return 0, fmt.Errorf("valkeyotelgcp: %s=%q: want auto, on or off", CredentialsEnv, v)
 	}
 }
 
@@ -128,7 +128,7 @@ func resolveTarget(endpoint string, sig signal, mode CredentialsMode) (target, e
 	}
 	u, err := url.Parse(t.url)
 	if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		return target{}, fmt.Errorf("valkeyotel/gcp: the endpoint (%s) isn't host:port or an http:// or https:// URL", setting)
+		return target{}, fmt.Errorf("valkeyotelgcp: the endpoint (%s) isn't host:port or an http:// or https:// URL", setting)
 	}
 	t.host, t.insecure = u.Hostname(), u.Scheme == "http"
 
@@ -137,7 +137,7 @@ func resolveTarget(endpoint string, sig signal, mode CredentialsMode) (target, e
 	switch mode {
 	case CredentialsOn:
 		if t.insecure {
-			return target{}, fmt.Errorf("valkeyotel/gcp: Google credentials need TLS, but the endpoint (%s) is plaintext", setting)
+			return target{}, fmt.Errorf("valkeyotelgcp: Google credentials need TLS, but the endpoint (%s) is plaintext", setting)
 		}
 		t.google, t.credentials = true, true
 		if !google {
@@ -147,7 +147,7 @@ func resolveTarget(endpoint string, sig signal, mode CredentialsMode) (target, e
 	default: // CredentialsAuto
 		if google && t.insecure {
 			// Google accepts only TLS: every send would fail, so say so now.
-			return target{}, fmt.Errorf("valkeyotel/gcp: the endpoint (%s) is a Google API host but plaintext; Google needs TLS (use https://, or unset OTEL_EXPORTER_OTLP_INSECURE and OTEL_EXPORTER_OTLP_%s_INSECURE)", setting, sig)
+			return target{}, fmt.Errorf("valkeyotelgcp: the endpoint (%s) is a Google API host but plaintext; Google needs TLS (use https://, or unset OTEL_EXPORTER_OTLP_INSECURE and OTEL_EXPORTER_OTLP_%s_INSECURE)", setting, sig)
 		}
 		t.credentials = google
 	}
@@ -180,7 +180,7 @@ func checkProtocol(sig signal) error {
 		v = strings.TrimSpace(os.Getenv(name))
 	}
 	if v != "" && !strings.EqualFold(v, "grpc") {
-		return fmt.Errorf("valkeyotel/gcp: %s=%q: Setup sends OTLP over gRPC only; want grpc", name, v)
+		return fmt.Errorf("valkeyotelgcp: %s=%q: Setup sends OTLP over gRPC only; want grpc", name, v)
 	}
 	return nil
 }

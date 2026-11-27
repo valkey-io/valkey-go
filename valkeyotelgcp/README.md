@@ -1,6 +1,6 @@
-# valkeyotel/gcp: valkey-go telemetry in Google Cloud
+# valkeyotelgcp: valkey-go telemetry in Google Cloud
 
-Package `gcp` sends [`valkeyotel`](..)'s metrics to **Cloud Monitoring** and its traces to **Cloud Trace**, with defaults that suit Memorystore for Valkey. One call at startup wires it up.
+Package `valkeyotelgcp` sends [`valkeyotel`](../valkeyotel)'s metrics to **Cloud Monitoring** and its traces to **Cloud Trace**, with defaults that suit Memorystore for Valkey. One call at startup wires it up.
 
 It uses the standard OpenTelemetry OTLP exporters and Google Cloud's OTLP endpoint, the [Telemetry API](https://cloud.google.com/stackdriver/docs/reference/telemetry/overview) (`telemetry.googleapis.com`). Google's older Go exporters for Cloud Monitoring and Cloud Trace are deprecated.
 
@@ -9,9 +9,9 @@ It uses the standard OpenTelemetry OTLP exporters and Google Cloud's OTLP endpoi
 ## Quickstart
 
 ```go
-import "github.com/valkey-io/valkey-go/valkeyotel/gcp"
+import "github.com/valkey-io/valkey-go/valkeyotelgcp"
 
-tel, err := gcp.Setup(ctx, gcp.Options{
+tel, err := valkeyotelgcp.Setup(ctx, valkeyotelgcp.Options{
 	ServiceName:         "checkout",    // the application: the job label, and the service in Cloud Trace
 	MemorystoreInstance: "my-instance", // optional: the valkey.instance label on every metric and span
 })
@@ -66,10 +66,10 @@ Google credentials follow the endpoint that's actually used, wherever it was set
 | `telemetry.googleapis.com:443`, the default | Attached |
 | A regional endpoint, `telemetry.REGION.rep.googleapis.com:443` | Attached. It stores only the metric points whose location is in its region |
 | Private Service Connect, `telemetry-ENDPOINT.p.googleapis.com:443` | Attached |
-| Private Service Connect behind a custom DNS name | Not attached, so a Google token never goes to a host that may not be Google's. Set `GoogleCredentials: gcp.CredentialsOn` or `VALKEYOTEL_GCP_CREDENTIALS=on`: the token is attached, and `telemetry.googleapis.com` is sent as the TLS server name and `:authority`, as Google requires |
+| Private Service Connect behind a custom DNS name | Not attached, so a Google token never goes to a host that may not be Google's. Set `GoogleCredentials: valkeyotelgcp.CredentialsOn` or `VALKEYOTEL_GCP_CREDENTIALS=on`: the token is attached, and `telemetry.googleapis.com` is sent as the TLS server name and `:authority`, as Google requires |
 | A local OpenTelemetry Collector, such as `http://localhost:4317` | Not attached: the collector authenticates to Google itself |
 
-A URL uses TLS with `https://` and plaintext with `http://`. A `host:port` endpoint uses TLS, unless `OTEL_EXPORTER_OTLP_INSECURE=true`. Credentials are never sent in plaintext. A plaintext Google endpoint, such as `http://telemetry.googleapis.com:443` or the default with `OTEL_EXPORTER_OTLP_INSECURE=true` left over from a collector setup, is an error, because Google accepts only TLS; `GoogleCredentials: gcp.CredentialsOff` allows it. Setup looks up the credentials and the project only when it attaches credentials, so an application that sends to a collector needs neither.
+A URL uses TLS with `https://` and plaintext with `http://`. A `host:port` endpoint uses TLS, unless `OTEL_EXPORTER_OTLP_INSECURE=true`. Credentials are never sent in plaintext. A plaintext Google endpoint, such as `http://telemetry.googleapis.com:443` or the default with `OTEL_EXPORTER_OTLP_INSECURE=true` left over from a collector setup, is an error, because Google accepts only TLS; `GoogleCredentials: valkeyotelgcp.CredentialsOff` allows it. Setup looks up the credentials and the project only when it attaches credentials, so an application that sends to a collector needs neither.
 
 **Project and quota project.** Service accounts, as on Compute Engine, GKE and Cloud Run, need nothing more. User credentials (`gcloud auth application-default login`), for example on a laptop, name no project: set `GOOGLE_CLOUD_PROJECT` (or `Options.ProjectID`). They also need a quota project: set `GOOGLE_CLOUD_QUOTA_PROJECT`, or run `gcloud auth application-default set-quota-project PROJECT_ID`. Setup sends it in the `x-goog-user-project` header, unless `OTEL_EXPORTER_OTLP_HEADERS` already does: Google rejects requests that carry it twice.
 
@@ -87,20 +87,20 @@ Google Cloud labels each time series with `instance`, taken from `service.instan
 
    Without any of them, or with only `localhost`, the host is `unknown` and Setup logs a warning.
 
-The generated ID is unique per process, even for processes that share a host and a PID, as containers running as PID 1 do. It stays the same while the process runs, and a restarted process gets a new one; an application that needs a stable ID sets 1 or 2. `gcp.NewResource` generates the same ID as Setup in one process, so metrics and spans agree when the application builds one of the providers itself. For the same reason, a second `Setup` in one process that sends the same metrics, with the same service name, needs its own `ServiceInstanceID`. `tel.ServiceInstanceID()` returns the ID, so it can be logged.
+The generated ID is unique per process, even for processes that share a host and a PID, as containers running as PID 1 do. It stays the same while the process runs, and a restarted process gets a new one; an application that needs a stable ID sets 1 or 2. `valkeyotelgcp.NewResource` generates the same ID as Setup in one process, so metrics and spans agree when the application builds one of the providers itself. For the same reason, a second `Setup` in one process that sends the same metrics, with the same service name, needs its own `ServiceInstanceID`. `tel.ServiceInstanceID()` returns the ID, so it can be logged.
 
 ## Applications that already use OpenTelemetry
 
 - Setup changes nothing global: no global providers and no propagator. With `SetGlobal: true`, it installs the providers it created, and never the application's own.
 - To use the application's own providers, pass them in `Options`. Setup then creates no exporters, and `tel.Shutdown` leaves those providers running. valkey-go's metrics still get the latency buckets and the command and instance labels.
-- The application is then responsible for its providers' resource: Google Cloud needs `service.instance.id` and the location. `gcp.NewResource` returns the resource that Setup would use, so that's one line:
+- The application is then responsible for its providers' resource: Google Cloud needs `service.instance.id` and the location. `valkeyotelgcp.NewResource` returns the resource that Setup would use, so that's one line:
 
 ```go
-res := gcp.NewResource(ctx, gcp.Options{ServiceName: "checkout"})
+res := valkeyotelgcp.NewResource(ctx, valkeyotelgcp.Options{ServiceName: "checkout"})
 mp := sdkmetric.NewMeterProvider(sdkmetric.WithResource(res), sdkmetric.WithReader(reader))
 tp := sdktrace.NewTracerProvider(sdktrace.WithResource(res), sdktrace.WithBatcher(exporter))
 
-tel, err := gcp.Setup(ctx, gcp.Options{MeterProvider: mp, TracerProvider: tp, MemorystoreInstance: "my-instance"})
+tel, err := valkeyotelgcp.Setup(ctx, valkeyotelgcp.Options{MeterProvider: mp, TracerProvider: tp, MemorystoreInstance: "my-instance"})
 ```
 
 `NewResource` and `Setup` generate the same `service.instance.id` in one process, so the providers the application builds and the ones Setup creates agree.
@@ -163,10 +163,12 @@ Metrics are billed at Managed Service for Prometheus rates, per sample: a histog
 
 ## Testing
 
+From the `valkeyotelgcp` directory:
+
 ```bash
-go test -race ./gcp/...
+go test -race ./...
 ```
 
-The unit tests replace Google Cloud with in-memory exporters and a local OTLP server. `TestTelemetry_LiveClient` also needs a local Valkey without a password at `127.0.0.1:6379` (or `VALKEYOTEL_GCP_TEST_ADDR`), and is skipped without one.
+The unit tests replace Google Cloud with in-memory exporters and a local OTLP server. `TestTelemetry_LiveClient` also needs a local Valkey without a password at `127.0.0.1:6379`, and is skipped without one; with `VALKEYOTEL_GCP_TEST_ADDR` set, it uses that address instead, and fails if it can't connect.
 
-`otel_e2e` sends traffic to a real instance, so the metrics and traces show up in the Console; its package comment lists the settings. It lives in `gcp/examples`, a separate Go module, so it isn't part of the `valkeyotel` module: run it from that directory with `go run ./otel_e2e`. To check the per-copy ID, run two copies on the same machine: both must appear, with different `instance` values. As a control, start both with `OTEL_RESOURCE_ATTRIBUTES=service.instance.id=same`: their points collide.
+`otel_e2e` sends traffic to a real instance, so the metrics and traces show up in the Console; its package comment lists the settings. It lives in `examples`, a separate Go module, so it isn't part of the `valkeyotelgcp` module: run it from that directory with `go run ./otel_e2e`. To check the per-copy ID, run two copies on the same machine: both must appear, with different `instance` values. As a control, start both with `OTEL_RESOURCE_ATTRIBUTES=service.instance.id=same`: their points collide.

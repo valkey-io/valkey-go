@@ -1,15 +1,16 @@
-module github.com/valkey-io/valkey-go/valkeyotel/gcp/examples
+module github.com/valkey-io/valkey-go/valkeyotelgcp/examples
 
 go 1.26.0
 
 replace (
-	github.com/valkey-io/valkey-go => ../../../
-	github.com/valkey-io/valkey-go/valkeyotel => ../../
+	github.com/valkey-io/valkey-go => ../../
+	github.com/valkey-io/valkey-go/valkeyotel => ../../valkeyotel
+	github.com/valkey-io/valkey-go/valkeyotelgcp => ../
 )
 
 require (
 	github.com/valkey-io/valkey-go v1.0.80
-	github.com/valkey-io/valkey-go/valkeyotel v1.0.80
+	github.com/valkey-io/valkey-go/valkeyotelgcp v1.0.80
 )
 
 require (
@@ -20,6 +21,7 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
+	github.com/valkey-io/valkey-go/valkeyotel v1.0.80 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/detectors/gcp v1.47.0 // indirect
 	go.opentelemetry.io/otel v1.47.0 // indirect
