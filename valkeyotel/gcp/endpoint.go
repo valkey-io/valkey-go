@@ -1,7 +1,6 @@
 package gcp
 
 import (
-	"cmp"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -10,7 +9,6 @@ import (
 	"maps"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
@@ -20,6 +18,7 @@ import (
 	"golang.org/x/oauth2/google"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/credentials/oauth"
 )
 
@@ -108,32 +107,28 @@ type target struct {
 // the first one set of: Options.Endpoint, OTEL_EXPORTER_OTLP_<SIGNAL>_ENDPOINT,
 // OTEL_EXPORTER_OTLP_ENDPOINT and TelemetryEndpoint. A URL's scheme decides TLS (https) or
 // plaintext (http); a host:port endpoint uses TLS unless OTEL_EXPORTER_OTLP_<SIGNAL>_INSECURE
-// or OTEL_EXPORTER_OTLP_INSECURE says otherwise, as the OTLP exporters do. Google credentials
-// then follow mode (see CredentialsMode), whichever place the endpoint came from. The
-// exporters send OTLP over gRPC, so a protocol other than grpc in the environment is an
-// error, and so is a plaintext Google endpoint with CredentialsAuto or CredentialsOn.
+// or OTEL_EXPORTER_OTLP_INSECURE is true (see envInsecure). Google credentials then follow
+// mode (see CredentialsMode), whichever place the endpoint came from. The exporters send OTLP
+// over gRPC, so a protocol other than grpc in the environment is an error, and so is a
+// plaintext Google endpoint with CredentialsAuto or CredentialsOn. The errors name the setting
+// that holds the endpoint rather than print it, since a URL can carry a password.
 func resolveTarget(endpoint string, sig signal, mode CredentialsMode) (target, error) {
 	if err := checkProtocol(sig); err != nil {
 		return target{}, err
 	}
-	raw := cmp.Or(
-		strings.TrimSpace(endpoint),
-		strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_"+string(sig)+"_ENDPOINT")),
-		strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")),
-		TelemetryEndpoint,
-	)
+	raw, setting := endpointSetting(endpoint, sig)
 	t := target{sig: sig, endpoint: raw, url: raw}
 	if !strings.Contains(raw, "://") {
 		// The exporter is given a URL for host:port too. Its scheme sets TLS explicitly, so
 		// the scheme of an OTEL_EXPORTER_OTLP_*ENDPOINT that raw replaced can't turn TLS off.
 		t.url = "https://" + raw
-		if envBool("OTEL_EXPORTER_OTLP_"+string(sig)+"_INSECURE", envBool("OTEL_EXPORTER_OTLP_INSECURE", false)) {
+		if envInsecure(sig) {
 			t.url = "http://" + raw
 		}
 	}
 	u, err := url.Parse(t.url)
 	if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		return target{}, fmt.Errorf("valkeyotel/gcp: endpoint %q: want host:port, or an http:// or https:// URL", raw)
+		return target{}, fmt.Errorf("valkeyotel/gcp: the endpoint (%s) isn't host:port or an http:// or https:// URL", setting)
 	}
 	t.host, t.insecure = u.Hostname(), u.Scheme == "http"
 
@@ -142,7 +137,7 @@ func resolveTarget(endpoint string, sig signal, mode CredentialsMode) (target, e
 	switch mode {
 	case CredentialsOn:
 		if t.insecure {
-			return target{}, fmt.Errorf("valkeyotel/gcp: Google credentials need TLS, but endpoint %q is plaintext", raw)
+			return target{}, fmt.Errorf("valkeyotel/gcp: Google credentials need TLS, but the endpoint (%s) is plaintext", setting)
 		}
 		t.google, t.credentials = true, true
 		if !google {
@@ -152,11 +147,26 @@ func resolveTarget(endpoint string, sig signal, mode CredentialsMode) (target, e
 	default: // CredentialsAuto
 		if google && t.insecure {
 			// Google accepts only TLS: every send would fail, so say so now.
-			return target{}, fmt.Errorf("valkeyotel/gcp: endpoint %q is a Google API host but plaintext; Google needs TLS (use https://, or unset OTEL_EXPORTER_OTLP_INSECURE and OTEL_EXPORTER_OTLP_%s_INSECURE)", raw, sig)
+			return target{}, fmt.Errorf("valkeyotel/gcp: the endpoint (%s) is a Google API host but plaintext; Google needs TLS (use https://, or unset OTEL_EXPORTER_OTLP_INSECURE and OTEL_EXPORTER_OTLP_%s_INSECURE)", setting, sig)
 		}
 		t.credentials = google
 	}
 	return t, nil
+}
+
+// endpointSetting returns the endpoint of sig, and the name of the setting it comes from: the
+// first one set of Options.Endpoint, OTEL_EXPORTER_OTLP_<SIGNAL>_ENDPOINT and
+// OTEL_EXPORTER_OTLP_ENDPOINT, else TelemetryEndpoint.
+func endpointSetting(endpoint string, sig signal) (value, setting string) {
+	if v := strings.TrimSpace(endpoint); v != "" {
+		return v, "Options.Endpoint"
+	}
+	for _, name := range []string{"OTEL_EXPORTER_OTLP_" + string(sig) + "_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT"} {
+		if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+			return v, name
+		}
+	}
+	return TelemetryEndpoint, "TelemetryEndpoint, the default"
 }
 
 // checkProtocol returns an error when OTEL_EXPORTER_OTLP_<SIGNAL>_PROTOCOL, or else
@@ -175,19 +185,27 @@ func checkProtocol(sig signal) error {
 	return nil
 }
 
-// envBool reads a boolean environment variable, or returns def when it is unset or invalid.
-func envBool(name string, def bool) bool {
-	if b, err := strconv.ParseBool(strings.TrimSpace(os.Getenv(name))); err == nil {
-		return b
+// envInsecure reports whether OTEL_EXPORTER_OTLP_<SIGNAL>_INSECURE, or else
+// OTEL_EXPORTER_OTLP_INSECURE, asks for plaintext. It reads them as the OTLP exporters do: a
+// per-signal value that is set wins, whatever it is, and only "true", in any case, is true.
+func envInsecure(sig signal) bool {
+	v := strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_" + string(sig) + "_INSECURE"))
+	if v == "" {
+		v = strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_INSECURE"))
 	}
-	return def
+	return strings.EqualFold(v, "true")
 }
 
 // newMetricExporter creates the OTLP exporter that sends metrics to t. It is a variable so
 // tests can replace Google Cloud.
 var newMetricExporter = func(ctx context.Context, t target, creds *google.Credentials) (sdkmetric.Exporter, error) {
 	opts := []otlpmetricgrpc.Option{otlpmetricgrpc.WithEndpointURL(t.url)}
-	if t.serverName != "" {
+	switch {
+	case t.insecure:
+		// Plaintext, as the http:// URL says. Without this, OTEL_EXPORTER_OTLP_CERTIFICATE
+		// would make the exporter use TLS anyway.
+		opts = append(opts, otlpmetricgrpc.WithTLSCredentials(insecure.NewCredentials()))
+	case t.serverName != "":
 		opts = append(opts, otlpmetricgrpc.WithTLSCredentials(serverNameTLS(t.serverName)))
 	}
 	if t.credentials && creds != nil {
@@ -200,7 +218,10 @@ var newMetricExporter = func(ctx context.Context, t target, creds *google.Creden
 // can replace Google Cloud.
 var newSpanExporter = func(ctx context.Context, t target, creds *google.Credentials) (sdktrace.SpanExporter, error) {
 	opts := []otlptracegrpc.Option{otlptracegrpc.WithEndpointURL(t.url)}
-	if t.serverName != "" {
+	switch {
+	case t.insecure: // plaintext, also with OTEL_EXPORTER_OTLP_CERTIFICATE (see newMetricExporter)
+		opts = append(opts, otlptracegrpc.WithTLSCredentials(insecure.NewCredentials()))
+	case t.serverName != "":
 		opts = append(opts, otlptracegrpc.WithTLSCredentials(serverNameTLS(t.serverName)))
 	}
 	if t.credentials && creds != nil {
@@ -267,14 +288,19 @@ func quotaProject(creds *google.Credentials) string {
 
 // envHeader reports whether the headers that the exporter of sig reads from the environment
 // include name: those of OTEL_EXPORTER_OTLP_<SIGNAL>_HEADERS, which replace those of
-// OTEL_EXPORTER_OTLP_HEADERS.
+// OTEL_EXPORTER_OTLP_HEADERS. A header whose value doesn't URL-decode doesn't count: the
+// exporter drops it.
 func envHeader(sig signal, name string) bool {
 	headers := strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_" + string(sig) + "_HEADERS"))
 	if headers == "" {
 		headers = os.Getenv("OTEL_EXPORTER_OTLP_HEADERS")
 	}
 	for _, pair := range strings.Split(headers, ",") {
-		if key, _, ok := strings.Cut(pair, "="); ok && strings.EqualFold(strings.TrimSpace(key), name) {
+		key, value, ok := strings.Cut(pair, "=")
+		if !ok || !strings.EqualFold(strings.TrimSpace(key), name) {
+			continue
+		}
+		if _, err := url.PathUnescape(value); err == nil {
 			return true
 		}
 	}

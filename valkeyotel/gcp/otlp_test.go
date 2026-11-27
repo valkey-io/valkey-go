@@ -8,8 +8,11 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/pem"
 	"math/big"
 	"net"
+	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -282,6 +285,27 @@ func TestOTLP_HostPortMeansTLS(t *testing.T) {
 			t.Error("no plaintext request arrived")
 		}
 	})
+}
+
+// TestOTLP_PlaintextURLWithCertificate checks that an http:// endpoint is plaintext, as
+// documented, also when OTEL_EXPORTER_OTLP_CERTIFICATE is set: the exporters would otherwise
+// use TLS with that certificate, whatever the URL says.
+func TestOTLP_PlaintextURLWithCertificate(t *testing.T) {
+	fakeGoogleCloud(t)
+	withRealExporters(t)
+	srv := startOTLPServer(t, nil)
+	pemFile := filepath.Join(t.TempDir(), "ca.pem")
+	cert := googleCertificate(t)
+	if err := os.WriteFile(pemFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Certificate[0]}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OTEL_EXPORTER_OTLP_CERTIFICATE", pemFile)
+	sendOne(t, setup(t, Options{Endpoint: "http://" + srv.addr, TraceSampleRatio: 1}))
+	for _, service := range []string{"metrics", "traces"} {
+		if len(srv.received(service)) == 0 {
+			t.Errorf("no %s request arrived", service)
+		}
+	}
 }
 
 // TestOTLP_LocalCollector sends to a local plaintext collector, chosen with

@@ -22,6 +22,7 @@ func TestResolveTarget(t *testing.T) {
 		want     target // sig and endpoint aren't compared
 		wantErr  bool
 		errHas   string // part of the expected error
+		errLacks string // what the error must not show
 	}{
 		{
 			name: "the Telemetry API by default",
@@ -147,6 +148,26 @@ func TestResolveTarget(t *testing.T) {
 			endpoint: "collector:4317",
 			want:     target{url: "https://collector:4317", host: "collector"},
 		},
+		// INSECURE is read as the exporters read it: only "true", in any case, is true, and a
+		// per-signal value that is set wins, whatever it is.
+		{
+			name:     "INSECURE=1 isn't true",
+			env:      map[string]string{"OTEL_EXPORTER_OTLP_INSECURE": "1"},
+			endpoint: "collector:4317",
+			want:     target{url: "https://collector:4317", host: "collector"},
+		},
+		{
+			name:     "a per-signal INSECURE that isn't true wins, even when it isn't a boolean",
+			env:      map[string]string{"OTEL_EXPORTER_OTLP_INSECURE": "true", "OTEL_EXPORTER_OTLP_METRICS_INSECURE": "yes"},
+			endpoint: "collector:4317",
+			want:     target{url: "https://collector:4317", host: "collector"},
+		},
+		{
+			name:     "TRUE in any case",
+			env:      map[string]string{"OTEL_EXPORTER_OTLP_METRICS_INSECURE": " TRUE "},
+			endpoint: "collector:4317",
+			want:     target{url: "http://collector:4317", host: "collector", insecure: true},
+		},
 		{
 			name:     "an http:// OTEL_EXPORTER_OTLP_ENDPOINT doesn't make Options.Endpoint plaintext",
 			env:      map[string]string{"OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector:4317"},
@@ -156,6 +177,37 @@ func TestResolveTarget(t *testing.T) {
 		{name: "another scheme", endpoint: "ftp://example.com", wantErr: true},
 		{name: "a URL without a host", endpoint: "http://", wantErr: true},
 		{name: "a broken URL", endpoint: "https://exa mple.com:443", wantErr: true},
+		// The errors name the setting, not the endpoint, which can carry a password.
+		{
+			name:     "a broken URL in Options.Endpoint",
+			endpoint: "https://user:secret@exa mple.com:443",
+			wantErr:  true,
+			errHas:   "(Options.Endpoint)",
+			errLacks: "secret",
+		},
+		{
+			name:     "another scheme in OTEL_EXPORTER_OTLP_ENDPOINT",
+			env:      map[string]string{"OTEL_EXPORTER_OTLP_ENDPOINT": "ftp://token@example.com"},
+			wantErr:  true,
+			errHas:   "(OTEL_EXPORTER_OTLP_ENDPOINT)",
+			errLacks: "token",
+		},
+		{
+			name:     "a plaintext Google host in the per-signal variable",
+			env:      map[string]string{"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "http://user:secret@telemetry.googleapis.com:443"},
+			sig:      signalTraces,
+			wantErr:  true,
+			errHas:   "(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)",
+			errLacks: "secret",
+		},
+		{
+			name:     "CredentialsOn over plaintext, from Options.Endpoint",
+			endpoint: "http://user:secret@collector:4317",
+			mode:     CredentialsOn,
+			wantErr:  true,
+			errHas:   "(Options.Endpoint)",
+			errLacks: "secret",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fakeGoogleCloud(t)
@@ -171,6 +223,9 @@ func TestResolveTarget(t *testing.T) {
 				}
 				if !strings.Contains(err.Error(), tc.errHas) {
 					t.Errorf("error %q doesn't say %q", err, tc.errHas)
+				}
+				if tc.errLacks != "" && strings.Contains(err.Error(), tc.errLacks) {
+					t.Errorf("error %q shows %q", err, tc.errLacks)
 				}
 				return
 			}
@@ -232,6 +287,16 @@ func TestEnvHeader(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_HEADERS", "api-key=2")
 	if envHeader(signalTraces, quotaProjectHeader) {
 		t.Error("OTEL_EXPORTER_OTLP_TRACES_HEADERS replaces OTEL_EXPORTER_OTLP_HEADERS, but the header was still found")
+	}
+	// The exporter drops a header whose value doesn't URL-decode, so the credentials' quota
+	// project must still be sent.
+	t.Setenv("OTEL_EXPORTER_OTLP_METRICS_HEADERS", "x-goog-user-project=%zz")
+	if envHeader(signalMetrics, quotaProjectHeader) {
+		t.Error("found a header whose value the exporter drops")
+	}
+	t.Setenv("OTEL_EXPORTER_OTLP_METRICS_HEADERS", "x-goog-user-project=%zz,x-goog-user-project=q%20p")
+	if !envHeader(signalMetrics, quotaProjectHeader) {
+		t.Error("missed the valid header after a dropped one")
 	}
 }
 

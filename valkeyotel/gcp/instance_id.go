@@ -29,22 +29,12 @@ var (
 	}
 )
 
-// The random part of generated IDs, chosen once per process, so that NewResource and Setup
-// generate the same ID. Tests reset it.
+// The generated service.instance.id, chosen once per process, so that every NewResource and
+// Setup call in the process uses the same one. Tests reset it.
 var (
-	processRandomMu sync.Mutex
-	processRandom   string
+	generatedIDMu sync.Mutex
+	generatedID   string
 )
-
-// processRandomHex returns the random part of this process's generated IDs.
-func processRandomHex() string {
-	processRandomMu.Lock()
-	defer processRandomMu.Unlock()
-	if processRandom == "" {
-		processRandom = randomHex()
-	}
-	return processRandom
-}
 
 // chooseInstanceID returns the service.instance.id of this process. res describes the process
 // without Options (see buildResource). The first value found wins:
@@ -59,10 +49,12 @@ func processRandomHex() string {
 //     OpenTelemetry's error handler.
 //
 // The random part keeps the ID unique when processes share a host name and a PID, as the
-// containers of a pod do (each often runs as PID 1). It is chosen once per process, so every
-// NewResource and Setup call in the process generates the same ID, and the metrics and spans
-// of one process agree even when the application creates one of the providers itself. The ID
-// stays the same while the process runs, and a restarted process gets a new one.
+// containers of a pod do (each often runs as PID 1). The whole ID is generated once per
+// process, by the first call that needs one, and every later NewResource and Setup call
+// returns it, even when its environment detection finds another host, as when the metadata
+// server answers one call and not another. So the metrics and spans of one process agree,
+// also when the application creates one of the providers itself. The ID stays the same while
+// the process runs, and a restarted process gets a new one.
 func chooseInstanceID(explicit string, res *resource.Resource) string {
 	if explicit != "" {
 		return explicit
@@ -70,18 +62,23 @@ func chooseInstanceID(explicit string, res *resource.Resource) string {
 	if v := stringAttr(res, serviceInstanceIDKey); v != "" {
 		return v
 	}
-	host := firstNonEmpty(
-		stringAttr(res, "faas.instance"),
-		stringAttr(res, "k8s.pod.name"),
-		stringAttr(res, "gcp.gce.instance.name"),
-		osHostname(),
-	)
-	unknown := host == ""
-	if unknown {
-		host = "unknown"
+	generatedIDMu.Lock()
+	id, unknown := generatedID, false
+	if id == "" {
+		host := firstNonEmpty(
+			stringAttr(res, "faas.instance"),
+			stringAttr(res, "k8s.pod.name"),
+			stringAttr(res, "gcp.gce.instance.name"),
+			osHostname(),
+		)
+		if unknown = host == ""; unknown {
+			host = "unknown"
+		}
+		id = fmt.Sprintf("%s-%d-%s", host, processID(), randomHex())
+		generatedID = id
 	}
-	id := fmt.Sprintf("%s-%d-%s", host, processID(), processRandomHex())
-	if unknown {
+	generatedIDMu.Unlock()
+	if unknown { // once, when the ID is generated; outside the lock, as the handler is the application's
 		otel.Handle(fmt.Errorf("valkeyotel/gcp: couldn't find a host name for service.instance.id; using %q. Set Options.ServiceInstanceID or service.instance.id in OTEL_RESOURCE_ATTRIBUTES to choose one", id))
 	}
 	return id

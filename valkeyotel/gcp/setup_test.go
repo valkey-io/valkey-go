@@ -3,10 +3,17 @@ package gcp
 import (
 	"cmp"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"math"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -132,6 +139,7 @@ var otelEnv = []string{
 	"OTEL_SDK_DISABLED", "OTEL_SERVICE_NAME", "OTEL_RESOURCE_ATTRIBUTES",
 	"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
 	"OTEL_EXPORTER_OTLP_INSECURE", "OTEL_EXPORTER_OTLP_METRICS_INSECURE", "OTEL_EXPORTER_OTLP_TRACES_INSECURE",
+	"OTEL_EXPORTER_OTLP_CERTIFICATE", "OTEL_EXPORTER_OTLP_METRICS_CERTIFICATE", "OTEL_EXPORTER_OTLP_TRACES_CERTIFICATE",
 	"OTEL_EXPORTER_OTLP_HEADERS", "OTEL_EXPORTER_OTLP_METRICS_HEADERS", "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
 	"OTEL_EXPORTER_OTLP_PROTOCOL", "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL", "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL",
 	"OTEL_METRICS_EXPORTER", "OTEL_TRACES_EXPORTER",
@@ -663,7 +671,7 @@ func TestSetup_Tracing(t *testing.T) {
 			}
 			tel := setup(t, Options{})
 			recording := 0
-			for range 1000 {
+			for range 10000 {
 				_, span := tel.TracerProvider().Tracer("test").Start(context.Background(), "GET")
 				if span.IsRecording() {
 					recording++
@@ -671,8 +679,10 @@ func TestSetup_Tracing(t *testing.T) {
 				span.End()
 			}
 			shutdown(t, tel)
-			if recording > 100 { // about 10 expected at 1%
-				t.Errorf("%d of 1000 new traces sampled, want about 1%%", recording)
+			// About 100 expected at 1%. Sampling none or every trace fails; a false failure
+			// would take a deviation of 7 standard deviations.
+			if recording < 30 || recording > 200 {
+				t.Errorf("%d of 10000 new traces sampled, want about 1%%", recording)
 			}
 		})
 	}
@@ -791,7 +801,9 @@ func TestEnvSamplerValid(t *testing.T) {
 		{sampler: "traceidratio", arg: "1.5", hasArg: true, want: false},
 		{sampler: "traceidratio", arg: "-0.1", hasArg: true, want: false},
 		{sampler: "traceidratio", arg: "NaN", hasArg: true, want: false},
-		{sampler: "traceidratio", arg: "", hasArg: true, want: false},
+		// A blank argument counts as unset, as in OpenTelemetry, so the ratio is 1.
+		{sampler: "traceidratio", arg: "", hasArg: true, want: true},
+		{sampler: "parentbased_traceidratio", arg: "  ", hasArg: true, want: true},
 		{sampler: "jaeger_remote", want: false}, // not supported by OpenTelemetry Go
 	} {
 		t.Setenv("OTEL_TRACES_SAMPLER", tc.sampler)
@@ -863,7 +875,9 @@ func TestSetup_MetricInterval(t *testing.T) {
 	t.Run("an invalid OTEL_METRIC_EXPORT_INTERVAL is ignored, as OpenTelemetry ignores it", func(t *testing.T) {
 		fakeGoogleCloud(t)
 		captureErrors(t) // OpenTelemetry reports the invalid variable
-		for _, v := range []string{" 1000", "1s", "-5"} {
+		// The last two are too large for a time.Duration: the first would wrap around to
+		// under a millisecond.
+		for _, v := range []string{" 1000", "1s", "-5", "18446744073710", "9223372036855"} {
 			t.Setenv("OTEL_METRIC_EXPORT_INTERVAL", v)
 			tel, err := Setup(context.Background(), Options{})
 			if err != nil {
@@ -1106,6 +1120,115 @@ func TestTelemetry_FlushLeavesOwnProviders(t *testing.T) {
 	shutdown(t, tel)
 }
 
+// blockingExporter is a metric exporter whose first Export waits for release and then fails.
+type blockingExporter struct {
+	*captureExporter
+	entered, release chan struct{}
+	once             sync.Once
+}
+
+func (e *blockingExporter) Export(ctx context.Context, rm *metricdata.ResourceMetrics) error {
+	first := false
+	e.once.Do(func() { first = true })
+	if !first {
+		return e.captureExporter.Export(ctx, rm)
+	}
+	close(e.entered)
+	<-e.release
+	return errors.New("export failed")
+}
+
+// A Flush whose export fails reports it, even when Shutdown starts meanwhile: only the
+// reader's "shut down" error is left to Shutdown.
+func TestTelemetry_FlushKeepsItsErrorDuringShutdown(t *testing.T) {
+	fakeGoogleCloud(t)
+	exp := &blockingExporter{captureExporter: &captureExporter{}, entered: make(chan struct{}), release: make(chan struct{})}
+	newMetricExporter = func(context.Context, target, *google.Credentials) (sdkmetric.Exporter, error) { return exp, nil }
+	tel := setup(t, Options{MetricInterval: time.Hour, TraceSampleRatio: -1})
+	recordOne(t, tel)
+	ctx := context.Background()
+	flushErr := make(chan error, 1)
+	go func() { flushErr <- tel.Flush(ctx) }()
+	select {
+	case <-exp.entered: // the flush's export is under way
+	case <-time.After(10 * time.Second):
+		t.Fatal("Flush didn't export")
+	}
+	shutdownErr := make(chan error, 1)
+	go func() { shutdownErr <- tel.Shutdown(ctx) }()
+	for !tel.shutDown.Load() {
+		time.Sleep(time.Millisecond)
+	}
+	close(exp.release)
+	if err := <-flushErr; err == nil || !strings.Contains(err.Error(), "export failed") {
+		t.Errorf("Flush: %v, want the export's error", err)
+	}
+	if err := <-shutdownErr; err != nil {
+		t.Errorf("Shutdown: %v", err)
+	}
+}
+
+// realFindCredentials is findCredentials as the package defines it, before tests replace it.
+var realFindCredentials = findCredentials
+
+// A token server that never answers doesn't hold up the exporters for good: each token request
+// of JSON credentials gives up after tokenTimeout.
+func TestFindCredentials_TokenTimeout(t *testing.T) {
+	testDone := make(chan struct{})
+	stalled := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select { // never answers
+		case <-r.Context().Done():
+		case <-testDone:
+		}
+	}))
+	defer stalled.Close()
+	defer close(testDone) // before Close, which waits for the handler
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := json.Marshal(map[string]string{
+		"type":         "service_account",
+		"project_id":   "key-project",
+		"private_key":  string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})),
+		"client_email": "test@key-project.iam.gserviceaccount.com",
+		"token_uri":    stalled.URL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "key.json")
+	if err := os.WriteFile(path, file, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", path)
+	orig := tokenTimeout
+	tokenTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { tokenTimeout = orig })
+
+	creds, err := realFindCredentials(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan error, 1)
+	go func() {
+		_, err := creds.TokenSource.Token()
+		got <- err
+	}()
+	select {
+	case err := <-got:
+		if err == nil {
+			t.Error("got a token from a server that never answers")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the token request didn't give up within 10s")
+	}
+}
+
 func TestSetup_ServiceInstanceID(t *testing.T) {
 	f := fakeGoogleCloud(t)
 	tel := setup(t, Options{})
@@ -1279,7 +1402,8 @@ func TestOptionAttributes(t *testing.T) {
 // and Cloud Trace would receive: the command and instance attributes, extra attributes from
 // Options next to the instance one, the latency buckets, the client-side cache counters and the
 // spans. It needs a local Valkey without a password, at 127.0.0.1:6379 or
-// VALKEYOTEL_GCP_TEST_ADDR, and is skipped without one.
+// VALKEYOTEL_GCP_TEST_ADDR. Without one at 127.0.0.1:6379 it is skipped; an address set in
+// VALKEYOTEL_GCP_TEST_ADDR that can't be used fails it.
 func TestTelemetry_LiveClient(t *testing.T) {
 	addr := cmp.Or(os.Getenv("VALKEYOTEL_GCP_TEST_ADDR"), "127.0.0.1:6379")
 	f := fakeGoogleCloud(t)
@@ -1298,11 +1422,15 @@ func TestTelemetry_LiveClient(t *testing.T) {
 	})
 	if err != nil {
 		_ = tel.Shutdown(context.Background())
+		if os.Getenv("VALKEYOTEL_GCP_TEST_ADDR") != "" {
+			t.Fatalf("VALKEYOTEL_GCP_TEST_ADDR=%s: %v", addr, err)
+		}
 		t.Skipf("no local Valkey without a password at %s: %v", addr, err)
 	}
 	ctx := context.Background()
-	const key = "valkeyotel-gcp:test"
-	if err := client.Do(ctx, client.B().Set().Key(key).Value("v").Build()).Error(); err != nil {
+	// A key of this run only, which expires even when the test stops before deleting it.
+	key := "valkeyotel-gcp:test:" + rand.Text()
+	if err := client.Do(ctx, client.B().Set().Key(key).Value("v").Ex(time.Minute).Build()).Error(); err != nil {
 		t.Fatal(err)
 	}
 	if err := client.Do(ctx, client.B().Get().Key(key).Build()).Error(); err != nil {

@@ -126,6 +126,7 @@ func run() error {
 	// The keys of this run, under a random prefix, so two copies can't overwrite each other's.
 	// service.instance.id wouldn't do: the control test gives both copies the same one.
 	keyPrefix := fmt.Sprintf("otel-e2e:%08x:key:", rand.Uint32())
+	hotKeySet := time.Now() // when the hot key was last set
 	log.Printf("✅ connected to %s; sending traffic (press Ctrl+C to stop)...", endpoint)
 
 	ticker := time.NewTicker(200 * time.Millisecond)
@@ -139,7 +140,7 @@ func run() error {
 				continue // Ctrl+C came during the last round: stop instead of starting another
 			}
 			ticks++
-			if !tick(ctx, client, ticks, keyPrefix, hotKey) {
+			if !tick(ctx, client, ticks, keyPrefix, hotKey, &hotKeySet) {
 				failed++
 			}
 			if ticks%300 == 0 {
@@ -157,9 +158,9 @@ func run() error {
 // notice Ctrl+C, and the last metrics and spans would never be sent.
 const roundTimeout = 5 * time.Second
 
-// hotKeyRefreshRounds is how often the hot key is set again, in rounds: 3000 rounds of 200ms
-// are 10 minutes, well within the key's 1-hour expiry.
-const hotKeyRefreshRounds = 3000
+// hotKeyRefresh is how often the hot key is set again, well within its 1-hour expiry. It is a
+// time rather than a number of rounds, because a slow round can take up to roundTimeout.
+const hotKeyRefresh = 10 * time.Minute
 
 // setHotKey writes the key that every round reads through the client-side cache. It expires
 // after an hour, so a stopped copy leaves nothing behind.
@@ -167,15 +168,19 @@ func setHotKey(ctx context.Context, client valkey.Client, hotKey string) error {
 	return client.Do(ctx, client.B().Set().Key(hotKey).Value("hot").Ex(time.Hour).Build()).Error()
 }
 
-// tick sends one round of commands and reports whether all of them worked.
-func tick(ctx context.Context, client valkey.Client, n int, keyPrefix, hotKey string) bool {
+// tick sends one round of commands and reports whether all of them worked. hotKeySet is when
+// the hot key was last set: once hotKeyRefresh has passed, tick sets it again, and a failed
+// refresh is tried again in the next round.
+func tick(ctx context.Context, client valkey.Client, n int, keyPrefix, hotKey string, hotKeySet *time.Time) bool {
 	ctx, cancel := context.WithTimeout(ctx, roundTimeout)
 	defer cancel()
 	ok := true
-	if n%hotKeyRefreshRounds == 0 { // set the hot key again before it expires
+	if time.Since(*hotKeySet) >= hotKeyRefresh { // set the hot key again before it expires
 		if err := setHotKey(ctx, client, hotKey); err != nil {
 			log.Printf("❌ refreshing the hot key failed: %v", err)
 			ok = false
+		} else {
+			*hotKeySet = time.Now()
 		}
 	}
 	key := keyPrefix + strconv.Itoa(n%100)

@@ -10,27 +10,28 @@ import (
 )
 
 // fixHostAndProcess makes the generated parts of service.instance.id predictable: the OS
-// hostname, PID 42 and the random part 0a1b2c3d.
+// hostname, PID 42 and the random part 0a1b2c3d. It also forgets the process's generated ID,
+// so the next one is generated from these.
 func fixHostAndProcess(t *testing.T, host string, hostErr error) {
 	t.Helper()
 	origHost, origPID, origRandom := hostname, processID, randomHex
 	hostname = func() (string, error) { return host, hostErr }
 	processID = func() int { return 42 }
 	randomHex = func() string { return "0a1b2c3d" }
-	origProcessRandom := setProcessRandom("") // so the fixed random part is picked
+	origGeneratedID := setGeneratedID("")
 	t.Cleanup(func() {
 		hostname, processID, randomHex = origHost, origPID, origRandom
-		setProcessRandom(origProcessRandom)
+		setGeneratedID(origGeneratedID)
 	})
 }
 
-// setProcessRandom replaces the random part chosen for this process, and returns the old one.
-// "" makes the next generated ID choose a new one, as a new process would.
-func setProcessRandom(v string) string {
-	processRandomMu.Lock()
-	defer processRandomMu.Unlock()
-	old := processRandom
-	processRandom = v
+// setGeneratedID replaces the ID generated for this process, and returns the old one. ""
+// makes the next call generate a new one, as a new process would.
+func setGeneratedID(v string) string {
+	generatedIDMu.Lock()
+	defer generatedIDMu.Unlock()
+	old := generatedID
+	generatedID = v
 	return old
 }
 
@@ -80,21 +81,20 @@ func TestChooseInstanceID(t *testing.T) {
 
 // TestChooseInstanceID_Unique checks what the two-copies test checks in Google Cloud: copies on
 // the same host get different IDs, even with the same PID, as containers that run as PID 1.
-// Each process chooses its own random part, and keeps it, so one process always generates the
-// same ID.
+// Each process generates its own ID, and keeps it.
 func TestChooseInstanceID_Unique(t *testing.T) {
 	origHost, origPID := hostname, processID
 	hostname = func() (string, error) { return "same-host", nil }
 	processID = func() int { return 1 }
-	origProcessRandom := setProcessRandom("")
+	origGeneratedID := setGeneratedID("")
 	t.Cleanup(func() {
 		hostname, processID = origHost, origPID
-		setProcessRandom(origProcessRandom)
+		setGeneratedID(origGeneratedID)
 	})
 
 	seen := map[string]bool{}
 	for range 100 {
-		setProcessRandom("") // another process
+		setGeneratedID("") // another process
 		id := chooseInstanceID("", nil)
 		if !strings.HasPrefix(id, "same-host-1-") || len(id) != len("same-host-1-")+8 {
 			t.Fatalf("id %q, want same-host-1-<8 hex digits>", id)
@@ -106,5 +106,23 @@ func TestChooseInstanceID_Unique(t *testing.T) {
 		if again := chooseInstanceID("", nil); again != id {
 			t.Fatalf("one process generated %q, then %q", id, again)
 		}
+	}
+}
+
+// The generated ID stays the process's, even when a later call's environment detection finds
+// another host, as when the metadata server answers one call and not the other. Explicit IDs
+// and the resource's still win over it.
+func TestChooseInstanceID_StableAcrossDetection(t *testing.T) {
+	fixHostAndProcess(t, "my-laptop", nil)
+	first := chooseInstanceID("", resourceWith()) // detection found nothing: the OS hostname
+	later := chooseInstanceID("", resourceWith(attribute.String("gcp.gce.instance.name", "vm-1")))
+	if first != "my-laptop-42-0a1b2c3d" || later != first {
+		t.Errorf("first %q, later %q; want my-laptop-42-0a1b2c3d for both", first, later)
+	}
+	if got := chooseInstanceID("copy-1", resourceWith()); got != "copy-1" {
+		t.Errorf("Options.ServiceInstanceID: got %q", got)
+	}
+	if got := chooseInstanceID("", resourceWith(attribute.String("service.instance.id", "from-env"))); got != "from-env" {
+		t.Errorf("the resource's ID: got %q", got)
 	}
 }

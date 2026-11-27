@@ -40,6 +40,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -61,6 +62,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
+	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 )
 
@@ -210,9 +212,20 @@ type Telemetry struct {
 	shutDown     atomic.Bool // Shutdown has started
 }
 
-// findCredentials looks up Application Default Credentials. It is a variable so tests can
-// replace Google Cloud.
+// tokenTimeout bounds each request for an access token. Without it, JSON credentials (user
+// credentials, service account keys, workload identity federation) would ask with
+// http.DefaultClient, which never gives up: gRPC asks for the token without a context, so a
+// token server that never answered would hold up the export, past its timeout, and Shutdown
+// with it. 30 seconds is the default of Google's newer auth library, cloud.google.com/go/auth.
+// On Google Cloud, tokens come from the metadata server, whose client has its own limit. It is
+// a variable so tests can shorten it.
+var tokenTimeout = 30 * time.Second
+
+// findCredentials looks up Application Default Credentials. The HTTP client in ctx is the one
+// the credentials use for every later token request too. It is a variable so tests can replace
+// Google Cloud.
 var findCredentials = func(ctx context.Context) (*google.Credentials, error) {
+	ctx = context.WithValue(ctx, oauth2.HTTPClient, &http.Client{Timeout: tokenTimeout})
 	return google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
 }
 
@@ -366,10 +379,11 @@ func exporterOff(sig signal) (bool, error) {
 }
 
 // envMetricInterval returns OTEL_METRIC_EXPORT_INTERVAL (in milliseconds), or 0 when it is
-// unset or invalid. It parses the value as OpenTelemetry does, which ignores invalid values.
+// unset or invalid. It parses the value as OpenTelemetry does, which ignores invalid values,
+// including those too large for a time.Duration.
 func envMetricInterval() time.Duration {
-	ms, err := strconv.Atoi(os.Getenv("OTEL_METRIC_EXPORT_INTERVAL"))
-	if err != nil || ms <= 0 {
+	ms, err := strconv.ParseInt(os.Getenv("OTEL_METRIC_EXPORT_INTERVAL"), 10, 64)
+	if err != nil || ms <= 0 || ms > int64(time.Duration(math.MaxInt64)/time.Millisecond) {
 		return 0
 	}
 	return time.Duration(ms) * time.Millisecond
@@ -442,11 +456,11 @@ func envSamplerValid() bool {
 	case "always_on", "always_off", "parentbased_always_on", "parentbased_always_off":
 		return true
 	case "traceidratio", "parentbased_traceidratio":
-		arg, ok := os.LookupEnv("OTEL_TRACES_SAMPLER_ARG")
-		if !ok {
-			return true // the ratio is then 1, as OpenTelemetry specifies
+		arg := strings.TrimSpace(os.Getenv("OTEL_TRACES_SAMPLER_ARG"))
+		if arg == "" {
+			return true // the ratio is then 1, as OpenTelemetry specifies; blank counts as unset
 		}
-		r, err := strconv.ParseFloat(strings.TrimSpace(arg), 64)
+		r, err := strconv.ParseFloat(arg, 64)
 		return err == nil && r >= 0 && r <= 1
 	default:
 		return false
@@ -682,10 +696,10 @@ func (t *Telemetry) Shutdown(ctx context.Context) error {
 // Setup created, and waits until they are sent or ctx ends. It is for Cloud Run with
 // request-based billing, where the CPU is throttled between requests and background sends can
 // be late: calling Flush at the end of a request sends the data while the CPU is allocated,
-// at the cost of that time on the request. Don't call it more often than every 5 seconds:
-// Cloud Monitoring accepts at most one point per time series every 5 seconds and refuses the
-// rest. Providers passed in Options are left alone, and after Shutdown has started, Flush does
-// nothing.
+// at the cost of that time on the request. Keep it at least 5 seconds from every other send,
+// the periodic ones included: Cloud Monitoring accepts at most one point per time series every
+// 5 seconds and refuses the rest. Providers passed in Options are left alone, and after
+// Shutdown has started, Flush does nothing.
 func (t *Telemetry) Flush(ctx context.Context) error {
 	if t.shutDown.Load() {
 		return nil
@@ -693,12 +707,14 @@ func (t *Telemetry) Flush(ctx context.Context) error {
 	var err error
 	if t.ownMeter != nil {
 		err = t.ownMeter.ForceFlush(ctx)
+		// When Shutdown starts meanwhile, the reader reports that it is shut down: Shutdown
+		// sends the rest and reports its own errors. Any other error is this flush's.
+		if t.shutDown.Load() && errors.Is(err, sdkmetric.ErrReaderShutdown) {
+			err = nil
+		}
 	}
 	if t.ownTracer != nil {
-		err = errors.Join(err, t.ownTracer.ForceFlush(ctx))
-	}
-	if t.shutDown.Load() {
-		return nil // Shutdown started meanwhile: it sends the rest and reports its own errors
+		err = errors.Join(err, t.ownTracer.ForceFlush(ctx)) // nil once the tracer provider is shut down
 	}
 	return err
 }
