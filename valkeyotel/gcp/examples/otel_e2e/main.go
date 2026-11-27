@@ -95,6 +95,14 @@ func run() error {
 	}()
 	log.Printf("📊 sending valkey-go telemetry (service.instance.id %q, valkey.instance %q)", tel.ServiceInstanceID(), opt.MemorystoreInstance)
 
+	// From here on, Ctrl+C or SIGTERM ends the run, and the deferred Shutdown sends the last
+	// metrics and spans. NewClient can't be interrupted, so a signal while it connects takes
+	// effect when it returns. After the first signal, AfterFunc stops listening, so a second
+	// one quits at once, during Shutdown too.
+	sigCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	context.AfterFunc(sigCtx, stopSignals)
+
 	client, err := tel.NewClient(valkey.ClientOption{
 		InitAddress: []string{endpoint},
 		Password:    os.Getenv("MEMORYSTORE_TEST_TOKEN"),
@@ -105,10 +113,14 @@ func run() error {
 	defer client.Close()
 
 	const hotKey = "otel-e2e:hot"
-	sctx, cancel := context.WithTimeout(ctx, roundTimeout)
+	sctx, cancel := context.WithTimeout(sigCtx, roundTimeout)
 	err = setHotKey(sctx, client, hotKey)
 	cancel()
 	if err != nil {
+		if sigCtx.Err() != nil { // Ctrl+C or SIGTERM came while connecting or during the SET
+			log.Println("Stopping before the traffic started")
+			return nil
+		}
 		return fmt.Errorf("initial SET failed: %w", err)
 	}
 	// The keys of this run, under a random prefix, so two copies can't overwrite each other's.
@@ -116,10 +128,6 @@ func run() error {
 	keyPrefix := fmt.Sprintf("otel-e2e:%08x:key:", rand.Uint32())
 	log.Printf("✅ connected to %s; sending traffic (press Ctrl+C to stop)...", endpoint)
 
-	// Ctrl+C or SIGTERM ends the traffic, and the deferred Shutdown sends the last data. This
-	// stops listening first, so a second Ctrl+C during Shutdown quits at once.
-	sigCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stopSignals()
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	start := time.Now()
