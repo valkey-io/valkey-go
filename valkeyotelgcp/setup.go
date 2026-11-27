@@ -698,8 +698,9 @@ func (t *Telemetry) Shutdown(ctx context.Context) error {
 // be late: calling Flush at the end of a request sends the data while the CPU is allocated,
 // at the cost of that time on the request. Keep it at least 5 seconds from every other send,
 // the periodic ones included: Cloud Monitoring accepts at most one point per time series every
-// 5 seconds and refuses the rest. Providers passed in Options are left alone, and after
-// Shutdown has started, Flush does nothing.
+// 5 seconds and refuses the rest. Each Flush also restarts the timer of the periodic sends.
+// Providers passed in Options are left alone, and after Shutdown has started, Flush does
+// nothing.
 func (t *Telemetry) Flush(ctx context.Context) error {
 	if t.shutDown.Load() {
 		return nil

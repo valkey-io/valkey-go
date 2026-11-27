@@ -1427,12 +1427,15 @@ func TestTelemetry_LiveClient(t *testing.T) {
 		}
 		t.Skipf("no local Valkey without a password at %s: %v", addr, err)
 	}
+	defer client.Close()
 	ctx := context.Background()
-	// A key of this run only, which expires even when the test stops before deleting it.
+	// A key of this run only. It is deleted when the test ends, also after a failed check, and
+	// expires anyway.
 	key := "valkeyotel-gcp:test:" + rand.Text()
 	if err := client.Do(ctx, client.B().Set().Key(key).Value("v").Ex(time.Minute).Build()).Error(); err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = client.Do(ctx, client.B().Del().Key(key).Build()).Error() }()
 	if err := client.Do(ctx, client.B().Get().Key(key).Build()).Error(); err != nil {
 		t.Fatal(err)
 	}
@@ -1441,8 +1444,6 @@ func TestTelemetry_LiveClient(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	_ = client.Do(ctx, client.B().Del().Key(key).Build()).Error()
-	client.Close()
 	shutdown(t, tel)
 
 	var ops []string
