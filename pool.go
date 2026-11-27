@@ -41,7 +41,19 @@ type pool struct {
 	timerOn bool
 }
 
+// Acquire gets a wire for a blocking command checkout. A blocking-command connection keeps its
+// auth refresh running, see pipe.StopTimer.
 func (p *pool) Acquire(ctx context.Context) (v wire) {
+	return p.acquire(ctx, false)
+}
+
+// AcquireDedicated gets a wire for a Client.Dedicate or Client.Dedicated checkout. It pauses the
+// auth refresh of the connection when ClientOption.DisableAuthRefreshOnDedicated is set.
+func (p *pool) AcquireDedicated(ctx context.Context) (v wire) {
+	return p.acquire(ctx, true)
+}
+
+func (p *pool) acquire(ctx context.Context, dedicated bool) (v wire) {
 	p.cond.L.Lock()
 
 	// Set up ctx handling when waiting for an available connection
@@ -81,7 +93,7 @@ retry:
 		// allowing others to make wires concurrently instead of waiting in line
 		p.cond.L.Unlock()
 		v = p.make(ctx)
-		if !v.StopTimer() {
+		if !v.StopTimer(dedicated) {
 			p.cond.L.Lock()
 			p.size--
 			v.Close()
@@ -94,7 +106,7 @@ retry:
 	v = p.list[i]
 	p.list[i] = nil
 	p.list = p.list[:i]
-	if !v.StopTimer() || v.Error() != nil {
+	if !v.StopTimer(dedicated) || v.Error() != nil {
 		p.size--
 		v.Close()
 		goto retry

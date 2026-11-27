@@ -136,6 +136,10 @@ type ClientOption struct {
 	// command, a background PING eventually times out, and a SUBSCRIBE confirmation can trip the out-of-order panic.
 	// Setting this option restores the v1.0.79 behavior for connections obtained from Dedicate(), so a single client
 	// can keep its ordinary connections refreshed while its dedicated subscriptions never send an AUTH.
+	//
+	// The pause covers Dedicate() and Dedicated() checkouts only: a blocking command served by a pooled
+	// connection keeps refreshing. A refresh AUTH that timed out before the checkout and whose reply is
+	// still outstanding also fails the checkout, so such a connection is closed instead of handed out.
 	DisableAuthRefreshOnDedicated bool
 
 	// RetryDelay is the function that returns the delay that should be used before retrying the attempt.

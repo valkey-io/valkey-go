@@ -450,11 +450,16 @@ func TestMuxReuseWire(t *testing.T) {
 
 	t.Run("unsubscribe blocking pool", func(t *testing.T) {
 		cleaned := false
+		dedicated := false
 		m, checkClean := setupMux([]*mockWire{
 			{
 				// leave first wire for pipeline calls
 			},
 			{
+				StopTimerFn: func(d bool) bool {
+					dedicated = d
+					return true
+				},
 				CleanSubscriptionsFn: func() {
 					cleaned = true
 				},
@@ -472,6 +477,9 @@ func TestMuxReuseWire(t *testing.T) {
 
 		if !cleaned {
 			t.Fatalf("CleanSubscriptions not called")
+		}
+		if !dedicated {
+			t.Fatalf("Acquire did not pass the dedicated checkout role to StopTimer")
 		}
 	})
 
@@ -1439,7 +1447,7 @@ type mockWire struct {
 	VersionFn       func() int
 	ErrorFn         func() error
 	CloseFn         func()
-	StopTimerFn     func() bool
+	StopTimerFn     func(dedicated bool) bool
 	ResetTimerFn    func() bool
 
 	CleanSubscriptionsFn func()
@@ -1523,9 +1531,9 @@ func (m *mockWire) SetOnCloseHook(fn func(error)) {
 	}
 }
 
-func (m *mockWire) StopTimer() bool {
+func (m *mockWire) StopTimer(dedicated bool) bool {
 	if m.StopTimerFn != nil {
-		return m.StopTimerFn()
+		return m.StopTimerFn(dedicated)
 	}
 	return true
 }
