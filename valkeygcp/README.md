@@ -141,10 +141,33 @@ client, err := valkeyotel.NewClient(option)
 | Field              | Default                                                                                                                                                                                                                                                                                    |
 | :----------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `RetryDelay`     | Exponential backoff with full jitter, up to 2s; stops after 20 retries                                                                                                                                                                                                                     |
-| `ClusterOption`  | Only when left entirely at zero: `ShardsRefreshInterval` 10s, `PreferInitAddressRefresh` and `PreferClusterShards` on, so the topology is refreshed through the discovery endpoint with `CLUSTER SHARDS`. Set any `ClusterOption` field and the whole `ClusterOption` is yours |
+| `ClusterOption`  | `ShardsRefreshInterval` 10s, `PreferInitAddressRefresh` on and `PreferClusterShards` on, so every 10s the client reads the cluster topology from the discovery endpoint with `CLUSTER SHARDS`. Used only if you set none of the three. Other `ClusterOption` fields, such as `MaxMovedRedirections`, don't affect this |
 | `SendToReplicas` | Read-only commands that don't block go to the replicas; set only with `Standalone.ReplicaAddress`                                                                                                                                                                                        |
 
 The cluster settings are left out when `Standalone.ReplicaAddress` is set. valkey-go ignores them when it ends up with a single-node client.
+
+If you set any of the three yourself, valkeygcp sets none of them, and the ones you leave out stay off. This is because valkeygcp can't tell a `false` you set from one you left out. For example, with only `ClusterOption{PreferClusterShards: true}`, the client doesn't refresh the topology every 10s and doesn't read it from the discovery endpoint. To change one of the three, set all three:
+
+```go
+option.ClusterOption = valkey.ClusterOption{
+	ShardsRefreshInterval:    30 * time.Second, // changed from 10s
+	PreferInitAddressRefresh: true,
+	PreferClusterShards:      true,
+}
+```
+
+To turn all three off, take the option that `ResolveClientOption` returns, set the three to zero, and build the client with `valkey.NewClient`:
+
+```go
+opt, err := valkeygcp.ResolveClientOption(ctx, option)
+if err != nil {
+	return err
+}
+opt.ClusterOption.ShardsRefreshInterval = 0
+opt.ClusterOption.PreferInitAddressRefresh = false
+opt.ClusterOption.PreferClusterShards = false
+client, err := valkey.NewClient(opt)
+```
 
 Each of these follows Google's [Valkey client best practices](https://docs.cloud.google.com/memorystore/docs/valkey/general-best-practices#valkey_client_best_practices): reconnect with exponential backoff and jitter, discover nodes through the discovery endpoint with `CLUSTER SHARDS`, refresh the topology periodically, and read from the reader endpoint. Timeouts are not changed: `Dialer.Timeout`, `Dialer.KeepAlive` and `ConnWriteTimeout` keep valkey-go's defaults (5s, 1s and 10s).
 
@@ -238,3 +261,85 @@ client, err := valkeygcp.NewClient(ctx, valkey.ClientOption{
 ```
 
 Only writes sent with `Do` and `DoMulti` are tracked: writes sent with `Dedicated`, `Dedicate`, `DoStream` or `DoMultiStream`, and writes made by other clients, are not. `NewClient` applies it by wrapping the client, so `ResolveClientOption` ignores it.
+| `live_tls`         | Connects over TLS, optionally with IAM, PINGs every node and runs SET/GET   | Network access to an instance with in-transit encryption, and its server CA file |
+
+---
+
+## 3. In-Transit Encryption (TLS)
+
+Instances with in-transit encryption turned on accept only TLS connections. valkey-go supports TLS through `ClientOption.TLSConfig`: set it to a `tls.Config` that trusts the instance's server CA certificates. `NewClient` and `ResolveClientOption` keep the `TLSConfig` you set, so TLS works the same with IAM authentication, without it, and with `valkey.NewClient`. TLS needs no extra role on the workload identity.
+
+### 3.1 Get the Server CA Certificates
+
+The instance's server CA mode decides where the certificates come from:
+
+```bash
+gcloud memorystore instances describe INSTANCE --location=REGION \
+  --format="value(transitEncryptionMode,serverCaMode,serverCaPool)"
+```
+
+Save them with the command for that mode. Keep every certificate the command returns:
+
+```bash
+# GOOGLE_MANAGED_PER_INSTANCE_CA, or empty on older instances
+gcloud memorystore instances get-certificate-authority INSTANCE --location=REGION --format=json \
+  | jq -r '.. | strings | select(contains("BEGIN CERTIFICATE"))' > server-ca.pem
+
+# GOOGLE_MANAGED_SHARED_CA
+gcloud memorystore instances get-shared-regional-certificate-authority --location=REGION --format=json \
+  | jq -r '.. | strings | select(contains("BEGIN CERTIFICATE"))' > server-ca.pem
+
+# CUSTOMER_MANAGED_CAS_CA (SERVER_CA_POOL is the instance's serverCaPool)
+gcloud privateca pools get-ca-certs SERVER_CA_POOL --output-file=server-ca.pem
+```
+
+The Memorystore commands need read access to the instance, for example `roles/memorystore.viewer`. The CA Service command needs `privateca.caPools.get` on the pool (`roles/privateca.poolReader`).
+
+### 3.2 Connect with TLS
+
+Build a `tls.Config` from the saved file:
+
+```go
+pem, err := os.ReadFile("/etc/memorystore/server-ca.pem")
+if err != nil {
+	return err
+}
+roots := x509.NewCertPool()
+if !roots.AppendCertsFromPEM(pem) {
+	return errors.New("server-ca.pem holds no certificate")
+}
+tlsConfig := &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
+```
+
+Then set it as `ClientOption.TLSConfig`:
+
+```go
+// Cluster mode with IAM authentication:
+client, err := valkeygcp.NewClient(ctx, valkey.ClientOption{
+	InitAddress: []string{"10.0.0.15:6379"}, // discovery endpoint
+	TLSConfig:   tlsConfig,
+}, valkeygcp.WithDefaultIAM())
+
+// Cluster mode disabled with a reader endpoint, no authentication:
+client, err := valkeygcp.NewClient(ctx, valkey.ClientOption{
+	InitAddress: []string{"10.0.0.2:6379"},                                         // primary endpoint
+	Standalone:  valkey.StandaloneOption{ReplicaAddress: []string{"10.0.0.3:6379"}}, // reader endpoint
+	TLSConfig:   tlsConfig,
+})
+```
+
+* **Every certificate in the file is trusted.** A file saved while the instance has more than one CA, for example during a server CA rotation, verifies nodes signed by any of them. `AppendCertsFromPEM` skips blocks it can't parse and only reports whether it added at least one certificate, so check that the file holds every certificate the command returned, for example with `grep -c 'BEGIN CERTIFICATE' server-ca.pem`.
+* **The file is read once**, when you build the `tls.Config`. After replacing it, create a new client. Per-instance CAs are valid for ten years and the next one can be downloaded about five years before the current one expires, so save the file again from time to time.
+* **Nodes are checked by IP address.** Leave `ServerName` empty: valkey-go then checks each node's certificate against the IP address it dials, including the node addresses it finds in cluster mode. Set `ServerName` only to check against another name.
+* **Keep verification on.** A certificate from another CA fails the handshake with `x509: certificate signed by unknown authority`. Don't set `InsecureSkipVerify`.
+
+### 3.3 Live Check
+
+`live_tls` (in `examples/`) builds its `TLSConfig` this way, connects to a real instance the way `NewClient` does, PINGs every node (each one a separate TLS handshake) and runs SET and GET. Run it from the `examples` directory, on a VM in the instance's VPC network:
+
+```bash
+go run ./live_tls -primary=10.0.0.2:6379 -reader=10.0.0.3:6379 -ca-file=server-ca.pem
+go run ./live_tls -discovery=10.0.0.15:6379 -ca-file=server-ca.pem -iam
+```
+
+The last line is `RESULT {"ok":true,...}` when every node answered over TLS. `-reader` is optional with `-primary`. `-duration=70m` keeps SET/GET traffic going and logs `STATS` every minute. With `-iam`, every login is logged as an `AUTH` line with a short hash of the token, never the token itself, so a long run shows when the token is renewed. `-conn-lifetime=5m` closes and reopens every connection every five minutes, so new logins and TLS handshakes keep happening during the run.
