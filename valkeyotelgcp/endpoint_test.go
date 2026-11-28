@@ -1,0 +1,342 @@
+package valkeyotelgcp
+
+import (
+	"cmp"
+	"context"
+	"errors"
+	"maps"
+	"strings"
+	"testing"
+
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
+)
+
+func TestResolveTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		env      map[string]string
+		endpoint string
+		sig      signal
+		mode     CredentialsMode
+		want     target // sig and endpoint aren't compared
+		wantErr  bool
+		errHas   string // part of the expected error
+		errLacks string // what the error must not show
+	}{
+		{
+			name: "the Telemetry API by default",
+			want: target{google: true, url: "https://telemetry.googleapis.com:443", host: telemetryHost, credentials: true},
+		},
+		{
+			name: "OTEL_EXPORTER_OTLP_ENDPOINT set to Google: credentials too",
+			env:  map[string]string{"OTEL_EXPORTER_OTLP_ENDPOINT": "https://telemetry.googleapis.com"},
+			want: target{google: true, url: "https://telemetry.googleapis.com", host: telemetryHost, credentials: true},
+		},
+		{
+			name: "the per-signal variable wins for its signal",
+			env:  map[string]string{"OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector:4317", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "https://telemetry.googleapis.com"},
+			sig:  signalTraces,
+			want: target{google: true, url: "https://telemetry.googleapis.com", host: telemetryHost, credentials: true},
+		},
+		{
+			name: "and not for the other",
+			env:  map[string]string{"OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector:4317", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "https://telemetry.googleapis.com"},
+			want: target{url: "http://collector:4317", host: "collector", insecure: true},
+		},
+		{
+			name:     "Options.Endpoint wins: a regional endpoint",
+			env:      map[string]string{"OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector:4317"},
+			endpoint: "telemetry.us-east1.rep.googleapis.com:443",
+			want:     target{google: true, url: "https://telemetry.us-east1.rep.googleapis.com:443", host: "telemetry.us-east1.rep.googleapis.com", credentials: true},
+		},
+		{
+			name:     "a Private Service Connect name",
+			endpoint: "https://telemetry-myendpoint.p.googleapis.com",
+			want:     target{google: true, url: "https://telemetry-myendpoint.p.googleapis.com", host: "telemetry-myendpoint.p.googleapis.com", credentials: true},
+		},
+		{
+			name:     "case doesn't matter",
+			endpoint: "HTTPS://Telemetry.GoogleAPIs.com:443",
+			want:     target{google: true, url: "HTTPS://Telemetry.GoogleAPIs.com:443", host: "Telemetry.GoogleAPIs.com", credentials: true},
+		},
+		{
+			name:     "a custom DNS name gets no credentials by default",
+			endpoint: "telemetry.internal.example.com:443",
+			want:     target{url: "https://telemetry.internal.example.com:443", host: "telemetry.internal.example.com"},
+		},
+		{
+			name:     "CredentialsOn: credentials and Google's server name",
+			endpoint: "telemetry.internal.example.com:443",
+			mode:     CredentialsOn,
+			want:     target{google: true, url: "https://telemetry.internal.example.com:443", host: "telemetry.internal.example.com", credentials: true, serverName: telemetryHost},
+		},
+		{
+			name:     "CredentialsOn with a Google host keeps its name",
+			endpoint: "telemetry-myendpoint.p.googleapis.com:443",
+			mode:     CredentialsOn,
+			want:     target{google: true, url: "https://telemetry-myendpoint.p.googleapis.com:443", host: "telemetry-myendpoint.p.googleapis.com", credentials: true},
+		},
+		{
+			name:     "CredentialsOn over plaintext",
+			endpoint: "http://telemetry.internal.example.com:4317",
+			mode:     CredentialsOn,
+			wantErr:  true,
+		},
+		{
+			name: "CredentialsOff, even for Google",
+			mode: CredentialsOff,
+			want: target{google: true, url: "https://telemetry.googleapis.com:443", host: telemetryHost},
+		},
+		{
+			name:     "Google over plaintext is an error: Google needs TLS",
+			endpoint: "http://telemetry.googleapis.com:443",
+			wantErr:  true,
+			errHas:   "Google needs TLS",
+		},
+		{
+			name:    "so is the default endpoint with OTEL_EXPORTER_OTLP_INSECURE left over",
+			env:     map[string]string{"OTEL_EXPORTER_OTLP_INSECURE": "true"},
+			wantErr: true,
+			errHas:  "unset OTEL_EXPORTER_OTLP_INSECURE",
+		},
+		{
+			name:    "or with the per-signal INSECURE, which the error names",
+			env:     map[string]string{"OTEL_EXPORTER_OTLP_TRACES_INSECURE": "true"},
+			sig:     signalTraces,
+			wantErr: true,
+			errHas:  "OTEL_EXPORTER_OTLP_TRACES_INSECURE",
+		},
+		{
+			name:     "CredentialsOff allows Google over plaintext",
+			endpoint: "http://telemetry.googleapis.com:443",
+			mode:     CredentialsOff,
+			want:     target{google: true, url: "http://telemetry.googleapis.com:443", host: telemetryHost, insecure: true},
+		},
+		{
+			name: "OTEL_EXPORTER_OTLP_PROTOCOL=grpc is fine",
+			env:  map[string]string{"OTEL_EXPORTER_OTLP_PROTOCOL": "grpc"},
+			want: target{google: true, url: "https://telemetry.googleapis.com:443", host: telemetryHost, credentials: true},
+		},
+		{
+			name:    "another OTEL_EXPORTER_OTLP_PROTOCOL is an error",
+			env:     map[string]string{"OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf"},
+			wantErr: true,
+			errHas:  `OTEL_EXPORTER_OTLP_PROTOCOL="http/protobuf"`,
+		},
+		{
+			name: "the per-signal protocol wins",
+			env:  map[string]string{"OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf", "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL": "GRPC"},
+			want: target{google: true, url: "https://telemetry.googleapis.com:443", host: telemetryHost, credentials: true},
+		},
+		{
+			name:    "for its own signal only",
+			env:     map[string]string{"OTEL_EXPORTER_OTLP_TRACES_PROTOCOL": "http/json"},
+			sig:     signalTraces,
+			wantErr: true,
+			errHas:  `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL="http/json"`,
+		},
+		{
+			name:     "host:port with OTEL_EXPORTER_OTLP_INSECURE",
+			env:      map[string]string{"OTEL_EXPORTER_OTLP_INSECURE": "true"},
+			endpoint: "localhost:4317",
+			want:     target{url: "http://localhost:4317", host: "localhost", insecure: true},
+		},
+		{
+			name:     "the per-signal INSECURE wins",
+			env:      map[string]string{"OTEL_EXPORTER_OTLP_INSECURE": "true", "OTEL_EXPORTER_OTLP_METRICS_INSECURE": "false"},
+			endpoint: "collector:4317",
+			want:     target{url: "https://collector:4317", host: "collector"},
+		},
+		// INSECURE is read as the exporters read it: only "true", in any case, is true, and a
+		// per-signal value that is set wins, whatever it is.
+		{
+			name:     "INSECURE=1 isn't true",
+			env:      map[string]string{"OTEL_EXPORTER_OTLP_INSECURE": "1"},
+			endpoint: "collector:4317",
+			want:     target{url: "https://collector:4317", host: "collector"},
+		},
+		{
+			name:     "a per-signal INSECURE that isn't true wins, even when it isn't a boolean",
+			env:      map[string]string{"OTEL_EXPORTER_OTLP_INSECURE": "true", "OTEL_EXPORTER_OTLP_METRICS_INSECURE": "yes"},
+			endpoint: "collector:4317",
+			want:     target{url: "https://collector:4317", host: "collector"},
+		},
+		{
+			name:     "TRUE in any case",
+			env:      map[string]string{"OTEL_EXPORTER_OTLP_METRICS_INSECURE": " TRUE "},
+			endpoint: "collector:4317",
+			want:     target{url: "http://collector:4317", host: "collector", insecure: true},
+		},
+		{
+			name:     "an http:// OTEL_EXPORTER_OTLP_ENDPOINT doesn't make Options.Endpoint plaintext",
+			env:      map[string]string{"OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector:4317"},
+			endpoint: "telemetry.googleapis.com:443",
+			want:     target{google: true, url: "https://telemetry.googleapis.com:443", host: telemetryHost, credentials: true},
+		},
+		{name: "another scheme", endpoint: "ftp://example.com", wantErr: true},
+		{name: "a URL without a host", endpoint: "http://", wantErr: true},
+		{name: "a broken URL", endpoint: "https://exa mple.com:443", wantErr: true},
+		// The errors name the setting, not the endpoint, which can carry a password.
+		{
+			name:     "a broken URL in Options.Endpoint",
+			endpoint: "https://user:secret@exa mple.com:443",
+			wantErr:  true,
+			errHas:   "(Options.Endpoint)",
+			errLacks: "secret",
+		},
+		{
+			name:     "another scheme in OTEL_EXPORTER_OTLP_ENDPOINT",
+			env:      map[string]string{"OTEL_EXPORTER_OTLP_ENDPOINT": "ftp://token@example.com"},
+			wantErr:  true,
+			errHas:   "(OTEL_EXPORTER_OTLP_ENDPOINT)",
+			errLacks: "token",
+		},
+		{
+			name:     "a plaintext Google host in the per-signal variable",
+			env:      map[string]string{"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "http://user:secret@telemetry.googleapis.com:443"},
+			sig:      signalTraces,
+			wantErr:  true,
+			errHas:   "(OTEL_EXPORTER_OTLP_TRACES_ENDPOINT)",
+			errLacks: "secret",
+		},
+		{
+			name:     "CredentialsOn over plaintext, from Options.Endpoint",
+			endpoint: "http://user:secret@collector:4317",
+			mode:     CredentialsOn,
+			wantErr:  true,
+			errHas:   "(Options.Endpoint)",
+			errLacks: "secret",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fakeGoogleCloud(t)
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			sig := cmp.Or(tc.sig, signalMetrics)
+			mode := cmp.Or(tc.mode, CredentialsAuto)
+			got, err := resolveTarget(tc.endpoint, sig, mode)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("got %+v, want an error", got)
+				}
+				if !strings.Contains(err.Error(), tc.errHas) {
+					t.Errorf("error %q doesn't say %q", err, tc.errHas)
+				}
+				if tc.errLacks != "" && strings.Contains(err.Error(), tc.errLacks) {
+					t.Errorf("error %q shows %q", err, tc.errLacks)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.sig != sig || got.endpoint == "" {
+				t.Errorf("signal %q, endpoint %q", got.sig, got.endpoint)
+			}
+			got.sig, got.endpoint = "", ""
+			if got != tc.want {
+				t.Errorf("got  %+v\nwant %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCredentialsFromEnv(t *testing.T) {
+	fakeGoogleCloud(t)
+	for v, want := range map[string]CredentialsMode{"": CredentialsAuto, "AUTO": CredentialsAuto, " on ": CredentialsOn, "off": CredentialsOff} {
+		t.Setenv(CredentialsEnv, v)
+		if got, err := credentialsFromEnv(); err != nil || got != want {
+			t.Errorf("%s=%q: got %v, %v; want %v", CredentialsEnv, v, got, err, want)
+		}
+	}
+	t.Setenv(CredentialsEnv, "yes")
+	if _, err := credentialsFromEnv(); err == nil {
+		t.Errorf("%s=yes was accepted", CredentialsEnv)
+	}
+}
+
+func TestQuotaProject(t *testing.T) {
+	fakeGoogleCloud(t)
+	userCreds := &google.Credentials{JSON: []byte(`{"type": "authorized_user", "quota_project_id": "from-file"}`)}
+	if got := quotaProject(userCreds); got != "from-file" {
+		t.Errorf("credentials file: got %q, want from-file", got)
+	}
+	if got := quotaProject(&google.Credentials{}); got != "" {
+		t.Errorf("metadata server credentials: got %q, want none", got)
+	}
+	if got := quotaProject(&google.Credentials{JSON: []byte(`{"type": "service_account"}`)}); got != "" {
+		t.Errorf("service account file: got %q, want none", got)
+	}
+	t.Setenv(quotaProjectEnv, "from-env")
+	if got := quotaProject(userCreds); got != "from-env" {
+		t.Errorf("%s: got %q, want it to win", quotaProjectEnv, got)
+	}
+}
+
+func TestEnvHeader(t *testing.T) {
+	fakeGoogleCloud(t)
+	if envHeader(signalMetrics, quotaProjectHeader) {
+		t.Error("found a header without any variable")
+	}
+	t.Setenv("OTEL_EXPORTER_OTLP_HEADERS", "api-key=1, X-Goog-User-Project = p")
+	if !envHeader(signalMetrics, quotaProjectHeader) {
+		t.Error("missed the header in OTEL_EXPORTER_OTLP_HEADERS")
+	}
+	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_HEADERS", "api-key=2")
+	if envHeader(signalTraces, quotaProjectHeader) {
+		t.Error("OTEL_EXPORTER_OTLP_TRACES_HEADERS replaces OTEL_EXPORTER_OTLP_HEADERS, but the header was still found")
+	}
+	// The exporter drops a header whose value doesn't URL-decode, so the credentials' quota
+	// project must still be sent.
+	t.Setenv("OTEL_EXPORTER_OTLP_METRICS_HEADERS", "x-goog-user-project=%zz")
+	if envHeader(signalMetrics, quotaProjectHeader) {
+		t.Error("found a header whose value the exporter drops")
+	}
+	t.Setenv("OTEL_EXPORTER_OTLP_METRICS_HEADERS", "x-goog-user-project=%zz,x-goog-user-project=q%20p")
+	if !envHeader(signalMetrics, quotaProjectHeader) {
+		t.Error("missed the valid header after a dropped one")
+	}
+}
+
+// staticToken stands in for the access token's credentials.
+type staticToken map[string]string
+
+func (s staticToken) GetRequestMetadata(context.Context, ...string) (map[string]string, error) {
+	if s == nil {
+		return nil, errors.New("no token")
+	}
+	return s, nil
+}
+
+func (staticToken) RequireTransportSecurity() bool { return true }
+
+func TestGoogleAuth(t *testing.T) {
+	ctx := context.Background()
+	token := staticToken{"authorization": "Bearer t"}
+	md, err := googleAuth{PerRPCCredentials: token, quotaProject: "q"}.GetRequestMetadata(ctx)
+	if err != nil || !maps.Equal(md, map[string]string{"authorization": "Bearer t", quotaProjectHeader: "q"}) {
+		t.Errorf("got %v, %v; want the token and the quota project", md, err)
+	}
+	if len(token) != 1 {
+		t.Errorf("the token's metadata was changed: %v", token)
+	}
+	if md, err := (googleAuth{PerRPCCredentials: token}).GetRequestMetadata(ctx); err != nil || !maps.Equal(md, token) {
+		t.Errorf("without a quota project: got %v, %v; want the token only", md, err)
+	}
+	if _, err := (googleAuth{PerRPCCredentials: staticToken(nil), quotaProject: "q"}).GetRequestMetadata(ctx); err == nil {
+		t.Error("the token's error was lost")
+	}
+
+	fakeGoogleCloud(t)
+	t.Setenv(quotaProjectEnv, "q")
+	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_HEADERS", "x-goog-user-project=q")
+	creds := &google.Credentials{TokenSource: oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "t"})}
+	if a := newGoogleAuth(signalMetrics, creds); a.quotaProject != "q" || !a.RequireTransportSecurity() {
+		t.Errorf("metrics: quota project %q, TLS required %v; want q and true", a.quotaProject, a.RequireTransportSecurity())
+	}
+	if a := newGoogleAuth(signalTraces, creds); a.quotaProject != "" {
+		t.Errorf("traces: quota project %q, want none: OTEL_EXPORTER_OTLP_TRACES_HEADERS sets it", a.quotaProject)
+	}
+}

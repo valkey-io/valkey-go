@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"net"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -672,6 +673,61 @@ func TestLabeler(t *testing.T) {
 
 		if !foundOperation {
 			t.Error("command error metric should have operation=LPOP attribute")
+		}
+	})
+}
+
+func TestHistogramOptionBuckets(t *testing.T) {
+	bounds := func(t *testing.T, metrics metricdata.ResourceMetrics, name string) []float64 {
+		t.Helper()
+		h, ok := findMetric(metrics, name).(metricdata.Histogram[float64])
+		if !ok || len(h.DataPoints) == 0 {
+			t.Fatalf("%s: no histogram points", name)
+		}
+		return h.DataPoints[0].Bounds
+	}
+	run := func(t *testing.T, opts ...Option) metricdata.ResourceMetrics {
+		t.Helper()
+		mr := metric.NewManualReader()
+		c, err := NewClient(
+			valkey.ClientOption{
+				InitAddress: []string{"127.0.0.1:6379"},
+				DialCtxFn: func(ctx context.Context, dst string, dialer *net.Dialer, _ *tls.Config) (conn net.Conn, err error) {
+					return dialer.DialContext(ctx, "tcp", dst)
+				},
+			},
+			append([]Option{WithMeterProvider(metric.NewMeterProvider(metric.WithReader(mr)))}, opts...)...,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+		if err := c.Do(context.Background(), c.B().Ping().Build()).Error(); err != nil {
+			t.Fatal(err)
+		}
+		metrics := metricdata.ResourceMetrics{}
+		if err := mr.Collect(context.Background(), &metrics); err != nil {
+			t.Fatal(err)
+		}
+		return metrics
+	}
+
+	t.Run("applies to command and dial latency", func(t *testing.T) {
+		buckets := []float64{.0001, .001, .01}
+		metrics := run(t, WithHistogramOption(HistogramOption{Buckets: buckets}))
+		for _, name := range []string{"valkey_command_duration_seconds", "valkey_dial_latency"} {
+			if got := bounds(t, metrics, name); !slices.Equal(got, buckets) {
+				t.Errorf("%s buckets = %v, want %v", name, got, buckets)
+			}
+		}
+	})
+
+	t.Run("defaults without the option", func(t *testing.T) {
+		metrics := run(t)
+		for _, name := range []string{"valkey_command_duration_seconds", "valkey_dial_latency"} {
+			if got := bounds(t, metrics, name); !slices.Equal(got, defaultHistogramBuckets) {
+				t.Errorf("%s buckets = %v, want the defaults %v", name, got, defaultHistogramBuckets)
+			}
 		}
 	})
 }
