@@ -18,12 +18,13 @@ type schema struct {
 }
 
 type field struct {
-	typ   reflect.Type
-	name  string
-	idx   int
-	isKey bool
-	isVer bool
-	isExt bool
+	typ    reflect.Type
+	name   string
+	idx    int
+	isKey  bool
+	isVer  bool
+	isExt  bool
+	ignore bool
 }
 
 func newSchema(t reflect.Type) schema {
@@ -39,7 +40,7 @@ func newSchema(t reflect.Type) schema {
 			continue
 		}
 		f := parse(sf)
-		if f.name == ignoreField {
+		if f.ignore {
 			continue
 		}
 		f.idx = i
@@ -80,11 +81,15 @@ func newSchema(t reflect.Type) schema {
 
 func parse(f reflect.StructField) (field field) {
 	v, _ := f.Tag.Lookup("json")
-	vs := strings.SplitN(v, ",", 1)
-	if vs[0] == "" {
+	if v == ignoreField {
+		field.ignore = true
+		return field
+	}
+	name, _, _ := strings.Cut(v, ",")
+	if name == "" {
 		field.name = f.Name
 	} else {
-		field.name = vs[0]
+		field.name = name
 	}
 
 	v, _ = f.Tag.Lookup("valkey")
