@@ -230,12 +230,14 @@ func (m *locker) onInvalidations(messages []valkey.ValkeyMessage) {
 	}
 	for _, msg := range messages {
 		k, _ := msg.ToString()
-		if strings.HasPrefix(k, m.prefix) {
-			if ks := strings.SplitN(k[len(m.prefix)+1:], ":", 2); len(ks) == 2 {
+		if rest, ok := strings.CutPrefix(k, m.prefix+":"); ok {
+			if idxStr, name, ok := strings.Cut(rest, ":"); ok {
+				n, err := strconv.Atoi(idxStr)
+				if err != nil || n < 0 {
+					continue
+				}
 				m.mu.RLock()
-				g, ok := m.gates[ks[1]]
-				if ok {
-					n, _ := strconv.Atoi(ks[0])
+				if g, ok := m.gates[name]; ok && n < len(g.csc) {
 					select {
 					case g.csc[n] <- struct{}{}:
 					default:
