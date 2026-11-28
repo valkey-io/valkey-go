@@ -667,6 +667,11 @@ func (m *ValkeyMessage) unmarshalView(c int64, buf []byte) (int64, error) {
 	case typeInteger, typeNull, typeBool:
 		m.intlen = size
 	case typeArray, typeMap, typeSet:
+		// Each nested message needs at least a type byte and an 8-byte
+		// length. Reject negative and oversized lengths before make().
+		if size < 0 || size > (int64(len(buf))-c)/9 {
+			return 0, ErrCacheUnmarshal
+		}
 		m.setValues(make([]ValkeyMessage, size))
 		for i := range m.values() {
 			if c, err = m.values()[i].unmarshalView(c, buf); err != nil {
@@ -674,7 +679,7 @@ func (m *ValkeyMessage) unmarshalView(c int64, buf []byte) (int64, error) {
 			}
 		}
 	default:
-		if int64(len(buf)) < c+size {
+		if size < 0 || size > int64(len(buf))-c {
 			return 0, ErrCacheUnmarshal
 		}
 		m.setString(BinaryString(buf[c : c+size]))
